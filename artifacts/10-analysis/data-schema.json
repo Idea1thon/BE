@@ -1,0 +1,383 @@
+{
+  "schema_type": "dataset_registry",
+  "title": "서울 창업 입지 추천 데이터 스키마 레지스트리",
+  "version": "2026-09-03",
+  "author": "GPT(Codex)",
+  "description": "원천 스냅샷, 정규화 논리 테이블, 후보/RAG Evidence 사이의 데이터 계약. 개별 행 검증용 JSON Schema가 아님.",
+  "source_of_truth": {
+    "catalog_contract": ".claude/context/data-catalog-contract.md",
+    "evidence_schema": "artifacts/20-method/rag-evidence-schema.json",
+    "source_handoff": "artifacts/handoff_data_sources.md"
+  },
+  "storage_targets": {
+    "local_source": {
+      "engine": "postgresql",
+      "server_version": "18.4",
+      "host": "127.0.0.1",
+      "port": 5432,
+      "database": "ideaton",
+      "role": "personal_source_and_validation",
+      "remote_access": false,
+      "password_documented": false
+    },
+    "docker_team_mirror": {
+      "engine": "postgresql",
+      "server_version": "16.14",
+      "host": "<docker_host_lan_or_vpn_ip>",
+      "port": 55432,
+      "database": "ideaton",
+      "role": "team_shared_read_and_development",
+      "extensions": ["postgis", "vector"],
+      "persistent_volume": "ideaton_pgdata",
+      "auto_sync_with_local_source": false,
+      "remote_access": "trusted_lan_or_vpn_only",
+      "password_documented": false
+    }
+  },
+  "spatial_unit_types": [
+    "commercial_area",
+    "hinterland",
+    "admin_dong",
+    "sigungu",
+    "region",
+    "point"
+  ],
+  "period_types": [
+    "quarter",
+    "month",
+    "half_year",
+    "snapshot"
+  ],
+  "canonical_tables": {
+    "area_dim": {
+      "primary_key": ["spatial_unit_type", "spatial_unit_code"],
+      "required": ["area_id", "spatial_unit_type", "spatial_unit_code", "spatial_unit_name", "geometry_path", "crs"],
+      "crs": "EPSG:5181"
+    },
+    "industry_dim": {
+      "primary_key": ["industry_code"],
+      "required": ["industry_code", "industry_name", "boundary_note", "ontology_version"],
+      "reference_path": "data/ontology/업종_검색키워드.json"
+    },
+    "metric_quarter": {
+      "logical_key": ["period", "spatial_unit_type", "spatial_unit_code", "industry_code", "metric_name"],
+      "required": ["period", "period_type", "spatial_unit_type", "spatial_unit_code", "metric_name", "value", "unit", "source_path", "source_column", "source_type"],
+      "period_type": "quarter"
+    },
+    "background_snapshot": {
+      "logical_key": ["period", "spatial_unit_type", "spatial_unit_code", "metric_name"],
+      "required": ["period", "period_type", "spatial_unit_type", "spatial_unit_code", "metric_name", "value", "source_path", "source_type", "grain_is_proxy"]
+    },
+    "anchor_point": {
+      "primary_key": ["anchor_id"],
+      "required": ["anchor_id", "anchor_type", "place_name", "source_path", "source_type", "observed_at", "synthetic_anchor", "coordinate_confidence"],
+      "coordinate_fields": ["x_wgs84", "y_wgs84", "x_5181", "y_5181"]
+    },
+    "poi_snapshot": {
+      "primary_key": ["source", "poi_id", "retrieved_at_utc"],
+      "required": ["source", "source_type", "poi_id", "place_name", "category_group_code", "x_wgs84", "y_wgs84", "search_mode", "retrieved_at_utc"]
+    },
+    "plan_snapshot": {
+      "required": ["source_path", "source_type", "observed_at", "spatial_unit_type", "status_note"],
+      "status_rule": "사업·계획 상태는 snapshot으로만 표현하고 미래 성공·확정 사건으로 승격하지 않음"
+    },
+    "news_snapshot": {
+      "primary_key": ["source", "news_id"],
+      "required": ["source", "source_type", "news_id", "published_date", "title", "url", "query_label", "search_period"],
+      "body_retained": false,
+      "usage": "FC-51-news evidence/context_notes only"
+    },
+    "candidate_evidence": {
+      "schema_path": "artifacts/20-method/rag-evidence-schema.json",
+      "candidate_is_success_probability": false
+    }
+  },
+  "datasets": [
+    {
+      "id": "area",
+      "paths": ["data/영역/"],
+      "status": "core",
+      "source_type": "official_file",
+      "spatial_grains": ["commercial_area", "hinterland", "admin_dong"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "observed": "static_geometry"},
+      "primary_key": {"commercial_area": ["상권_코드"], "hinterland": ["상권배후지_구분_코드"], "admin_dong": ["행정동_코드"]},
+      "source_field_note": "상권배후지 원천 CSV의 상권배후지_구분_코드는 레거시 컬럼명이며 값은 개별 배후지 코드다.",
+      "canonical_table": "area_dim",
+      "crs": "EPSG:5181",
+      "usage": "지역 필터, PIP, 공간 crosswalk"
+    },
+    {
+      "id": "store",
+      "paths": ["data/점포/"],
+      "status": "core",
+      "source_type": "official_file",
+      "spatial_grains": ["commercial_area", "hinterland", "admin_dong"],
+      "industry_grain": true,
+      "period": {"type": "quarter", "observed": "2021Q1~2026Q1"},
+      "primary_key": ["기준_년분기_코드", "공간단위_코드", "서비스_업종_코드"],
+      "source_fields": ["전체_점포_수", "일반_점포_수", "프랜차이즈_점포_수", "개업_율", "개업_점포_수", "폐업_률", "폐업_점포_수"],
+      "canonical_table": "metric_quarter",
+      "usage": "업종별 경쟁·개폐업·프랜차이즈 근거"
+    },
+    {
+      "id": "estimated_sales",
+      "paths": ["data/추정매출/"],
+      "status": "core",
+      "source_type": "official_file",
+      "spatial_grains": ["commercial_area", "hinterland", "admin_dong"],
+      "industry_grain": true,
+      "period": {"type": "quarter", "observed": "2021Q1~2026Q1"},
+      "primary_key": ["기준_년분기_코드", "공간단위_코드", "서비스_업종_코드"],
+      "source_fields": ["당월_매출_금액", "당월_매출_건수", "주중_매출_금액", "주말_매출_금액"],
+      "source_field_families": ["요일별_매출_금액", "시간대별_매출_금액", "연령대별_매출_금액", "성별_매출_금액", "소비자유형별_매출_금액"],
+      "canonical_table": "metric_quarter",
+      "usage": "수요·요일·시간대·고객군 적합성. 성공확률로 해석 금지"
+    },
+    {
+      "id": "flow_population",
+      "paths": ["data/길단위인구/"],
+      "status": "core",
+      "source_type": "official_file",
+      "spatial_grains": ["commercial_area", "hinterland", "admin_dong"],
+      "industry_grain": false,
+      "period": {"type": "quarter", "observed": "2021Q1~2026Q1"},
+      "primary_key": ["기준_년분기_코드", "공간단위_코드"],
+      "source_fields": ["총_유동인구_수"],
+      "source_field_families": ["시간대별_유동인구_수", "요일별_유동인구_수", "연령대별_유동인구_수", "성별_유동인구_수"],
+      "canonical_table": "metric_quarter",
+      "usage": "유동 수요와 구성"
+    },
+    {
+      "id": "resident_population",
+      "paths": ["data/상주인구/"],
+      "status": "conditional",
+      "source_type": "official_file",
+      "spatial_grains": ["commercial_area", "hinterland", "admin_dong"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "label": "2021Q1~2026Q1 표기, 계단식 갱신"},
+      "primary_key": ["기준_년분기_코드", "공간단위_코드"],
+      "canonical_table": "background_snapshot",
+      "usage": "최신 주거 배경 수준",
+      "prohibited": ["분기 증감", "모멘텀"]
+    },
+    {
+      "id": "worker_population",
+      "paths": ["data/직장인구/"],
+      "status": "conditional",
+      "source_type": "official_file",
+      "spatial_grains": ["commercial_area", "hinterland", "admin_dong"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "label": "2021Q1~2026Q1 표기, 계단식 갱신"},
+      "primary_key": ["기준_년분기_코드", "공간단위_코드"],
+      "canonical_table": "background_snapshot",
+      "usage": "최신 직장 배경 수준",
+      "prohibited": ["분기 증감", "모멘텀"]
+    },
+    {
+      "id": "change_indicator",
+      "paths": ["data/상권변화지표/"],
+      "status": "conditional",
+      "source_type": "official_file",
+      "spatial_grains": ["commercial_area", "admin_dong"],
+      "industry_grain": false,
+      "period": {"type": "quarter", "observed": "2021Q1~2026Q1"},
+      "primary_key": ["기준_년분기_코드", "공간단위_코드"],
+      "source_fields": ["상권_변화_지표", "상권_변화_지표_명", "운영_영업_개월_평균", "폐업_영업_개월_평균"],
+      "canonical_table": "background_snapshot",
+      "usage": "전체 업종 지역 배경 리스크 라벨",
+      "prohibited": ["업종별 지표로 해석", "연속 gap을 주력 순위 피처로 사용"]
+    },
+    {
+      "id": "foreign_population",
+      "paths": ["data/외국인생활인구/"],
+      "status": "conditional",
+      "source_type": "official_api_snapshot",
+      "spatial_grains": ["admin_dong"],
+      "industry_grain": false,
+      "period": {"types": ["quarter", "month"], "observed": "2023Q1~2026Q3; 2026Q3 partial"},
+      "primary_key": ["기준_년분기_코드 또는 기준_년월", "행정동_코드"],
+      "canonical_table": "background_snapshot",
+      "usage": "행정동 외국인 거주·방문형 배경"
+    },
+    {
+      "id": "food_license_panel",
+      "paths": ["data/인허가/음식점_상권분기_패널.csv"],
+      "status": "audit-only",
+      "source_type": "official_file",
+      "spatial_grains": ["commercial_area"],
+      "industry_grain": true,
+      "period": {"type": "quarter", "observed": "2021Q1~2026Q3; 2026Q3 partial"},
+      "primary_key": ["기준_년분기_코드", "상권_코드", "업종코드"],
+      "source_fields": ["영업중_수", "신규개업_수", "폐업_수", "개업률", "폐업률", "분기_상태"],
+      "canonical_table": "metric_quarter",
+      "usage": "점포수 교차검증·생존분석·greenfield audit",
+      "prohibited": ["서울시 점포데이터 폐업률 대체"]
+    },
+    {
+      "id": "employment_rate",
+      "paths": ["data/고용률/자치구_고용률_반기.csv"],
+      "status": "conditional",
+      "source_type": "official_file",
+      "spatial_grains": ["sigungu"],
+      "industry_grain": false,
+      "period": {"type": "half_year", "observed": "2021H1~2026H1"},
+      "primary_key": ["기준_반기", "자치구_코드", "성별"],
+      "source_fields": ["고용률"],
+      "canonical_table": "background_snapshot",
+      "usage": "자치구 배경 proxy"
+    },
+    {
+      "id": "rent_wide",
+      "paths": ["data/매장용빌딩 임대료,공실률 및 수익률 통계 데이터.csv"],
+      "status": "conditional",
+      "source_type": "official_file",
+      "spatial_grains": ["region"],
+      "industry_grain": false,
+      "period": {"type": "quarter", "observed": "2021Q1~2025Q4"},
+      "canonical_table": "background_snapshot",
+      "usage": "권역 임대료·공실률·수익률",
+      "prohibited": ["개별 주소 월세", "현재 공실"]
+    },
+    {
+      "id": "rone_rent",
+      "paths": ["data/임대료/R-ONE_임대동향_분기.csv", "output/crosswalks/crosswalk_rone_trdar.csv"],
+      "status": "conditional",
+      "source_type": "official_api_snapshot",
+      "spatial_grains": ["commercial_area", "region"],
+      "industry_grain": false,
+      "period": {"type": "quarter", "observed": "2024Q1~2026Q2"},
+      "primary_key": ["상가유형", "지표", "grain", "권역", "R_ONE_상권", "기준_년분기_코드"],
+      "canonical_table": "background_snapshot",
+      "usage": "R-ONE 상권·권역 임대료 proxy",
+      "join_rule": "crosswalk join_eligible=yes만 자동 결합; grain_is_proxy=true",
+      "prohibited": ["개별 매물 월세", "CSV에 없는 공실률 생성"]
+    },
+    {
+      "id": "urban_plan",
+      "paths": ["data/도시계획사업/"],
+      "status": "conditional",
+      "source_type": "official_file",
+      "spatial_grains": ["commercial_area", "sigungu"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "observed": "2026 snapshot"},
+      "primary_key": ["사업장명", "사업유형", "추진단계", "상권_코드 또는 자치구"],
+      "source_fields": ["사업유형_대분류", "사업유형", "추진단계", "겹침_면적", "겹침_상권비율", "건수"],
+      "canonical_table": "plan_snapshot",
+      "usage": "공식 정비·재개발·재건축·역세권 사업 배경"
+    },
+    {
+      "id": "subway_station",
+      "paths": ["data/도시철도역사/역사정보_서울.csv", "data/도시철도역사/상권_역세권.csv", "data/도시철도역사/역출입구_요약.csv"],
+      "status": "conditional",
+      "source_type": "official_file",
+      "spatial_grains": ["point", "commercial_area"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "observed": "2026-06-30 station snapshot"},
+      "primary_key": ["역번호"],
+      "source_fields": ["역사명", "노선명", "환승역", "위도", "경도", "X_5181", "Y_5181"],
+      "canonical_table": "anchor_point",
+      "usage": "역 anchor 및 반경 접근성",
+      "prohibited": ["출구 좌표로 간주", "배차·미래 정거장 위치 생성"]
+    },
+    {
+      "id": "bus_stop",
+      "paths": ["data/버스정류장/버스정류소_서울.csv", "data/버스정류장/상권_버스접근성.csv"],
+      "status": "conditional",
+      "source_type": "official_file",
+      "spatial_grains": ["point", "commercial_area"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "observed": "2026-08 Seoul snapshot + adjacent data"},
+      "primary_key": ["NODE_ID"],
+      "source_fields": ["정류소명", "정류소타입", "위도", "경도", "X_5181", "Y_5181"],
+      "canonical_table": "anchor_point",
+      "usage": "반경 정류소 수·유형 문맥",
+      "prohibited": ["분기 추세", "노선·배차 간격 추정"]
+    },
+    {
+      "id": "apartment_complex",
+      "paths": ["data/공동주택/아파트단지_서울.csv", "data/공동주택/상권_아파트접근성.csv", "data/공동주택/_geocode_cache.json"],
+      "status": "conditional",
+      "source_type": "official_api_snapshot",
+      "spatial_grains": ["point", "commercial_area"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "observed": "2026 snapshot"},
+      "primary_key": ["단지코드"],
+      "source_fields": ["단지명", "세대수", "위도", "경도", "X_5181", "Y_5181", "geocode_신뢰도"],
+      "canonical_table": "anchor_point",
+      "usage": "아파트 anchor 및 반경 세대수",
+      "coverage_note": "지오코딩 89.7%; 소형 빌라·연립 누락"
+    },
+    {
+      "id": "kakao_poi",
+      "paths": ["data/카카오POI/"],
+      "status": "conditional",
+      "source_type": "observed_poi_snapshot",
+      "spatial_grains": ["point"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "observed": "2026-09-02"},
+      "primary_key": ["source", "poi_id", "retrieved_at_utc"],
+      "source_fields": ["poi_id", "place_name", "category_group_code", "x_wgs84", "y_wgs84", "search_mode", "search_query", "retrieved_at_utc"],
+      "canonical_table": "poi_snapshot",
+      "usage": "잠실 파일럿의 선택적 POI seed/context",
+      "coverage_note": "잠실역 90행, 잠실동 FD6/CE7 343행; 서울 전체 상가 전수·매물·공실 아님"
+    },
+    {
+      "id": "naver_trend",
+      "paths": ["data/네이버트렌드/", "data/ontology/업종_검색키워드.json"],
+      "status": "conditional",
+      "source_type": "official_api_snapshot",
+      "spatial_grains": ["sigungu", "admin_dong"],
+      "industry_grain": true,
+      "period": {"type": "month", "observed": "2021-01~2026-08"},
+      "primary_key": ["기준_년월", "대상 단위", "키워드 또는 업종코드"],
+      "source_fields": ["raw_ratio", "anchor_ratio", "rel_index"],
+      "canonical_table": "background_snapshot",
+      "usage": "최근 관심도·검색 맥락",
+      "prohibited": ["절대 검색량으로 표현", "계절 보정 추세 가점", "단일 급등 가점", "후보 정렬"]
+    },
+    {
+      "id": "news",
+      "paths": ["data/뉴스/"],
+      "status": "conditional",
+      "source_type": "observed_news_metadata",
+      "spatial_grains": ["sigungu", "admin_dong", "region"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "observed": "BigKinds 2024-01~2026-09; Naver 2026-09-02"},
+      "primary_key": ["source", "news_id"],
+      "source_fields": ["title", "published_date", "url", "sigungu_tags", "dong_tags", "topic_tags", "query_label", "search_period"],
+      "canonical_table": "news_snapshot",
+      "usage": "FC-51-news evidence/context_notes only",
+      "prohibited": ["기사량을 공식 사업 상태로 해석", "성공·수요·공실로 해석", "후보 정렬"]
+    },
+    {
+      "id": "generated_grid_evidence",
+      "paths": ["output/generated_evidence/"],
+      "status": "project_generated",
+      "source_type": "project_generated",
+      "spatial_grains": ["point"],
+      "industry_grain": false,
+      "period": {"type": "snapshot", "observed": "generation snapshot"},
+      "primary_key": ["evidence_id", "anchor_id"],
+      "canonical_table": "anchor_point",
+      "usage": "공간 후보 보조·데모",
+      "required_flags": {"synthetic_anchor": true, "precision": "지점(생성)", "listing_url": null, "address_point": null},
+      "prohibited": ["실제 상가·매물·주소로 표시", "추천 등급을 조건부 검토보다 높게 설정"]
+    }
+  ],
+  "join_rules": {
+    "time_industry_key": ["period", "spatial_unit_type", "spatial_unit_code", "industry_code"],
+    "no_zero_fill": true,
+    "many_to_many": "stop_and_document_crosswalk_or_spatial_overlap",
+    "proxy_required_fields": ["grain_is_proxy", "proxy_note", "source_grain"],
+    "api_runtime": "recommendation reads local snapshots; no live API calls"
+  },
+  "unknown_or_missing": [
+    "개별 상가 임대 매물·보증금·월세·면적·주차·현재 공실",
+    "SNS 전수 게시물·도달량·감성",
+    "후보별 미래 성공·수익·손익 label",
+    "지하철 출구 좌표·배차 간격·계획 정거장 확정 위치",
+    "소형 빌라·연립 전체 세대",
+    "내국인 생활인구 정밀 분모"
+  ]
+}

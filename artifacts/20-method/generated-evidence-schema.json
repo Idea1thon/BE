@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "generated-evidence-schema",
+  "title": "프로젝트 생성 근거 레코드 (project_generated evidence)",
+  "description": "개별 상가 매물을 크롤링하지 않고(불법·비확장), 공개 데이터에서 파생한 접근성·경쟁·비용 맥락을 격자로 생성한 좌표에 붙인 근거 레코드. 이 좌표는 실제 매물·점포가 아니다. evidence_origin=project_generated, is_synthetic_anchor=true, listing_url/address_point=null을 항상 명시하고, limitations[0]은 '생성 좌표이며 실제 매물·점포가 아님'으로 시작한다. rag-evidence-schema.json의 후보 evidence[] 항목과 겹치지만, 이 스키마는 후보 생성 전 단계의 재사용 가능한 맥락 레이어다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evidence_id", "evidence_origin", "evidence_type", "schema_version",
+    "target_anchor_id", "is_synthetic_anchor", "listing_url", "address_point",
+    "anchor", "generator", "claim", "spatial_grain", "generated_at",
+    "metrics", "metric_definitions", "source_references", "source_files", "limitations"
+  ],
+  "properties": {
+    "evidence_id": {"type": "string", "pattern": "^EVD-GEN-"},
+    "evidence_origin": {"const": "project_generated"},
+    "evidence_type": {
+      "enum": ["accessibility_context", "competition_context", "cost_context", "demand_context", "entry_environment_context"]
+    },
+    "schema_version": {"const": "gen-evidence-v1"},
+    "target_anchor_id": {"type": "string", "pattern": "^GEN-PT-"},
+    "is_synthetic_anchor": {"const": true},
+    "listing_url": {"const": null},
+    "address_point": {"const": null},
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "point", "generation_method", "grid_id", "sigungu"],
+      "properties": {
+        "type": {"const": "generated_point"},
+        "point": {
+          "type": "object", "additionalProperties": false,
+          "required": ["x", "y", "crs"],
+          "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "crs": {"const": "EPSG:5181"}}
+        },
+        "wgs84": {
+          "type": ["object", "null"], "additionalProperties": false,
+          "properties": {"lon": {"type": "number"}, "lat": {"type": "number"}}
+        },
+        "generation_method": {"type": "string"},
+        "grid_id": {"type": "string"},
+        "sigungu": {"type": "string"},
+        "admin_dong": {
+          "type": ["object", "null"], "additionalProperties": false,
+          "properties": {"code": {"type": "string"}, "name": {"type": "string"}}
+        },
+        "host_commercial_area": {
+          "type": ["object", "null"], "additionalProperties": false,
+          "properties": {
+            "code": {"type": "string"}, "name": {"type": "string"},
+            "relation": {"enum": ["포함", "최근접"]}, "distance_m": {"type": "number"}
+          }
+        }
+      }
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["script", "version", "generated_at", "region_request", "inputs", "params"],
+      "properties": {
+        "script": {"type": "string"},
+        "version": {"type": "string"},
+        "generated_at": {"type": "string"},
+        "region_request": {
+          "type": "object", "additionalProperties": false,
+          "required": ["sido", "sigungu"],
+          "properties": {"sido": {"type": "string"}, "sigungu": {"type": "string"}, "dong": {"type": ["string", "null"]}}
+        },
+        "inputs": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "params": {"type": "object"}
+      }
+    },
+    "claim": {"type": "string"},
+    "spatial_grain": {"enum": ["point_radius_250m", "point_radius_500m", "point_multi_radius"]},
+    "generated_at": {"type": "string"},
+    "metrics": {"type": "object", "additionalProperties": {"type": ["number", "null"]}},
+    "metric_definitions": {"type": "object", "additionalProperties": {"type": "string"}},
+    "source_references": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "source_files": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "limitations": {"type": "array", "items": {"type": "string"}, "minItems": 3}
+  }
+}

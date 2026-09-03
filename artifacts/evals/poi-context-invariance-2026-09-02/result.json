@@ -1,0 +1,69 @@
+{
+  "generated_by": "GPT(Codex)",
+  "generated_at": "2026-09-02T10:34:56.840005+00:00",
+  "passed": true,
+  "request": {
+    "sido": "서울특별시",
+    "sigungu": "송파구",
+    "dong": "잠실동",
+    "quarter": "20261",
+    "special_condition_text": "월세 300만원 이하, 20평 이상, 주차 가능"
+  },
+  "checks": [
+    "F24 context 경계·등급/정렬/근거 불변",
+    "F25 FC-11/entry_health 라벨 불변"
+  ],
+  "cases": [
+    {
+      "industry_code": "CS100001",
+      "errors": [],
+      "candidate_count": 27
+    },
+    {
+      "industry_code": "CS100002",
+      "errors": [],
+      "candidate_count": 27
+    },
+    {
+      "industry_code": "CS100003",
+      "errors": [],
+      "candidate_count": 27
+    },
+    {
+      "industry_code": "CS100004",
+      "errors": [],
+      "candidate_count": 27
+    },
+    {
+      "industry_code": "CS100005",
+      "errors": [],
+      "candidate_count": 27
+    },
+    {
+      "industry_code": "CS100006",
+      "errors": [],
+      "candidate_count": 27
+    },
+    {
+      "industry_code": "CS100007",
+      "errors": [],
+      "candidate_count": 27
+    },
+    {
+      "industry_code": "CS100008",
+      "errors": [],
+      "candidate_count": 27
+    },
+    {
+      "industry_code": "CS100009",
+      "errors": [],
+      "candidate_count": 27
+    },
+    {
+      "industry_code": "CS100010",
+      "errors": [],
+      "candidate_count": 27
+    }
+  ],
+  "errors": []
+}
