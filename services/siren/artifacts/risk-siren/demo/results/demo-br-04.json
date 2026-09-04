@@ -1,0 +1,563 @@
+{
+  "request_id": "demo-demo-br-04-2026-03-31",
+  "branch": {
+    "franchise_id": "demo-fr-04",
+    "branch_id": "demo-br-04",
+    "brand_name": "데모 중식음식점 건대입구역(건대)점",
+    "as_of": "2026-03-31",
+    "industry_code": "CS100002",
+    "industry_label": "중식음식점",
+    "trade_area_code": "3120053"
+  },
+  "risk": {
+    "score": 30.1046,
+    "grade": "정상",
+    "score_version": "risk-siren-v1-provisional",
+    "calculation_status": "calculated",
+    "policy_status": "provisional",
+    "composite_basis": [
+      "SR-01",
+      "SR-02.market",
+      "SR-03",
+      "SR-02.branch",
+      "SR-05"
+    ],
+    "excludes": [
+      "SR-04"
+    ],
+    "branch_floor_applied": false
+  },
+  "layers": {
+    "market_risk": {
+      "score": 34.3327,
+      "status": "calculated"
+    },
+    "branch_risk": {
+      "score": 27.8279,
+      "status": "calculated"
+    }
+  },
+  "components": {
+    "closure": {
+      "score": 55.5558,
+      "score_basis": "rolling_2q_rate",
+      "latest_quarter": "2026Q1",
+      "latest_quarter_status": "완전",
+      "window_has_partial_quarter": false,
+      "quarter_rate": 2.2727,
+      "rolling_2q_rate": 6.6667,
+      "rolling_4q_rate": 11.3636,
+      "rate_exceeds_100": false,
+      "active_count_end": 43,
+      "new_openings": 0,
+      "closures": 1,
+      "source": "seoul_open_data:음식점_상권분기_패널",
+      "status": "calculated"
+    },
+    "sales_decline": {
+      "market": {
+        "score": 12.0216,
+        "latest_quarter": "2026Q1",
+        "recent_quarter_change_pct": -3.0054,
+        "yoy_change_pct": 15.3172,
+        "source": "seoul_open_data:추정매출-상권",
+        "status": "calculated"
+      },
+      "branch": {
+        "score": 38.5697,
+        "recent_3m_total_krw": 144165908.0,
+        "previous_3m_total_krw": 167197078.0,
+        "recent_3m_change_pct": -13.7749,
+        "previous_3m_change_pct": 12.5746,
+        "recent_period_missing_months": [],
+        "previous_period_missing_months": [],
+        "status": "calculated"
+      }
+    },
+    "competition": {
+      "score": 25.625,
+      "radius_m": 250.0,
+      "same_new_recent_3m": 2,
+      "same_new_delta": 1,
+      "similar_new_recent_3m": 1,
+      "similar_new_delta": -5,
+      "weighted_new_count": 1.65,
+      "active_only": true,
+      "source": "seoul_open_data:음식점_인허가_서울",
+      "status": "calculated"
+    },
+    "profitability": {
+      "score": 22.0438,
+      "operating_margin_recent_3m_pct": 14.8909,
+      "operating_margin_previous_3m_pct": 18.3715,
+      "operating_margin_decline_pt": 3.4806,
+      "operating_profit_recent_3m_krw": 21467554.0,
+      "consecutive_negative_months": 0,
+      "labor_ratio_recent_3m": 0.2691,
+      "coupon_ratio_recent_3m": 0.0203,
+      "delivery_ratio_recent_3m": 0.279,
+      "loan_interest_trend": "flat",
+      "cogs_clamped_months": [],
+      "recent_period_missing_months": [],
+      "status": "calculated"
+    }
+  },
+  "review_signal": {
+    "status": "calculated",
+    "sub_score": 31.25,
+    "direction": "stable",
+    "review_count": 24,
+    "negative_count": 3,
+    "positive_count": 20,
+    "negative_ratio": 0.125,
+    "positive_ratio": 0.8333,
+    "negative_ratio_previous_period": 0.1304,
+    "negative_ratio_delta": -0.0054,
+    "watchlist_flag": false,
+    "source": "synthetic_reviews",
+    "model": "deterministic-count-v0"
+  },
+  "evidence": [
+    {
+      "evidence_id": "ev-closure-rolling-2q",
+      "signal_id": "SR-01",
+      "layer": "market",
+      "value": 6.6667,
+      "unit": "percent",
+      "period": "rolling-2q~2026Q1",
+      "grain": "trade_area-industry-quarter",
+      "source": "seoul_open_data:음식점_상권분기_패널",
+      "synthetic": false,
+      "supports": "최근 2분기 폐업률"
+    },
+    {
+      "evidence_id": "ev-closure-quarter",
+      "signal_id": "SR-01",
+      "layer": "market",
+      "value": 2.2727,
+      "unit": "percent",
+      "period": "2026Q1",
+      "grain": "trade_area-industry-quarter",
+      "source": "seoul_open_data:음식점_상권분기_패널",
+      "synthetic": false,
+      "supports": "최근 분기 폐업률"
+    },
+    {
+      "evidence_id": "ev-market-sales-qoq",
+      "signal_id": "SR-02.market",
+      "layer": "market",
+      "value": -3.0054,
+      "unit": "percent",
+      "period": "QoQ~2026Q1",
+      "grain": "trade_area-industry-quarter",
+      "source": "seoul_open_data:추정매출-상권",
+      "synthetic": false,
+      "supports": "상권·업종 분기 매출 변화율"
+    },
+    {
+      "evidence_id": "ev-competition-new-3m",
+      "signal_id": "SR-03",
+      "layer": "market",
+      "value": 1.65,
+      "unit": "weighted-count",
+      "period": "recent-3m-radius-250.0m",
+      "grain": "point-radius-industry",
+      "source": "seoul_open_data:음식점_인허가_서울",
+      "synthetic": false,
+      "supports": "반경 내 동일·유사업종 신규 경쟁업체 가중 관측"
+    },
+    {
+      "evidence_id": "ev-branch-sales-3m",
+      "signal_id": "SR-02.branch",
+      "layer": "branch",
+      "value": -13.7749,
+      "unit": "percent",
+      "period": "recent-3m-vs-previous-3m",
+      "grain": "branch-month",
+      "source": "synthetic_pos",
+      "synthetic": true,
+      "supports": "가맹점 순매출 최근 3개월 변화율"
+    },
+    {
+      "evidence_id": "ev-profit-margin-3m",
+      "signal_id": "SR-05",
+      "layer": "branch",
+      "value": 14.8909,
+      "unit": "percent",
+      "period": "recent-3m",
+      "grain": "branch-month",
+      "source": "synthetic_self_reported",
+      "synthetic": true,
+      "supports": "최근 3개월 영업이익률"
+    },
+    {
+      "evidence_id": "ev-review-neg-ratio",
+      "signal_id": "SR-04",
+      "layer": "auxiliary",
+      "value": 0.125,
+      "unit": "ratio",
+      "period": "recent-90d",
+      "grain": "branch-review",
+      "source": "synthetic_reviews",
+      "synthetic": true,
+      "supports": "최근 리뷰 부정 반응 비율 (보조 신호)"
+    }
+  ],
+  "missing_data": [],
+  "uncertainty": [
+    "가중치와 기준값은 데이터 검증 전의 provisional 정책이며 운영 적용 전 사람 승인이 필요합니다."
+  ],
+  "excluded_future_months": [],
+  "data_provenance": {
+    "contains_synthetic": true,
+    "disclosure": "가맹점 매출·손익·리뷰는 대회 데모용 합성 데이터입니다. 상권×업종 폐업률·시장 매출·경쟁업체 등장은 서울시 공개데이터 실측입니다.",
+    "by_signal": [
+      {
+        "signal_id": "SR-01",
+        "layer": "market",
+        "source": "seoul_open_data:음식점_상권분기_패널",
+        "synthetic": false
+      },
+      {
+        "signal_id": "SR-02.market",
+        "layer": "market",
+        "source": "seoul_open_data:추정매출-상권",
+        "synthetic": false
+      },
+      {
+        "signal_id": "SR-03",
+        "layer": "market",
+        "source": "seoul_open_data:음식점_인허가_서울",
+        "synthetic": false
+      },
+      {
+        "signal_id": "SR-02.branch",
+        "layer": "branch",
+        "source": "synthetic_pos",
+        "synthetic": true
+      },
+      {
+        "signal_id": "SR-05",
+        "layer": "branch",
+        "source": "synthetic_self_reported",
+        "synthetic": true
+      },
+      {
+        "signal_id": "SR-04",
+        "layer": "auxiliary",
+        "source": "synthetic_reviews",
+        "synthetic": true
+      }
+    ]
+  },
+  "alert": {
+    "event_type": "branch_risk_evaluated",
+    "event_id": "evt-fdef1418143543a1126997fc",
+    "idempotency_key": "fdef1418143543a1126997fc",
+    "branch_id": "demo-br-04",
+    "grade": "정상",
+    "previous_grade": null,
+    "score": 30.1046,
+    "as_of": "2026-03-31",
+    "recipients": [
+      {
+        "role": "branch_owner",
+        "channels": [
+          "in_app",
+          "email"
+        ]
+      },
+      {
+        "role": "franchise_hq",
+        "channels": [
+          "in_app",
+          "email"
+        ]
+      }
+    ],
+    "report_link": null,
+    "should_fire": false,
+    "dispatch_status": "disabled",
+    "evidence_ids": [
+      "ev-closure-rolling-2q",
+      "ev-closure-quarter",
+      "ev-market-sales-qoq",
+      "ev-competition-new-3m",
+      "ev-branch-sales-3m",
+      "ev-profit-margin-3m",
+      "ev-review-neg-ratio"
+    ]
+  },
+  "financial_products": {
+    "status": "catalog_match_pending",
+    "items": []
+  },
+  "explanation": {
+    "text": "현재 입력된 검증 근거 기준으로 높은 위험 신호는 확인되지 않았습니다. 이후 기간의 변화를 계속 확인해 주세요. 가맹점 매출·손익·리뷰는 대회 데모용 합성 데이터입니다. 상권×업종 폐업률·시장 매출·경쟁업체 등장은 서울시 공개데이터 실측입니다.",
+    "evidence_ids": [
+      "ev-closure-rolling-2q",
+      "ev-closure-quarter",
+      "ev-market-sales-qoq",
+      "ev-competition-new-3m",
+      "ev-branch-sales-3m",
+      "ev-profit-margin-3m",
+      "ev-review-neg-ratio"
+    ],
+    "model": "deterministic-template-v1"
+  },
+  "projections": {
+    "branch_owner": {
+      "branch_id": "demo-br-04",
+      "score": 30.1046,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "layers": {
+        "market_risk": {
+          "score": 34.3327,
+          "status": "calculated"
+        },
+        "branch_risk": {
+          "score": 27.8279,
+          "status": "calculated"
+        }
+      },
+      "components": {
+        "closure": {
+          "score": 55.5558,
+          "score_basis": "rolling_2q_rate",
+          "latest_quarter": "2026Q1",
+          "latest_quarter_status": "완전",
+          "window_has_partial_quarter": false,
+          "quarter_rate": 2.2727,
+          "rolling_2q_rate": 6.6667,
+          "rolling_4q_rate": 11.3636,
+          "rate_exceeds_100": false,
+          "active_count_end": 43,
+          "new_openings": 0,
+          "closures": 1,
+          "source": "seoul_open_data:음식점_상권분기_패널",
+          "status": "calculated"
+        },
+        "sales_decline": {
+          "market": {
+            "score": 12.0216,
+            "latest_quarter": "2026Q1",
+            "recent_quarter_change_pct": -3.0054,
+            "yoy_change_pct": 15.3172,
+            "source": "seoul_open_data:추정매출-상권",
+            "status": "calculated"
+          },
+          "branch": {
+            "score": 38.5697,
+            "recent_3m_total_krw": 144165908.0,
+            "previous_3m_total_krw": 167197078.0,
+            "recent_3m_change_pct": -13.7749,
+            "previous_3m_change_pct": 12.5746,
+            "recent_period_missing_months": [],
+            "previous_period_missing_months": [],
+            "status": "calculated"
+          }
+        },
+        "competition": {
+          "score": 25.625,
+          "radius_m": 250.0,
+          "same_new_recent_3m": 2,
+          "same_new_delta": 1,
+          "similar_new_recent_3m": 1,
+          "similar_new_delta": -5,
+          "weighted_new_count": 1.65,
+          "active_only": true,
+          "source": "seoul_open_data:음식점_인허가_서울",
+          "status": "calculated"
+        },
+        "profitability": {
+          "score": 22.0438,
+          "operating_margin_recent_3m_pct": 14.8909,
+          "operating_margin_previous_3m_pct": 18.3715,
+          "operating_margin_decline_pt": 3.4806,
+          "operating_profit_recent_3m_krw": 21467554.0,
+          "consecutive_negative_months": 0,
+          "labor_ratio_recent_3m": 0.2691,
+          "coupon_ratio_recent_3m": 0.0203,
+          "delivery_ratio_recent_3m": 0.279,
+          "loan_interest_trend": "flat",
+          "cogs_clamped_months": [],
+          "recent_period_missing_months": [],
+          "status": "calculated"
+        }
+      },
+      "review_signal": {
+        "status": "calculated",
+        "sub_score": 31.25,
+        "direction": "stable",
+        "review_count": 24,
+        "negative_count": 3,
+        "positive_count": 20,
+        "negative_ratio": 0.125,
+        "positive_ratio": 0.8333,
+        "negative_ratio_previous_period": 0.1304,
+        "negative_ratio_delta": -0.0054,
+        "watchlist_flag": false,
+        "source": "synthetic_reviews",
+        "model": "deterministic-count-v0"
+      },
+      "evidence": [
+        {
+          "evidence_id": "ev-closure-rolling-2q",
+          "signal_id": "SR-01",
+          "layer": "market",
+          "value": 6.6667,
+          "unit": "percent",
+          "period": "rolling-2q~2026Q1",
+          "grain": "trade_area-industry-quarter",
+          "source": "seoul_open_data:음식점_상권분기_패널",
+          "synthetic": false,
+          "supports": "최근 2분기 폐업률"
+        },
+        {
+          "evidence_id": "ev-closure-quarter",
+          "signal_id": "SR-01",
+          "layer": "market",
+          "value": 2.2727,
+          "unit": "percent",
+          "period": "2026Q1",
+          "grain": "trade_area-industry-quarter",
+          "source": "seoul_open_data:음식점_상권분기_패널",
+          "synthetic": false,
+          "supports": "최근 분기 폐업률"
+        },
+        {
+          "evidence_id": "ev-market-sales-qoq",
+          "signal_id": "SR-02.market",
+          "layer": "market",
+          "value": -3.0054,
+          "unit": "percent",
+          "period": "QoQ~2026Q1",
+          "grain": "trade_area-industry-quarter",
+          "source": "seoul_open_data:추정매출-상권",
+          "synthetic": false,
+          "supports": "상권·업종 분기 매출 변화율"
+        },
+        {
+          "evidence_id": "ev-competition-new-3m",
+          "signal_id": "SR-03",
+          "layer": "market",
+          "value": 1.65,
+          "unit": "weighted-count",
+          "period": "recent-3m-radius-250.0m",
+          "grain": "point-radius-industry",
+          "source": "seoul_open_data:음식점_인허가_서울",
+          "synthetic": false,
+          "supports": "반경 내 동일·유사업종 신규 경쟁업체 가중 관측"
+        },
+        {
+          "evidence_id": "ev-branch-sales-3m",
+          "signal_id": "SR-02.branch",
+          "layer": "branch",
+          "value": -13.7749,
+          "unit": "percent",
+          "period": "recent-3m-vs-previous-3m",
+          "grain": "branch-month",
+          "source": "synthetic_pos",
+          "synthetic": true,
+          "supports": "가맹점 순매출 최근 3개월 변화율"
+        },
+        {
+          "evidence_id": "ev-profit-margin-3m",
+          "signal_id": "SR-05",
+          "layer": "branch",
+          "value": 14.8909,
+          "unit": "percent",
+          "period": "recent-3m",
+          "grain": "branch-month",
+          "source": "synthetic_self_reported",
+          "synthetic": true,
+          "supports": "최근 3개월 영업이익률"
+        },
+        {
+          "evidence_id": "ev-review-neg-ratio",
+          "signal_id": "SR-04",
+          "layer": "auxiliary",
+          "value": 0.125,
+          "unit": "ratio",
+          "period": "recent-90d",
+          "grain": "branch-review",
+          "source": "synthetic_reviews",
+          "synthetic": true,
+          "supports": "최근 리뷰 부정 반응 비율 (보조 신호)"
+        }
+      ],
+      "missing_data": [],
+      "uncertainty": [
+        "가중치와 기준값은 데이터 검증 전의 provisional 정책이며 운영 적용 전 사람 승인이 필요합니다."
+      ],
+      "recommended_actions": [],
+      "financial_products": {
+        "status": "catalog_match_pending",
+        "items": []
+      },
+      "report_link": null,
+      "data_provenance": {
+        "contains_synthetic": true,
+        "disclosure": "가맹점 매출·손익·리뷰는 대회 데모용 합성 데이터입니다. 상권×업종 폐업률·시장 매출·경쟁업체 등장은 서울시 공개데이터 실측입니다.",
+        "by_signal": [
+          {
+            "signal_id": "SR-01",
+            "layer": "market",
+            "source": "seoul_open_data:음식점_상권분기_패널",
+            "synthetic": false
+          },
+          {
+            "signal_id": "SR-02.market",
+            "layer": "market",
+            "source": "seoul_open_data:추정매출-상권",
+            "synthetic": false
+          },
+          {
+            "signal_id": "SR-03",
+            "layer": "market",
+            "source": "seoul_open_data:음식점_인허가_서울",
+            "synthetic": false
+          },
+          {
+            "signal_id": "SR-02.branch",
+            "layer": "branch",
+            "source": "synthetic_pos",
+            "synthetic": true
+          },
+          {
+            "signal_id": "SR-05",
+            "layer": "branch",
+            "source": "synthetic_self_reported",
+            "synthetic": true
+          },
+          {
+            "signal_id": "SR-04",
+            "layer": "auxiliary",
+            "source": "synthetic_reviews",
+            "synthetic": true
+          }
+        ]
+      }
+    },
+    "franchise_hq": {
+      "branch_id": "demo-br-04",
+      "franchise_id": "demo-fr-04",
+      "score": 30.1046,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "component_status": {
+        "closure": "calculated",
+        "sales_decline_market": "calculated",
+        "sales_decline_branch": "calculated",
+        "competition": "calculated",
+        "profitability": "calculated"
+      },
+      "review_watchlist_flag": false,
+      "data_provenance": {
+        "contains_synthetic": true,
+        "disclosure": "가맹점 매출·손익·리뷰는 대회 데모용 합성 데이터입니다. 상권×업종 폐업률·시장 매출·경쟁업체 등장은 서울시 공개데이터 실측입니다."
+      }
+    }
+  }
+}

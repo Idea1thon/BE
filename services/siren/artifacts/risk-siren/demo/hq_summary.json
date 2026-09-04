@@ -1,0 +1,136 @@
+{
+  "franchise_id": "demo-all",
+  "as_of": "2026-03-31",
+  "branch_count": 20,
+  "calculated_count": 18,
+  "grade_distribution": {
+    "정상": 6,
+    "주의": 4,
+    "위험": 8
+  },
+  "danger_ratio_pct": 44.4444,
+  "average_score": 60.0773,
+  "watchlist": [
+    {
+      "branch_id": "demo-br-06",
+      "grade": "주의",
+      "reasons": [
+        "SR-05",
+        "SR-04"
+      ]
+    },
+    {
+      "branch_id": "demo-br-07",
+      "grade": "주의",
+      "reasons": [
+        "SR-05",
+        "SR-04"
+      ]
+    },
+    {
+      "branch_id": "demo-br-08",
+      "grade": "주의",
+      "reasons": [
+        "SR-05",
+        "SR-04"
+      ]
+    },
+    {
+      "branch_id": "demo-br-10",
+      "grade": "위험",
+      "reasons": [
+        "grade:위험",
+        "SR-05",
+        "SR-04"
+      ]
+    },
+    {
+      "branch_id": "demo-br-11",
+      "grade": "위험",
+      "reasons": [
+        "grade:위험",
+        "SR-05",
+        "SR-04"
+      ]
+    },
+    {
+      "branch_id": "demo-br-12",
+      "grade": "위험",
+      "reasons": [
+        "grade:위험",
+        "SR-05"
+      ]
+    },
+    {
+      "branch_id": "demo-br-13",
+      "grade": "위험",
+      "reasons": [
+        "grade:위험",
+        "SR-05",
+        "SR-04"
+      ]
+    },
+    {
+      "branch_id": "demo-br-14",
+      "grade": "위험",
+      "reasons": [
+        "grade:위험",
+        "SR-05",
+        "SR-04"
+      ]
+    },
+    {
+      "branch_id": "demo-br-15",
+      "grade": "주의",
+      "reasons": [
+        "SR-05"
+      ]
+    },
+    {
+      "branch_id": "demo-br-16",
+      "grade": "위험",
+      "reasons": [
+        "grade:위험",
+        "SR-05",
+        "SR-04"
+      ]
+    },
+    {
+      "branch_id": "demo-br-17",
+      "grade": "위험",
+      "reasons": [
+        "grade:위험",
+        "SR-05",
+        "SR-04"
+      ]
+    },
+    {
+      "branch_id": "demo-br-18",
+      "grade": "위험",
+      "reasons": [
+        "grade:위험",
+        "SR-05"
+      ]
+    },
+    {
+      "branch_id": "demo-br-19",
+      "grade": null,
+      "reasons": [
+        "partial"
+      ]
+    },
+    {
+      "branch_id": "demo-br-20",
+      "grade": null,
+      "reasons": [
+        "SR-04",
+        "partial"
+      ]
+    }
+  ],
+  "unread_alert_count": 8,
+  "data_provenance": {
+    "contains_synthetic": true,
+    "disclosure": "일부 가맹점 결과에 대회 데모용 합성 데이터가 포함되어 있습니다."
+  }
+}

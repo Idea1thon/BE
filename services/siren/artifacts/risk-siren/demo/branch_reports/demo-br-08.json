@@ -1,0 +1,1748 @@
+{
+  "branch_id": "demo-br-08",
+  "scenario": "slow_margin_squeeze",
+  "missing_months": [],
+  "branch_reports": [
+    {
+      "month": "2024-04",
+      "sales": {
+        "hall": {
+          "credit": 12659785,
+          "cash": 2041901,
+          "simple_pay": 5717322
+        },
+        "delivery": {
+          "baemin": 8723140,
+          "coupang_eats": 5551089,
+          "other": 1586025
+        },
+        "takeout": {
+          "credit": 8199746,
+          "cash": 2236294,
+          "simple_pay": 4472589
+        }
+      },
+      "deductions": {
+        "customer_refund": 349751,
+        "own_coupon_discount": 947792
+      },
+      "cogs": {
+        "food_ingredients": 14603526,
+        "sub_materials": 497344,
+        "alcohol": 2354678,
+        "beverage": 1107917,
+        "inventory_begin": 4777712,
+        "inventory_end": 4712053
+      },
+      "labor": {
+        "fulltime": 6484043,
+        "parttime": 4754965,
+        "four_major_insurance": 1873168,
+        "meal_welfare": 720449,
+        "short_term": 576360
+      },
+      "variable": {
+        "platform_fee": 1790647,
+        "delivery_agency_fee": 717514,
+        "supplies": 584213,
+        "utilities": 1540371,
+        "marketing_ad": 434149
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 673159
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 378970
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2024-05",
+      "sales": {
+        "hall": {
+          "credit": 14690021,
+          "cash": 2369358,
+          "simple_pay": 6634203
+        },
+        "delivery": {
+          "baemin": 9322632,
+          "coupang_eats": 5932584,
+          "other": 1695024
+        },
+        "takeout": {
+          "credit": 8271921,
+          "cash": 2255979,
+          "simple_pay": 4511957
+        }
+      },
+      "deductions": {
+        "customer_refund": 169793,
+        "own_coupon_discount": 1109619
+      },
+      "cogs": {
+        "food_ingredients": 16241044,
+        "sub_materials": 709409,
+        "alcohol": 2252037,
+        "beverage": 1559133,
+        "inventory_begin": 6353159,
+        "inventory_end": 6203086
+      },
+      "labor": {
+        "fulltime": 6854180,
+        "parttime": 5026399,
+        "four_major_insurance": 1980097,
+        "meal_welfare": 761576,
+        "short_term": 609260
+      },
+      "variable": {
+        "platform_fee": 1837317,
+        "delivery_agency_fee": 874920,
+        "supplies": 671186,
+        "utilities": 1707181,
+        "marketing_ad": 517827
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 712233
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 230203
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2024-06",
+      "sales": {
+        "hall": {
+          "credit": 12975292,
+          "cash": 2092789,
+          "simple_pay": 5859810
+        },
+        "delivery": {
+          "baemin": 9172853,
+          "coupang_eats": 5837270,
+          "other": 1667792
+        },
+        "takeout": {
+          "credit": 9235428,
+          "cash": 2518753,
+          "simple_pay": 5037507
+        }
+      },
+      "deductions": {
+        "customer_refund": 341063,
+        "own_coupon_discount": 1285148
+      },
+      "cogs": {
+        "food_ingredients": 14567700,
+        "sub_materials": 518519,
+        "alcohol": 2033868,
+        "beverage": 1589146,
+        "inventory_begin": 4829003,
+        "inventory_end": 4754282
+      },
+      "labor": {
+        "fulltime": 6793679,
+        "parttime": 4982032,
+        "four_major_insurance": 1962618,
+        "meal_welfare": 754853,
+        "short_term": 603883
+      },
+      "variable": {
+        "platform_fee": 1901479,
+        "delivery_agency_fee": 938744,
+        "supplies": 661582,
+        "utilities": 1895982,
+        "marketing_ad": 534294
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 670677
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 322747
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2024-07",
+      "sales": {
+        "hall": {
+          "credit": 12351722,
+          "cash": 1992213,
+          "simple_pay": 5578197
+        },
+        "delivery": {
+          "baemin": 8716363,
+          "coupang_eats": 5546777,
+          "other": 1584793
+        },
+        "takeout": {
+          "credit": 8679678,
+          "cash": 2367185,
+          "simple_pay": 4734370
+        }
+      },
+      "deductions": {
+        "customer_refund": 385912,
+        "own_coupon_discount": 1148250
+      },
+      "cogs": {
+        "food_ingredients": 13393679,
+        "sub_materials": 653360,
+        "alcohol": 2445518,
+        "beverage": 1305947,
+        "inventory_begin": 5817606,
+        "inventory_end": 5580652
+      },
+      "labor": {
+        "fulltime": 6803128,
+        "parttime": 4988960,
+        "four_major_insurance": 1965348,
+        "meal_welfare": 755903,
+        "short_term": 604723
+      },
+      "variable": {
+        "platform_fee": 1909365,
+        "delivery_agency_fee": 722087,
+        "supplies": 691490,
+        "utilities": 1746249,
+        "marketing_ad": 526016
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 652301
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 287573
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2024-08",
+      "sales": {
+        "hall": {
+          "credit": 12996469,
+          "cash": 2096205,
+          "simple_pay": 5869373
+        },
+        "delivery": {
+          "baemin": 8554766,
+          "coupang_eats": 5443942,
+          "other": 1555412
+        },
+        "takeout": {
+          "credit": 7313220,
+          "cash": 1994514,
+          "simple_pay": 3989029
+        }
+      },
+      "deductions": {
+        "customer_refund": 299147,
+        "own_coupon_discount": 1297365
+      },
+      "cogs": {
+        "food_ingredients": 12846652,
+        "sub_materials": 440128,
+        "alcohol": 2235415,
+        "beverage": 1088302,
+        "inventory_begin": 4763327,
+        "inventory_end": 5022702
+      },
+      "labor": {
+        "fulltime": 6734206,
+        "parttime": 4938418,
+        "four_major_insurance": 1945437,
+        "meal_welfare": 748245,
+        "short_term": 598597
+      },
+      "variable": {
+        "platform_fee": 1851426,
+        "delivery_agency_fee": 925601,
+        "supplies": 681791,
+        "utilities": 1767755,
+        "marketing_ad": 522635
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 626082
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 271588
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2024-09",
+      "sales": {
+        "hall": {
+          "credit": 13830313,
+          "cash": 2230696,
+          "simple_pay": 6245947
+        },
+        "delivery": {
+          "baemin": 8834214,
+          "coupang_eats": 5621773,
+          "other": 1606220
+        },
+        "takeout": {
+          "credit": 7927247,
+          "cash": 2161977,
+          "simple_pay": 4323953
+        }
+      },
+      "deductions": {
+        "customer_refund": 305495,
+        "own_coupon_discount": 1494695
+      },
+      "cogs": {
+        "food_ingredients": 14923805,
+        "sub_materials": 563068,
+        "alcohol": 2389433,
+        "beverage": 1099297,
+        "inventory_begin": 5875451,
+        "inventory_end": 6032968
+      },
+      "labor": {
+        "fulltime": 7299294,
+        "parttime": 5352815,
+        "four_major_insurance": 2108685,
+        "meal_welfare": 811033,
+        "short_term": 648825
+      },
+      "variable": {
+        "platform_fee": 1709680,
+        "delivery_agency_fee": 656692,
+        "supplies": 760625,
+        "utilities": 1651824,
+        "marketing_ad": 477040
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 668100
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 341785
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2024-10",
+      "sales": {
+        "hall": {
+          "credit": 15425997,
+          "cash": 2488064,
+          "simple_pay": 6966580
+        },
+        "delivery": {
+          "baemin": 9160255,
+          "coupang_eats": 5829253,
+          "other": 1665500
+        },
+        "takeout": {
+          "credit": 7481846,
+          "cash": 2040503,
+          "simple_pay": 4081008
+        }
+      },
+      "deductions": {
+        "customer_refund": 376916,
+        "own_coupon_discount": 1492665
+      },
+      "cogs": {
+        "food_ingredients": 14928645,
+        "sub_materials": 585059,
+        "alcohol": 2429628,
+        "beverage": 1108770,
+        "inventory_begin": 5514104,
+        "inventory_end": 5242243
+      },
+      "labor": {
+        "fulltime": 7420592,
+        "parttime": 5441768,
+        "four_major_insurance": 2143727,
+        "meal_welfare": 824510,
+        "short_term": 659608
+      },
+      "variable": {
+        "platform_fee": 1978460,
+        "delivery_agency_fee": 824210,
+        "supplies": 706417,
+        "utilities": 1582568,
+        "marketing_ad": 528762
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 775399
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 271646
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2024-11",
+      "sales": {
+        "hall": {
+          "credit": 14054824,
+          "cash": 2266907,
+          "simple_pay": 6347340
+        },
+        "delivery": {
+          "baemin": 8839004,
+          "coupang_eats": 5624820,
+          "other": 1607092
+        },
+        "takeout": {
+          "credit": 7396378,
+          "cash": 2017194,
+          "simple_pay": 4034388
+        }
+      },
+      "deductions": {
+        "customer_refund": 250158,
+        "own_coupon_discount": 1642828
+      },
+      "cogs": {
+        "food_ingredients": 13956667,
+        "sub_materials": 449372,
+        "alcohol": 2393096,
+        "beverage": 1169592,
+        "inventory_begin": 4789095,
+        "inventory_end": 4794355
+      },
+      "labor": {
+        "fulltime": 7300585,
+        "parttime": 5353762,
+        "four_major_insurance": 2109058,
+        "meal_welfare": 811176,
+        "short_term": 648941
+      },
+      "variable": {
+        "platform_fee": 1694561,
+        "delivery_agency_fee": 758267,
+        "supplies": 577381,
+        "utilities": 1850465,
+        "marketing_ad": 543950
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 666453
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 358426
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2024-12",
+      "sales": {
+        "hall": {
+          "credit": 14993457,
+          "cash": 2418299,
+          "simple_pay": 6771239
+        },
+        "delivery": {
+          "baemin": 9685941,
+          "coupang_eats": 6163781,
+          "other": 1761081
+        },
+        "takeout": {
+          "credit": 8858518,
+          "cash": 2415959,
+          "simple_pay": 4831919
+        }
+      },
+      "deductions": {
+        "customer_refund": 389533,
+        "own_coupon_discount": 1743871
+      },
+      "cogs": {
+        "food_ingredients": 15585922,
+        "sub_materials": 730430,
+        "alcohol": 2549422,
+        "beverage": 1743948,
+        "inventory_begin": 6333773,
+        "inventory_end": 6270845
+      },
+      "labor": {
+        "fulltime": 7808953,
+        "parttime": 5726565,
+        "four_major_insurance": 2255920,
+        "meal_welfare": 867661,
+        "short_term": 694129
+      },
+      "variable": {
+        "platform_fee": 1810672,
+        "delivery_agency_fee": 886528,
+        "supplies": 573038,
+        "utilities": 1698353,
+        "marketing_ad": 484134
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 755003
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 268086
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-01",
+      "sales": {
+        "hall": {
+          "credit": 12018142,
+          "cash": 1938410,
+          "simple_pay": 5427548
+        },
+        "delivery": {
+          "baemin": 7531142,
+          "coupang_eats": 4792545,
+          "other": 1369299
+        },
+        "takeout": {
+          "credit": 7183349,
+          "cash": 1959095,
+          "simple_pay": 3918190
+        }
+      },
+      "deductions": {
+        "customer_refund": 179171,
+        "own_coupon_discount": 1441408
+      },
+      "cogs": {
+        "food_ingredients": 12435968,
+        "sub_materials": 432901,
+        "alcohol": 1884261,
+        "beverage": 1063735,
+        "inventory_begin": 5209092,
+        "inventory_end": 5392858
+      },
+      "labor": {
+        "fulltime": 7190143,
+        "parttime": 5272771,
+        "four_major_insurance": 2077152,
+        "meal_welfare": 798905,
+        "short_term": 639124
+      },
+      "variable": {
+        "platform_fee": 1491754,
+        "delivery_agency_fee": 512264,
+        "supplies": 591085,
+        "utilities": 1703213,
+        "marketing_ad": 482020
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 569182
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 219134
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-02",
+      "sales": {
+        "hall": {
+          "credit": 11064624,
+          "cash": 1784617,
+          "simple_pay": 4996926
+        },
+        "delivery": {
+          "baemin": 7356125,
+          "coupang_eats": 4681170,
+          "other": 1337478
+        },
+        "takeout": {
+          "credit": 7651336,
+          "cash": 2086728,
+          "simple_pay": 4173455
+        }
+      },
+      "deductions": {
+        "customer_refund": 202420,
+        "own_coupon_discount": 1522457
+      },
+      "cogs": {
+        "food_ingredients": 12910409,
+        "sub_materials": 502603,
+        "alcohol": 1834075,
+        "beverage": 919273,
+        "inventory_begin": 4817848,
+        "inventory_end": 4989255
+      },
+      "labor": {
+        "fulltime": 7150527,
+        "parttime": 5243720,
+        "four_major_insurance": 2065708,
+        "meal_welfare": 794503,
+        "short_term": 635603
+      },
+      "variable": {
+        "platform_fee": 1633843,
+        "delivery_agency_fee": 603043,
+        "supplies": 558754,
+        "utilities": 1622466,
+        "marketing_ad": 452528
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 601404
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 259851
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-03",
+      "sales": {
+        "hall": {
+          "credit": 13523339,
+          "cash": 2181184,
+          "simple_pay": 6107315
+        },
+        "delivery": {
+          "baemin": 8934280,
+          "coupang_eats": 5685451,
+          "other": 1624414
+        },
+        "takeout": {
+          "credit": 7750112,
+          "cash": 2113667,
+          "simple_pay": 4227334
+        }
+      },
+      "deductions": {
+        "customer_refund": 232157,
+        "own_coupon_discount": 1640132
+      },
+      "cogs": {
+        "food_ingredients": 14787932,
+        "sub_materials": 475060,
+        "alcohol": 2293602,
+        "beverage": 1395816,
+        "inventory_begin": 4997386,
+        "inventory_end": 4847119
+      },
+      "labor": {
+        "fulltime": 7850155,
+        "parttime": 5756780,
+        "four_major_insurance": 2267823,
+        "meal_welfare": 872239,
+        "short_term": 697792
+      },
+      "variable": {
+        "platform_fee": 1639566,
+        "delivery_agency_fee": 920595,
+        "supplies": 739048,
+        "utilities": 1838196,
+        "marketing_ad": 491998
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 718904
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 354807
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-04",
+      "sales": {
+        "hall": {
+          "credit": 13330142,
+          "cash": 2150023,
+          "simple_pay": 6020065
+        },
+        "delivery": {
+          "baemin": 9180352,
+          "coupang_eats": 5842042,
+          "other": 1669155
+        },
+        "takeout": {
+          "credit": 8788340,
+          "cash": 2396820,
+          "simple_pay": 4793640
+        }
+      },
+      "deductions": {
+        "customer_refund": 327056,
+        "own_coupon_discount": 1964839
+      },
+      "cogs": {
+        "food_ingredients": 15318886,
+        "sub_materials": 604120,
+        "alcohol": 2214824,
+        "beverage": 1443330,
+        "inventory_begin": 5140086,
+        "inventory_end": 5160312
+      },
+      "labor": {
+        "fulltime": 8309759,
+        "parttime": 6093823,
+        "four_major_insurance": 2400597,
+        "meal_welfare": 923307,
+        "short_term": 738646
+      },
+      "variable": {
+        "platform_fee": 1980294,
+        "delivery_agency_fee": 608476,
+        "supplies": 567608,
+        "utilities": 1927304,
+        "marketing_ad": 523884
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 665805
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 282799
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-05",
+      "sales": {
+        "hall": {
+          "credit": 13670879,
+          "cash": 2204980,
+          "simple_pay": 6173946
+        },
+        "delivery": {
+          "baemin": 9380956,
+          "coupang_eats": 5969699,
+          "other": 1705629
+        },
+        "takeout": {
+          "credit": 9328184,
+          "cash": 2544050,
+          "simple_pay": 5088101
+        }
+      },
+      "deductions": {
+        "customer_refund": 345313,
+        "own_coupon_discount": 1940819
+      },
+      "cogs": {
+        "food_ingredients": 15154461,
+        "sub_materials": 471348,
+        "alcohol": 2749879,
+        "beverage": 1620130,
+        "inventory_begin": 5881675,
+        "inventory_end": 5634139
+      },
+      "labor": {
+        "fulltime": 8173496,
+        "parttime": 5993897,
+        "four_major_insurance": 2361232,
+        "meal_welfare": 908166,
+        "short_term": 726534
+      },
+      "variable": {
+        "platform_fee": 1750977,
+        "delivery_agency_fee": 763338,
+        "supplies": 564925,
+        "utilities": 1552200,
+        "marketing_ad": 505980
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 734945
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 203284
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-06",
+      "sales": {
+        "hall": {
+          "credit": 14481668,
+          "cash": 2335753,
+          "simple_pay": 6540107
+        },
+        "delivery": {
+          "baemin": 8915244,
+          "coupang_eats": 5673337,
+          "other": 1620953
+        },
+        "takeout": {
+          "credit": 7633097,
+          "cash": 2081754,
+          "simple_pay": 4163506
+        }
+      },
+      "deductions": {
+        "customer_refund": 177467,
+        "own_coupon_discount": 1904360
+      },
+      "cogs": {
+        "food_ingredients": 13863259,
+        "sub_materials": 480719,
+        "alcohol": 2069317,
+        "beverage": 1540385,
+        "inventory_begin": 4927914,
+        "inventory_end": 5110167
+      },
+      "labor": {
+        "fulltime": 8201794,
+        "parttime": 6014649,
+        "four_major_insurance": 2369407,
+        "meal_welfare": 911310,
+        "short_term": 729050
+      },
+      "variable": {
+        "platform_fee": 1824339,
+        "delivery_agency_fee": 666138,
+        "supplies": 752484,
+        "utilities": 1472797,
+        "marketing_ad": 524144
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 681735
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 317258
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-07",
+      "sales": {
+        "hall": {
+          "credit": 14161992,
+          "cash": 2284192,
+          "simple_pay": 6395738
+        },
+        "delivery": {
+          "baemin": 8227988,
+          "coupang_eats": 5235992,
+          "other": 1495997
+        },
+        "takeout": {
+          "credit": 6323189,
+          "cash": 1724506,
+          "simple_pay": 3449013
+        }
+      },
+      "deductions": {
+        "customer_refund": 295471,
+        "own_coupon_discount": 2106837
+      },
+      "cogs": {
+        "food_ingredients": 12796307,
+        "sub_materials": 642733,
+        "alcohol": 1844576,
+        "beverage": 1420751,
+        "inventory_begin": 5264605,
+        "inventory_end": 5461544
+      },
+      "labor": {
+        "fulltime": 8117416,
+        "parttime": 5952772,
+        "four_major_insurance": 2345031,
+        "meal_welfare": 901935,
+        "short_term": 721548
+      },
+      "variable": {
+        "platform_fee": 1615258,
+        "delivery_agency_fee": 896346,
+        "supplies": 541235,
+        "utilities": 1745785,
+        "marketing_ad": 457701
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 650271
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 366962
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-08",
+      "sales": {
+        "hall": {
+          "credit": 11674116,
+          "cash": 1882922,
+          "simple_pay": 5272182
+        },
+        "delivery": {
+          "baemin": 8378365,
+          "coupang_eats": 5331687,
+          "other": 1523340
+        },
+        "takeout": {
+          "credit": 8275352,
+          "cash": 2256914,
+          "simple_pay": 4513829
+        }
+      },
+      "deductions": {
+        "customer_refund": 166351,
+        "own_coupon_discount": 2150730
+      },
+      "cogs": {
+        "food_ingredients": 12695423,
+        "sub_materials": 657537,
+        "alcohol": 1879929,
+        "beverage": 1439635,
+        "inventory_begin": 5176025,
+        "inventory_end": 5086600
+      },
+      "labor": {
+        "fulltime": 7849393,
+        "parttime": 5756222,
+        "four_major_insurance": 2267603,
+        "meal_welfare": 872155,
+        "short_term": 697723
+      },
+      "variable": {
+        "platform_fee": 1715690,
+        "delivery_agency_fee": 745264,
+        "supplies": 614664,
+        "utilities": 1622955,
+        "marketing_ad": 474469
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 599818
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 367782
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-09",
+      "sales": {
+        "hall": {
+          "credit": 13845618,
+          "cash": 2233164,
+          "simple_pay": 6252859
+        },
+        "delivery": {
+          "baemin": 8007083,
+          "coupang_eats": 5095417,
+          "other": 1455833
+        },
+        "takeout": {
+          "credit": 7253085,
+          "cash": 1978114,
+          "simple_pay": 3956229
+        }
+      },
+      "deductions": {
+        "customer_refund": 360050,
+        "own_coupon_discount": 2281218
+      },
+      "cogs": {
+        "food_ingredients": 13557507,
+        "sub_materials": 453495,
+        "alcohol": 2419421,
+        "beverage": 1316191,
+        "inventory_begin": 5265449,
+        "inventory_end": 5279900
+      },
+      "labor": {
+        "fulltime": 8017544,
+        "parttime": 5879532,
+        "four_major_insurance": 2316179,
+        "meal_welfare": 890838,
+        "short_term": 712671
+      },
+      "variable": {
+        "platform_fee": 1705420,
+        "delivery_agency_fee": 604497,
+        "supplies": 615804,
+        "utilities": 1408732,
+        "marketing_ad": 439469
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 598952
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 363489
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-10",
+      "sales": {
+        "hall": {
+          "credit": 13202395,
+          "cash": 2129419,
+          "simple_pay": 5962372
+        },
+        "delivery": {
+          "baemin": 8312654,
+          "coupang_eats": 5289871,
+          "other": 1511391
+        },
+        "takeout": {
+          "credit": 7787486,
+          "cash": 2123860,
+          "simple_pay": 4247720
+        }
+      },
+      "deductions": {
+        "customer_refund": 379923,
+        "own_coupon_discount": 1983789
+      },
+      "cogs": {
+        "food_ingredients": 14239704,
+        "sub_materials": 602435,
+        "alcohol": 1843892,
+        "beverage": 1178820,
+        "inventory_begin": 5723995,
+        "inventory_end": 5923215
+      },
+      "labor": {
+        "fulltime": 8578203,
+        "parttime": 6290682,
+        "four_major_insurance": 2478148,
+        "meal_welfare": 953134,
+        "short_term": 762507
+      },
+      "variable": {
+        "platform_fee": 1884086,
+        "delivery_agency_fee": 792945,
+        "supplies": 600353,
+        "utilities": 1548311,
+        "marketing_ad": 479093
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 603731
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 220710
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-11",
+      "sales": {
+        "hall": {
+          "credit": 13296814,
+          "cash": 2144647,
+          "simple_pay": 6005013
+        },
+        "delivery": {
+          "baemin": 8277652,
+          "coupang_eats": 5267597,
+          "other": 1505028
+        },
+        "takeout": {
+          "credit": 8563445,
+          "cash": 2335485,
+          "simple_pay": 4670970
+        }
+      },
+      "deductions": {
+        "customer_refund": 212028,
+        "own_coupon_discount": 2434080
+      },
+      "cogs": {
+        "food_ingredients": 13746912,
+        "sub_materials": 500483,
+        "alcohol": 2344027,
+        "beverage": 1567591,
+        "inventory_begin": 4614638,
+        "inventory_end": 4407133
+      },
+      "labor": {
+        "fulltime": 8904435,
+        "parttime": 6529919,
+        "four_major_insurance": 2572392,
+        "meal_welfare": 989382,
+        "short_term": 791505
+      },
+      "variable": {
+        "platform_fee": 1556483,
+        "delivery_agency_fee": 759159,
+        "supplies": 781338,
+        "utilities": 1937029,
+        "marketing_ad": 460843
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 719287
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 307145
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2025-12",
+      "sales": {
+        "hall": {
+          "credit": 13272584,
+          "cash": 2140739,
+          "simple_pay": 5994071
+        },
+        "delivery": {
+          "baemin": 9190147,
+          "coupang_eats": 5848275,
+          "other": 1670936
+        },
+        "takeout": {
+          "credit": 8601321,
+          "cash": 2345815,
+          "simple_pay": 4691629
+        }
+      },
+      "deductions": {
+        "customer_refund": 346806,
+        "own_coupon_discount": 2448155
+      },
+      "cogs": {
+        "food_ingredients": 15124837,
+        "sub_materials": 577405,
+        "alcohol": 2464972,
+        "beverage": 1236210,
+        "inventory_begin": 5862910,
+        "inventory_end": 6163636
+      },
+      "labor": {
+        "fulltime": 8782939,
+        "parttime": 6440822,
+        "four_major_insurance": 2537293,
+        "meal_welfare": 975882,
+        "short_term": 780706
+      },
+      "variable": {
+        "platform_fee": 2061537,
+        "delivery_agency_fee": 883377,
+        "supplies": 559609,
+        "utilities": 1904834,
+        "marketing_ad": 470934
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 723797
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 205671
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2026-01",
+      "sales": {
+        "hall": {
+          "credit": 13422655,
+          "cash": 2164944,
+          "simple_pay": 6061844
+        },
+        "delivery": {
+          "baemin": 7355282,
+          "coupang_eats": 4680634,
+          "other": 1337324
+        },
+        "takeout": {
+          "credit": 6000520,
+          "cash": 1636506,
+          "simple_pay": 3273011
+        }
+      },
+      "deductions": {
+        "customer_refund": 289444,
+        "own_coupon_discount": 2009406
+      },
+      "cogs": {
+        "food_ingredients": 12671234,
+        "sub_materials": 595159,
+        "alcohol": 2222310,
+        "beverage": 1066556,
+        "inventory_begin": 4467058,
+        "inventory_end": 4340627
+      },
+      "labor": {
+        "fulltime": 8263194,
+        "parttime": 6059675,
+        "four_major_insurance": 2387145,
+        "meal_welfare": 918133,
+        "short_term": 734506
+      },
+      "variable": {
+        "platform_fee": 1363176,
+        "delivery_agency_fee": 635646,
+        "supplies": 493170,
+        "utilities": 1418595,
+        "marketing_ad": 466943
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 626507
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 346640
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2026-02",
+      "sales": {
+        "hall": {
+          "credit": 13513085,
+          "cash": 2179530,
+          "simple_pay": 6102684
+        },
+        "delivery": {
+          "baemin": 7388214,
+          "coupang_eats": 4701591,
+          "other": 1343312
+        },
+        "takeout": {
+          "credit": 6146290,
+          "cash": 1676261,
+          "simple_pay": 3352522
+        }
+      },
+      "deductions": {
+        "customer_refund": 283490,
+        "own_coupon_discount": 2139397
+      },
+      "cogs": {
+        "food_ingredients": 11696424,
+        "sub_materials": 469743,
+        "alcohol": 1703104,
+        "beverage": 1045710,
+        "inventory_begin": 4631919,
+        "inventory_end": 4413150
+      },
+      "labor": {
+        "fulltime": 8440110,
+        "parttime": 6189414,
+        "four_major_insurance": 2438254,
+        "meal_welfare": 937790,
+        "short_term": 750232
+      },
+      "variable": {
+        "platform_fee": 1551262,
+        "delivery_agency_fee": 522766,
+        "supplies": 634929,
+        "utilities": 1324941,
+        "marketing_ad": 475239
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 582546
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 293602
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    },
+    {
+      "month": "2026-03",
+      "sales": {
+        "hall": {
+          "credit": 13603231,
+          "cash": 2194070,
+          "simple_pay": 6143395
+        },
+        "delivery": {
+          "baemin": 8614841,
+          "coupang_eats": 5482171,
+          "other": 1566335
+        },
+        "takeout": {
+          "credit": 7979220,
+          "cash": 2176151,
+          "simple_pay": 4352301
+        }
+      },
+      "deductions": {
+        "customer_refund": 388831,
+        "own_coupon_discount": 2742256
+      },
+      "cogs": {
+        "food_ingredients": 14014918,
+        "sub_materials": 411774,
+        "alcohol": 2216668,
+        "beverage": 1328420,
+        "inventory_begin": 4638163,
+        "inventory_end": 4706800
+      },
+      "labor": {
+        "fulltime": 9097250,
+        "parttime": 6671317,
+        "four_major_insurance": 2628094,
+        "meal_welfare": 1010806,
+        "short_term": 808644
+      },
+      "variable": {
+        "platform_fee": 1899849,
+        "delivery_agency_fee": 807988,
+        "supplies": 550781,
+        "utilities": 1563838,
+        "marketing_ad": 476831
+      },
+      "opex": {
+        "rent_mgmt": 5300000,
+        "equipment_rental": 450000,
+        "telecom_it": 220000,
+        "tax_bookkeeping": 280000,
+        "insurance": 200000,
+        "card_fee": 657135
+      },
+      "finance": {
+        "loan_interest": 0,
+        "other_misc": 241462
+      },
+      "sales_source": "synthetic_pos",
+      "cost_source": "synthetic_self_reported"
+    }
+  ],
+  "reviews": {
+    "source": "synthetic_reviews",
+    "records": [
+      {
+        "review_id": "demo-br-08-rv-0035",
+        "branch_id": "demo-br-08",
+        "written_at": "2024-07-26",
+        "rating": 4,
+        "text": "사장님이 친절하시고 매장도 깨끗합니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0002",
+        "branch_id": "demo-br-08",
+        "written_at": "2024-08-16",
+        "rating": 2,
+        "text": "가격을 올리면서 서비스는 오히려 나빠졌습니다.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0006",
+        "branch_id": "demo-br-08",
+        "written_at": "2024-09-28",
+        "rating": 5,
+        "text": "사장님이 친절하시고 매장도 깨끗합니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0009",
+        "branch_id": "demo-br-08",
+        "written_at": "2024-10-03",
+        "rating": 5,
+        "text": "재료가 신선하고 간이 딱 맞습니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0020",
+        "branch_id": "demo-br-08",
+        "written_at": "2024-10-13",
+        "rating": 5,
+        "text": "음식이 정갈하고 맛있어요. 재방문 의사 있습니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0033",
+        "branch_id": "demo-br-08",
+        "written_at": "2024-11-20",
+        "rating": 5,
+        "text": "사장님이 친절하시고 매장도 깨끗합니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0023",
+        "branch_id": "demo-br-08",
+        "written_at": "2024-12-20",
+        "rating": 4,
+        "text": "분위기가 좋아서 모임 장소로 괜찮아요.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0024",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-02-14",
+        "rating": 4,
+        "text": "재료가 신선하고 간이 딱 맞습니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0018",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-03-05",
+        "rating": 4,
+        "text": "포장 상태가 꼼꼼하고 국물도 안 샜어요.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0030",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-03-14",
+        "rating": 1,
+        "text": "음식이 식어서 나왔고 맛도 예전만 못하네요.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0026",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-04-13",
+        "rating": 5,
+        "text": "음식이 정갈하고 맛있어요. 재방문 의사 있습니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0010",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-05-06",
+        "rating": 2,
+        "text": "재료가 신선하지 않은 느낌이었어요. 다시는 안 갈 것 같아요.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0007",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-05-16",
+        "rating": 3,
+        "text": "점심시간엔 사람이 많아 조금 기다렸어요.",
+        "sentiment_label": "중립"
+      },
+      {
+        "review_id": "demo-br-08-rv-0019",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-05-31",
+        "rating": 4,
+        "text": "가성비 좋고 양도 넉넉해서 만족스러웠어요.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0029",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-06-25",
+        "rating": 3,
+        "text": "무난합니다. 특별하진 않지만 나쁘지도 않아요.",
+        "sentiment_label": "중립"
+      },
+      {
+        "review_id": "demo-br-08-rv-0027",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-07-20",
+        "rating": 2,
+        "text": "배달이 한 시간 넘게 걸렸고 메뉴도 하나 누락됐어요.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0014",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-09-03",
+        "rating": 2,
+        "text": "배달이 한 시간 넘게 걸렸고 메뉴도 하나 누락됐어요.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0005",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-09-16",
+        "rating": 2,
+        "text": "예전보다 양이 확 줄었어요. 가격은 그대로인데 아쉽습니다.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0032",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-09-17",
+        "rating": 3,
+        "text": "위치는 찾기 쉬운데 주차가 조금 불편해요.",
+        "sentiment_label": "중립"
+      },
+      {
+        "review_id": "demo-br-08-rv-0004",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-10-03",
+        "rating": 2,
+        "text": "예전보다 양이 확 줄었어요. 가격은 그대로인데 아쉽습니다.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0008",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-10-04",
+        "rating": 4,
+        "text": "가성비 좋고 양도 넉넉해서 만족스러웠어요.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0016",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-10-06",
+        "rating": 5,
+        "text": "가격 대비 퀄리티가 높습니다. 추천해요.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0012",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-10-24",
+        "rating": 5,
+        "text": "가성비 좋고 양도 넉넉해서 만족스러웠어요.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0034",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-11-07",
+        "rating": 5,
+        "text": "가성비 좋고 양도 넉넉해서 만족스러웠어요.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0003",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-11-10",
+        "rating": 4,
+        "text": "직원분들이 응대를 잘해주셔서 기분 좋게 먹었습니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0001",
+        "branch_id": "demo-br-08",
+        "written_at": "2025-12-03",
+        "rating": 2,
+        "text": "배달이 한 시간 넘게 걸렸고 메뉴도 하나 누락됐어요.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0031",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-01-24",
+        "rating": 5,
+        "text": "음식이 정갈하고 맛있어요. 재방문 의사 있습니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0022",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-02-06",
+        "rating": 2,
+        "text": "대기 시간이 너무 길고 직원이 부족해 보였어요.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0017",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-02-09",
+        "rating": 3,
+        "text": "위치는 찾기 쉬운데 주차가 조금 불편해요.",
+        "sentiment_label": "중립"
+      },
+      {
+        "review_id": "demo-br-08-rv-0036",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-02-09",
+        "rating": 5,
+        "text": "사장님이 친절하시고 매장도 깨끗합니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0011",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-02-13",
+        "rating": 3,
+        "text": "무난합니다. 특별하진 않지만 나쁘지도 않아요.",
+        "sentiment_label": "중립"
+      },
+      {
+        "review_id": "demo-br-08-rv-0015",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-02-18",
+        "rating": 4,
+        "text": "분위기가 좋아서 모임 장소로 괜찮아요.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0013",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-02-20",
+        "rating": 4,
+        "text": "음식이 정갈하고 맛있어요. 재방문 의사 있습니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0037",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-03-07",
+        "rating": 5,
+        "text": "직원분들이 응대를 잘해주셔서 기분 좋게 먹었습니다.",
+        "sentiment_label": "긍정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0028",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-03-13",
+        "rating": 2,
+        "text": "쿠폰 할인 받아도 예전 정가보다 비싸게 느껴집니다.",
+        "sentiment_label": "부정"
+      },
+      {
+        "review_id": "demo-br-08-rv-0021",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-03-19",
+        "rating": 3,
+        "text": "맛은 평범하고 가격은 적당한 편입니다.",
+        "sentiment_label": "중립"
+      },
+      {
+        "review_id": "demo-br-08-rv-0025",
+        "branch_id": "demo-br-08",
+        "written_at": "2026-03-21",
+        "rating": 1,
+        "text": "주문이 자꾸 잘못 나와요. 관리가 안 되는 느낌입니다.",
+        "sentiment_label": "부정"
+      }
+    ]
+  }
+}
