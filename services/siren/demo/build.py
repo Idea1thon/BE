@@ -1,7 +1,7 @@
 """데모 전체 파이프라인 실행.
 
-  python -m service.siren.demo.build            # 전체 생성 + 실행
-  python -m service.siren.demo.build --reuse    # 기존 market_baseline.json 재사용
+  python -m services.siren.demo.build            # 전체 생성 + 실행
+  python -m services.siren.demo.build --reuse    # 기존 market_baseline.json 재사용
 
 산출: artifacts/risk-siren/demo/{market_baseline.json, branch_reports/, requests/,
       results/, timeline/, hq_summary.json, SUMMARY.md}

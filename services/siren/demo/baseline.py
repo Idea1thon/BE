@@ -17,8 +17,8 @@ from .seoul_data import (
     load_trade_area_meta,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-OUT_DIR = REPO_ROOT / "artifacts/risk-siren/demo"
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+OUT_DIR = SERVICE_ROOT / "artifacts/risk-siren/demo"
 
 TARGET_GU = {
     "강남구", "서초구", "마포구", "송파구", "종로구",

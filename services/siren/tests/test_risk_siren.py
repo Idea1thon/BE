@@ -6,10 +6,10 @@ from datetime import date
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from service.siren.api import analyze_risk, hq_summary
-from service.siren.hq_summary import summarize
-from service.siren.models import HqSummaryRequest, RiskSirenRequest
-from service.siren.pipeline import analyze
+from services.siren.api import analyze_risk, hq_summary
+from services.siren.hq_summary import summarize
+from services.siren.models import HqSummaryRequest, RiskSirenRequest
+from services.siren.pipeline import analyze
 
 
 # --------------------------------------------------------------------------- #
