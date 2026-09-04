@@ -29,7 +29,8 @@ def _load() -> dict:
 
 
 def _save(data: dict) -> None:
-    tmp = BUDGET_FILE + ".tmp"
+    # 프로세스별 고유 tmp — 동시에 여러 이식 스크립트가 돌 때 os.replace 경쟁 방지
+    tmp = f"{BUDGET_FILE}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
     os.replace(tmp, BUDGET_FILE)

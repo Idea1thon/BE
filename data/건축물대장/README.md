@@ -47,8 +47,57 @@
   전유부 호실 없음. 호실·층별 용도·주차대수는 Tier 2 필요.
 - footprint 중심좌표이며 정확한 도로명주소 호수·출입구 위치가 아니다.
 
-## Tier 2 (미착수) — 건축HUB API
+## Tier 2 (송파구 파일럿 완료, 2026-09-04~05) — 건축HUB 건축물대장 API
 
-층별 용도·전유부 호실·주차대수 → [공공데이터포털 15134735](https://www.data.go.kr/data/15134735/openapi.do)
-(`DATA_GO_KR_SERVICE_KEY`, 자동승인, 개발계정 일 10,000회). 서울 법정동(~467) 순회.
-파일럿 1개 자치구부터. 착수 시 이 README와 `manifest.json`에 Tier 2 산출을 추가한다.
+층별 용도·전유부 호실·주차대수·**도로명주소**를 REAL로 채운다.
+
+- 원천: 국토교통부 건축HUB 건축물대장정보 서비스 (공공데이터포털 [15134735](https://www.data.go.kr/data/15134735/openapi.do),
+  endpoint `BldRgstHubService`). `DATA_GO_KR_SERVICE_KEY` 공용, 자동승인, 상세기능당 일 10,000회.
+- 스크립트: [`scripts/ingest_building_register.py`](../../scripts/ingest_building_register.py) +
+  공통 클라이언트 [`scripts/datago_hub.py`](../../scripts/datago_hub.py)
+- 사용 엔드포인트: `getBrTitleInfo`(표제부) · `getBrFlrOulnInfo`(층별개요). `getBrExposInfo`/`getBrExposPubuseAreaInfo`
+  (전유부·호실)은 `--with-units`로 선택 실행 — 잠실동만 4만+ 레코드라 무겁다.
+- 법정동 코드는 Tier 1 산출물(`상가건물_서울.csv`)에서 자치구별로 추출.
+
+### 산출 (`api/` 하위, 자치구별 파일)
+
+| 파일 | 내용 |
+| --- | --- |
+| `표제부_{구}.csv` | mgmBldrgstPk 단위: 지번주소·**도로명주소**·주용도·건폐율·용적률·연면적·구조·지상/지하층수·**승강기·주차 유형별 대수**·사용승인일 |
+| `층별용도_{구}.csv` | (건물,층) 단위 상업 용도·면적 — 표제부 주용도가 비상업이어도 층별로 상업 용도가 있으면 포함(주상복합 저층상가 포착) |
+| `건물링크_{구}.csv` | Tier 1 PNU ↔ mgmBldrgstPk ↔ **도로명주소** |
+| `manifest_{구}.json` | 범위·건수·Tier1 매칭률·미완료 법정동·한계 |
+
+### 커버리지 (송파구 전체 13개 법정동, 2026-09-05)
+
+- 표제부 23,360동 (상업 주용도 5,196) · 상업 층 46,290행 (**8,727개 건물**에 상업 층 존재 —
+  표제부 주용도 상업 5,196보다 3,531개 많음 = 주상복합 등 Tier 1이 놓친 저층상가)
+- **Tier 1 상업건물 4,653동 중 96.8% 매칭**(4,506동 — 지번 정확매칭 4,501 + 본번 fallback 5).
+  건축인허가(Tier 2 대안, 아래) 61%보다 대폭 높음 — 건축물대장은 *현행 등록 상태*라 오래된 건물도 포함
+- 미매칭 3.2%는 대형 소비 필지(아파트 단지 등, 본번 다건 귀속)로 추정
+
+### 재생성 / 확대
+
+```bash
+.venv/bin/python3 scripts/ingest_building_register.py --sigungu 송파구
+# 다른 자치구:
+.venv/bin/python3 scripts/ingest_building_register.py --sigungu 강남구
+# 전유부 호실까지(무거움):
+.venv/bin/python3 scripts/ingest_building_register.py --sigungu 송파구 --with-units
+```
+
+법정동 하나가 API 오류로 실패해도 나머지는 계속 진행하고 `manifest_{구}.json.scope.failed_dongs`에
+기록한다. 같은 명령을 재실행하면 완료된 법정동은 `data/건축물대장/_cache/`(`.gitignore`)로 건너뛴다.
+
+### 대안 소스로 시도했던 것 — 건축HUB 건축인허가 API (`ArchPmsHubService`)
+
+`scripts/ingest_building_permit.py`로 먼저 시도했으나 **허가 시점 데이터라 전산화 이전
+건물 레코드가 없어 Tier1 매칭률이 61%에 그쳤다**(잠실·신천 2개 법정동, `data/건축인허가/`,
+미커밋·부분 실행). 건축물대장 API가 확보된 뒤로는 그쪽을 정본으로 쓰고, 건축인허가는
+주차 상세·허가 이력의 보조 후보로만 남긴다.
+
+### 한계 (Tier 2 공통)
+
+- 대형 필지(아파트 단지 등)는 여러 동/허가가 본번에 뭉쳐 있어 PNU 정확매칭이 안 될 수 있음
+- 임대료·보증금·권리금·공실·매물 여부는 **여전히 없음** — 이 API로 생성 불가
+- `--with-units` 없이는 호실(전유부) 단위가 아니라 건물·층 단위

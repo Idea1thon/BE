@@ -9,7 +9,7 @@ __pycache__/
 
 # API 월 호출 예산 카운터 (로컬 상태)
 .api_budget.json
-.api_budget.json.tmp
+.api_budget.json*.tmp
 
 # 서울 생활인구 원천 월별 파일 (행정동×일×시간대, 대용량) — 집계본만 커밋
 LONG_FOREIGNER_DONG_*.csv
@@ -57,6 +57,10 @@ GIS건물통합정보*/
 
 # 건축물대장(GIS건물통합정보 파생) 건물 단위 파일 39MB — 요약·manifest·README 만 커밋, 원천에서 재생성
 data/건축물대장/상가건물_서울.csv
+
+# 건축HUB API(건축인허가·건축물대장) 원시 응답 캐시 (재수집 가능) — 정규화 CSV·manifest 만 커밋
+data/건축인허가/_cache/
+data/건축물대장/_cache/
 
 
 # macOS
