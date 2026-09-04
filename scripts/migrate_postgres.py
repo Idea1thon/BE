@@ -240,6 +240,8 @@ def source_type_for(path: Path) -> str:
         return "observed_news_metadata"
     if rel.startswith("data/카카오POI/"):
         return "observed_poi_snapshot"
+    if rel.startswith("data/건축물대장/"):
+        return "derived"
     if rel.endswith(".json") or rel.endswith(".jsonl"):
         return "official_api_snapshot"
     return "official_file"

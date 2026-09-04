@@ -1,0 +1,64 @@
+{
+  "source": {
+    "name": "국토교통부 GIS건물통합정보 (공공데이터포털 15083092) 서울 추출본",
+    "file": "AL_D010_11_20260809.shp",
+    "snapshot": "20260809",
+    "crs_src": "EPSG:5186",
+    "encoding": "cp949"
+  },
+  "generated_at": "2026-09-04",
+  "filter": {
+    "use_codes": [
+      "03000",
+      "04000",
+      "07000",
+      "Z3000",
+      "Z6000"
+    ],
+    "use_groups": {
+      "03000": "근린생활1",
+      "04000": "근린생활2",
+      "07000": "판매시설",
+      "Z3000": "근린생활",
+      "Z6000": "판매영업"
+    },
+    "include_secondary": false,
+    "note": "GIS건물통합정보의 건물 주용도(A8) 기준. 층별 용도·전유부 호실·주차·공실·임대료 없음."
+  },
+  "counts": {
+    "gis_records": 695761,
+    "commercial_buildings": 115141,
+    "geom_errors": 0,
+    "trdar_inside": 92527,
+    "trdar_near_150m": 19091,
+    "trdar_outside": 3523,
+    "trdar_covered": 1622
+  },
+  "distributions": {
+    "building_age_year": {
+      "n": 109188,
+      "min": 0,
+      "median": 37.0,
+      "p90": 57.0,
+      "max": 116
+    },
+    "gfa_m2": {
+      "n": 114964,
+      "min": 0.8,
+      "median": 397.6,
+      "p90": 1174.5,
+      "max": 340913.8
+    }
+  },
+  "outputs": {
+    "building_level": "data/건축물대장/상가건물_서울.csv (gitignore)",
+    "trdar_summary": "data/건축물대장/상권_상가건물_요약.csv"
+  },
+  "limitations": [
+    "건물 주용도 기준 — 주상복합 등 주용도가 비상업인 건물의 저층 상가 누락",
+    "GIS건물통합정보는 집합건물(구분상가)을 일반건물과 구분하지 않음 — 건물당 footprint 1개, 전유부 호실 없음",
+    "footprint 중심좌표이며 개별 호실·매물 위치 아님",
+    "사용승인일 결측 건물 존재 → 건물연식 일부 공란",
+    "상권 폴리곤 밖(서울 면적의 ~73%) 건물은 상권 미결합"
+  ]
+}

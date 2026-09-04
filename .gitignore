@@ -55,6 +55,9 @@ AL_D010_*.prj
 AL_D010_*.fix
 GIS건물통합정보*/
 
+# 건축물대장(GIS건물통합정보 파생) 건물 단위 파일 39MB — 요약·manifest·README 만 커밋, 원천에서 재생성
+data/건축물대장/상가건물_서울.csv
+
 
 # macOS
 .DS_Store

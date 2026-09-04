@@ -9,8 +9,12 @@
   .venv/bin/python3 scripts/migrate_postgres_context.py --phase crosswalks
   .venv/bin/python3 scripts/migrate_postgres_context.py --phase anchors
   .venv/bin/python3 scripts/migrate_postgres_context.py --phase context
+  .venv/bin/python3 scripts/migrate_postgres_context.py --phase building
   .venv/bin/python3 scripts/migrate_postgres_context.py --phase evidence
   .venv/bin/python3 scripts/migrate_postgres_context.py --phase all
+
+building 단계는 db/002_commercial_building.sql 적용과
+scripts/ingest_building_ledger.py 실행(→ data/건축물대장/상가건물_서울.csv)을 선행한다.
 """
 from __future__ import annotations
 
@@ -30,8 +34,11 @@ from migrate_postgres import (  # noqa: E402
     TARGET_INDUSTRIES,
     copy_into,
     csv_rows,
+    date_value,
     file_id,
+    integer,
     number,
+    point_wkt,
     psql_args,
     psql_env,
     run_sql,
@@ -830,9 +837,81 @@ ON CONFLICT (run_id, candidate_id) DO UPDATE SET
           "candidates:", copy_into(candidate_sql, candidates))
 
 
+def _building_snapshot() -> str:
+    manifest = DATA / "건축물대장" / "manifest.json"
+    if manifest.is_file():
+        try:
+            return str(json.loads(manifest.read_text(encoding="utf-8"))["source"]["snapshot"])
+        except (KeyError, ValueError):
+            pass
+    return "unknown"
+
+
+def commercial_building_rows() -> Iterator[list[Any]]:
+    path = DATA / "건축물대장" / "상가건물_서울.csv"
+    if not path.is_file():
+        raise RuntimeError(f"{path} 없음 — scripts/ingest_building_ledger.py 를 먼저 실행하세요")
+    snapshot = _building_snapshot()
+    source_id = file_id(path.relative_to(ROOT).as_posix())
+    for row in csv_rows(path)[2]:
+        area_code = scalar(row.get("상권_코드"))
+        join = scalar(row.get("상권_결합")) or "미결합"
+        yield [
+            scalar(row.get("건물관리번호")), snapshot,
+            scalar(row.get("PNU")), scalar(row.get("시군구코드")), scalar(row.get("시군구명")),
+            scalar(row.get("법정동코드")), scalar(row.get("대지위치")), scalar(row.get("지번")),
+            scalar(row.get("지번구분")), scalar(row.get("용도코드")), scalar(row.get("용도명")),
+            scalar(row.get("용도군")), integer(row.get("지상층수")), integer(row.get("지하층수")),
+            number(row.get("건축면적_㎡")), number(row.get("연면적_㎡")),
+            number(row.get("건폐율_pct")), number(row.get("용적률_pct")), number(row.get("높이_m")),
+            scalar(row.get("구조")), date_value(row.get("사용승인일")), integer(row.get("건물연식_년")),
+            number(row.get("footprint_㎡")), point_wkt(row.get("x_5181"), row.get("y_5181")),
+            number(row.get("경도")), number(row.get("위도")),
+            f"commercial_area:{area_code}" if area_code and join != "미결합" else None,
+            join, scalar(row.get("행정동_코드")), scalar(row.get("행정동_명")), source_id,
+        ]
+
+
+def load_commercial_building() -> None:
+    sql = """
+CREATE TEMP TABLE _stage_cb (
+    building_pk text, snapshot text, pnu text, sigungu_code text, sigungu_name text,
+    legal_dong_code text, lot_address text, lot_number text, lot_kind text,
+    use_code text, use_name text, use_group text, floors_above integer, floors_below integer,
+    building_area_m2 numeric, gross_floor_area_m2 numeric, building_coverage_pct numeric,
+    floor_area_ratio_pct numeric, height_m numeric, structure text, approval_date date,
+    building_age_years integer, footprint_m2 numeric, point_wkt text, lon numeric, lat numeric,
+    host_area_id text, area_join_type text, admin_dong_code text, admin_dong_name text,
+    source_file_id bigint
+);
+COPY _stage_cb FROM STDIN WITH (FORMAT csv, NULL '\\N');
+DELETE FROM context.commercial_building b
+USING (SELECT DISTINCT snapshot FROM _stage_cb) s
+WHERE b.snapshot = s.snapshot;
+INSERT INTO context.commercial_building
+    (building_pk, snapshot, pnu, sigungu_code, sigungu_name, legal_dong_code, lot_address,
+     lot_number, lot_kind, use_code, use_name, use_group, floors_above, floors_below,
+     building_area_m2, gross_floor_area_m2, building_coverage_pct, floor_area_ratio_pct,
+     height_m, structure, approval_date, building_age_years, footprint_m2, point, lon, lat,
+     host_area_id, area_join_type, admin_dong_code, admin_dong_name, source_file_id)
+SELECT building_pk, snapshot, pnu, sigungu_code, sigungu_name, legal_dong_code, lot_address,
+       lot_number, lot_kind, use_code, use_name, use_group, floors_above, floors_below,
+       building_area_m2, gross_floor_area_m2, building_coverage_pct, floor_area_ratio_pct,
+       height_m, structure, approval_date, building_age_years, footprint_m2,
+       CASE WHEN point_wkt IS NULL THEN NULL ELSE ST_GeomFromText(point_wkt, 5181) END,
+       lon, lat, host_area_id, area_join_type, admin_dong_code, admin_dong_name, source_file_id
+FROM (SELECT DISTINCT ON (building_pk, snapshot) * FROM _stage_cb
+      ORDER BY building_pk, snapshot) d
+ON CONFLICT (building_pk, snapshot) DO NOTHING;
+"""
+    print("commercial_building:", copy_into(sql, commercial_building_rows()))
+    run_sql("REFRESH MATERIALIZED VIEW context.commercial_building_area_summary;")
+    print("commercial_building_area_summary refreshed")
+
+
 def main() -> int:
     parser = __import__("argparse").ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=("crosswalks", "anchors", "context", "plans", "evidence", "all"), required=True)
+    parser.add_argument("--phase", choices=("crosswalks", "anchors", "context", "plans", "building", "evidence", "all"), required=True)
     args = parser.parse_args()
     try:
         if args.phase in {"crosswalks", "all"}:
@@ -845,6 +924,8 @@ def main() -> int:
             load_metrics()
         if args.phase in {"context", "plans", "all"}:
             load_plans()
+        if args.phase in {"building", "all"}:
+            load_commercial_building()
         if args.phase in {"context", "all"}:
             load_news()
             load_news_manifest()

@@ -77,6 +77,7 @@ evidence   : 추천 실행·후보·RAG Evidence 원문 JSON
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/001_location_schema.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/002_commercial_building.sql   # 건축물대장 상업용 건물 (context)
 ```
 
 그 다음 `scripts/migrate_postgres.py --phase metadata`로 `data/`와 `output/crosswalks/`의 파일별 상대경로, 원천 출처, encoding, SHA-256, manifest를 등록한다.
@@ -97,6 +98,11 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/001_location_schema.sql
 ### 3단계: 보조 데이터 이식 — 완료(초기 범위)
 
 상주·직장인구, 외국인 생활인구, 고용률, 임대료·R-ONE, 도시계획, POI, 네이버 트렌드, BigKinds·네이버 뉴스 snapshot을 `context`에 이식했다. 실행 스크립트는 [`scripts/migrate_postgres_context.py`](../scripts/migrate_postgres_context.py)다.
+
+건축물대장(GIS건물통합정보 파생) 상업용 건물 115,141동은 `context.commercial_building`에,
+상권 × 스냅샷 요약은 materialized view `context.commercial_building_area_summary`에 적재한다.
+`--phase building`은 `db/002_commercial_building.sql` 적용과 `scripts/ingest_building_ledger.py`
+실행(→ `data/건축물대장/상가건물_서울.csv`)을 선행한다. 건물 주용도 기준이며 매물·공실·임대료가 아니다.
 
 이 데이터들은 모두 같은 분기 테이블로 취급하지 않는다.
 
@@ -149,6 +155,8 @@ POSTGRES_SSLMODE=prefer
 .venv/bin/python3 scripts/migrate_postgres_context.py --phase crosswalks
 .venv/bin/python3 scripts/migrate_postgres_context.py --phase anchors
 .venv/bin/python3 scripts/migrate_postgres_context.py --phase context
+.venv/bin/python3 scripts/ingest_building_ledger.py
+.venv/bin/python3 scripts/migrate_postgres_context.py --phase building
 .venv/bin/python3 scripts/migrate_postgres_context.py --phase evidence
 ```
 
