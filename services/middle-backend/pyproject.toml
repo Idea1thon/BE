@@ -1,0 +1,30 @@
+[project]
+name = "fmp-backend"
+version = "0.1.0"
+description = "중소 프랜차이즈 운영 지원 서비스 — Backend API"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "sqlalchemy[asyncio]==2.0.36",
+    "asyncpg==0.30.0",
+    "alembic==1.14.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "pyjwt==2.10.1",
+    "bcrypt==4.2.1",
+    "httpx==0.28.1",
+    "email-validator==2.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "greenlet==3.1.1",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
