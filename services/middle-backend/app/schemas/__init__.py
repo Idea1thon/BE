@@ -159,6 +159,8 @@ class NotificationItem(BaseModel):
 
 class NotificationListResponse(BaseModel):
     unread_count: int
+    # 다음 페이지가 있을 때만 채워진다. 그대로 `cursor` 쿼리에 실어 보낸다.
+    next_cursor: str | None = None
     items: list[NotificationItem]
 
 
