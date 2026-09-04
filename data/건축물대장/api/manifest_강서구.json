@@ -8,25 +8,25 @@
   },
   "generated_at": "2026-09-05",
   "scope": {
-    "sigungu": "송파구",
+    "sigungu": "강서구",
     "bjdong_count": 13,
     "failed_dongs": [],
     "budget_exhausted": false,
     "complete": true
   },
   "counts": {
-    "title": 23360,
-    "commercial_titles": 5196,
+    "title": 24295,
+    "commercial_titles": 4543,
     "commercial_floors": 0,
     "buildings_with_commercial_floor": 0,
     "expos_units": null
   },
   "tier1_link": {
-    "tier1_commercial_pnu": 4653,
-    "matched_pnu": 4505,
-    "by_jibun": 4500,
+    "tier1_commercial_pnu": 3911,
+    "matched_pnu": 3718,
+    "by_jibun": 3713,
     "by_bonbun": 5,
-    "match_rate": 0.968
+    "match_rate": 0.951
   },
   "commercial_filter": {
     "03": "근린생활1",

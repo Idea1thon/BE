@@ -8,25 +8,25 @@
   },
   "generated_at": "2026-09-05",
   "scope": {
-    "sigungu": "송파구",
-    "bjdong_count": 13,
+    "sigungu": "성북구",
+    "bjdong_count": 39,
     "failed_dongs": [],
     "budget_exhausted": false,
     "complete": true
   },
   "counts": {
-    "title": 23360,
-    "commercial_titles": 5196,
+    "title": 32594,
+    "commercial_titles": 5805,
     "commercial_floors": 0,
     "buildings_with_commercial_floor": 0,
     "expos_units": null
   },
   "tier1_link": {
-    "tier1_commercial_pnu": 4653,
-    "matched_pnu": 4505,
-    "by_jibun": 4500,
-    "by_bonbun": 5,
-    "match_rate": 0.968
+    "tier1_commercial_pnu": 5235,
+    "matched_pnu": 5033,
+    "by_jibun": 5027,
+    "by_bonbun": 6,
+    "match_rate": 0.961
   },
   "commercial_filter": {
     "03": "근린생활1",
@@ -34,7 +34,7 @@
     "07": "판매시설",
     "14": "업무시설"
   },
-  "budget": "bldrgst:getBrTitleInfo 일 2026-09-05: 3548/9000 (남은 5452) | 월 2026-09: 3737/279000 (남은 275263)",
+  "budget": "bldrgst:getBrTitleInfo 일 2026-09-05: 5410/9000 (남은 3590) | 월 2026-09: 5599/279000 (남은 273401)",
   "limitations": [
     "표제부 주용도 기준 상업 필터 + 층별개요로 주상복합 저층상가 일부 포착",
     "대형 필지(아파트단지 등)는 bun-본번 집계라 PNU 정확매칭 안 될 수 있음",

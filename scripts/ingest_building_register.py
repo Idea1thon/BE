@@ -14,7 +14,13 @@
   건물링크_{구}.csv   — Tier1 PNU ↔ mgmBldrgstPk
   manifest_{구}.json
 
-실행: .venv/bin/python3 scripts/ingest_building_register.py [--sigungu 송파구] [--with-units]
+실행:
+  .venv/bin/python3 scripts/ingest_building_register.py --sigungu 송파구
+  .venv/bin/python3 scripts/ingest_building_register.py --all [--skip-floors] [--limit-gu N]
+      서울 25개 자치구를 법정동 수 오름차순으로 순회. getBrFlrOulnInfo(층별개요)는
+      법정동당 최대 22만+건이라 일일 무료 한도(기능당 10,000회)로 서울 전체가
+      하루에 안 끝난다 — 같은 명령을 재실행하면 완료된 (자치구,법정동)은 캐시로
+      건너뛰고 이어간다. --skip-floors 로 표제부(주소·주차·승강기)만 먼저 전체 수집 가능.
 """
 from __future__ import annotations
 import csv
@@ -84,6 +90,17 @@ def dong_codes_for(gu):
     return sorted((c, c[:5], c[5:10], nm) for c, nm in seen.items())
 
 
+def all_sigungu_by_size():
+    """서울 25개 자치구를 Tier1 법정동 수 오름차순으로 — 작은 구부터 끝내서 하루 예산 안에
+    더 많은 구를 완결시킨다."""
+    counts: dict[str, set] = defaultdict(set)
+    with TIER1_CSV.open(encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            if row["시군구명"] and row["법정동코드"]:
+                counts[row["시군구명"]].add(row["법정동코드"])
+    return sorted(counts, key=lambda g: len(counts[g]))
+
+
 def write(name, rows, cols):
     p = OUT_DIR / name
     with p.open("w", encoding="utf-8-sig", newline="") as f:
@@ -94,11 +111,7 @@ def write(name, rows, cols):
     return len(rows)
 
 
-def main():
-    gu = arg("--sigungu", "송파구")
-    limit = i(arg("--limit-dong")) if "--limit-dong" in sys.argv else None
-    with_units = "--with-units" in sys.argv
-    ops = OPS_CORE + (OPS_UNITS if with_units else [])
+def run_gu(gu: str, ops: list[str], with_units: bool, limit: int | None = None) -> int:
     dongs = dong_codes_for(gu)
     if limit:
         dongs = dongs[:limit]
@@ -114,6 +127,7 @@ def main():
     pnu_to_pk: dict[str, set] = defaultdict(set)
     commercial_pks: set[str] = set()
     failed_dongs: list[str] = []
+    budget_exhausted = False
 
     for code10, sg, bj, nm in dongs:
         got = {}
@@ -121,14 +135,21 @@ def main():
         for op in ops:
             try:
                 got[op] = fetch_all(SERVICE, op, sigungu_cd=sg, bjdong_cd=bj)
+            except SystemExit as exc:
+                print(f"  {code10} {nm:8} ⏸ 일일 예산 도달, 이번 실행 중단 — {exc}", flush=True)
+                budget_exhausted = True
+                failed = True
+                break
             except RuntimeError as exc:
                 print(f"  {code10} {nm:8} ⚠ {op} 실패, 이 법정동 건너뜀 — {exc}", flush=True)
                 failed_dongs.append(f"{code10}:{op}")
                 failed = True
                 break
         if failed:
+            if budget_exhausted:
+                break
             continue
-        for op in OPS_UNITS:
+        for op in OPS_CORE + OPS_UNITS:
             got.setdefault(op, [])
         print(f"  {code10} {nm:8} " + " ".join(
             f"{op.replace('getBr','').replace('Info','')}={len(v)}" for op, v in got.items()), flush=True)
@@ -238,7 +259,7 @@ def main():
                    "endpoints": ops, "note": "현행 등록 상태 — 건축인허가보다 커버리지 높음"},
         "generated_at": datetime.date.today().isoformat(),
         "scope": {"sigungu": gu, "bjdong_count": len(dongs), "failed_dongs": failed_dongs,
-                  "complete": not failed_dongs},
+                  "budget_exhausted": budget_exhausted, "complete": not failed_dongs and not budget_exhausted},
         "counts": {"title": n_title, "commercial_titles": len(commercial_pks),
                    "commercial_floors": n_flr, "buildings_with_commercial_floor": len(with_commercial_floor),
                    "expos_units": n_exp if with_units else None},
@@ -262,8 +283,44 @@ def main():
           f"(지번 {m_jibun} + 본번 {m_bonbun}, {manifest['tier1_link']['match_rate']})")
     print(f"예산: {budget_status(SERVICE, ops)}")
     if failed_dongs:
-        print(f"⚠ 미완료: {failed_dongs} — 같은 명령 재실행하면 완료된 법정동은 캐시로 건너뛰고 이어감")
+        print(f"⚠ 미완료(오류): {failed_dongs} — 재실행하면 완료된 법정동은 캐시로 건너뛰고 이어감")
+    if budget_exhausted:
+        print(f"⏸ {gu}: 일일 예산 도달로 {len(dongs)}개 법정동 중 일부만 처리 — 내일(또는 한도 리셋 후) 재실행하면 이어감")
+        return 2
     return 1 if failed_dongs else 0
+
+
+def main() -> int:
+    with_units = "--with-units" in sys.argv
+    skip_floors = "--skip-floors" in sys.argv
+    limit = i(arg("--limit-dong")) if "--limit-dong" in sys.argv else None
+    ops = (["getBrTitleInfo"] if skip_floors else OPS_CORE) + (OPS_UNITS if with_units else [])
+
+    if "--all" in sys.argv:
+        gus = all_sigungu_by_size()
+        limit_gu = i(arg("--limit-gu")) if "--limit-gu" in sys.argv else None
+        if limit_gu:
+            gus = gus[:limit_gu]
+        print(f"서울 전체 {len(gus)}개 자치구 순회 (작은 구부터). ops={ops}", flush=True)
+        done, exhausted = [], False
+        for gu in gus:
+            rc = run_gu(gu, ops, with_units, limit)
+            if rc == 2:
+                exhausted = True
+                break
+            done.append(gu)
+        remaining = [g for g in gus if g not in done]
+        print(f"\n=== 서울 전체 진행상황 ===")
+        print(f"완료: {len(done)}/{len(gus)}개 자치구")
+        if remaining:
+            print(f"남음: {remaining}")
+        if exhausted:
+            print("일일 예산 도달로 중단 — 같은 명령(--all) 재실행하면 완료 자치구는 캐시로 건너뛰고 이어감")
+        return 0 if not remaining else 2
+
+    gu = arg("--sigungu", "송파구")
+    rc = run_gu(gu, ops, with_units, limit)
+    return 0 if rc in (0, 2) else rc
 
 
 if __name__ == "__main__":
