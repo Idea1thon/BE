@@ -16,15 +16,10 @@ import subprocess
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-ROOT = Path(__file__).resolve().parents[1]
+from .env import load_env
+from .paths import find_project_root
 
-try:  # 스크립트로 직접 실행될 때와 패키지 import 모두 지원
-    from _env import load_env
-except ImportError:  # pragma: no cover
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _env import load_env
+ROOT = find_project_root(__file__)
 
 
 class ServingDbError(RuntimeError):

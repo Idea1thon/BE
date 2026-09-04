@@ -2,19 +2,28 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import unittest
+from pathlib import Path
+
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVICE_ROOT))
 
 from fastapi import HTTPException
 from pydantic import ValidationError
 
 from api.main import (
     PipelineRecommendationRequest,
+    RecommendationApiResponse,
+    _region_options,
     app,
     create_recommendation,
     healthz,
     industries,
     regions,
 )
+from service.recommendation.pipeline import RecommendationRequest, load_layers, resolve_region
 
 
 class FastApiBoundaryTests(unittest.TestCase):
@@ -30,6 +39,20 @@ class FastApiBoundaryTests(unittest.TestCase):
         region_response = asyncio.run(regions("송파구"))
         self.assertEqual(region_response["sido"], "서울특별시")
         self.assertIn("잠실2동", region_response["dong"])
+
+    def test_every_catalog_dong_is_resolvable_by_the_spatial_layer(self) -> None:
+        _, _, dong_layer, sigungu_by_prefix = load_layers()
+        failures = []
+        for sigungu, dong in _region_options():
+            try:
+                resolve_region(
+                    RecommendationRequest("서울특별시", sigungu, dong, "CS100010"),
+                    dong_layer,
+                    sigungu_by_prefix,
+                )
+            except Exception as exc:  # pragma: no cover - included in failure message
+                failures.append(f"{sigungu}/{dong}: {exc}")
+        self.assertEqual(failures, [])
 
     def test_recommendation_rejects_ambiguous_input_before_data_access(self) -> None:
         with self.assertRaises(HTTPException) as raised:
@@ -49,6 +72,19 @@ class FastApiBoundaryTests(unittest.TestCase):
                 region={"sigungu": "송파구", "dong": "잠실동"},
                 special_condition_text="커피 매장",
                 source="files",
+            )
+
+    def test_response_validates_candidates_against_evidence_schema(self) -> None:
+        with self.assertRaises(ValidationError):
+            RecommendationApiResponse(
+                request_id=None,
+                run_id="run-1",
+                status="completed",
+                request={},
+                input_interpretation={},
+                summary={},
+                candidates=[{"candidate_id": "incomplete"}],
+                explanations={},
             )
 
     def test_backend_contract_is_forwarded_to_pipeline(self) -> None:

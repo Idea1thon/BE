@@ -7,7 +7,7 @@
 → LLM 설명(실패 시 템플릿) 순서로 실행한다.
 
 실행 예:
-  .venv/bin/python3 scripts/recommendation_pipeline.py \
+  .venv/bin/python3 -m service.recommendation.pipeline \
     --sido 서울특별시 --sigungu 송파구 --dong 잠실동 \
     --industry-code CS100010 \
     --special-condition-text '월세 300만원 이하, 20평 이상, 주차 가능' \
@@ -36,16 +36,17 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import shapefile
-from llm_explanation import explain_candidates
-from llm_input_planner import parse_conditions, plan_input
-from llm_runtime import LLMRuntimeError
+from .llm_explanation import explain_candidates
+from .llm_input_planner import parse_conditions, plan_input
+from .llm_runtime import LLMRuntimeError
+from .paths import find_project_root
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Point, shape
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = find_project_root(__file__)
 DEFAULT_QUARTER = "20261"
 DEFAULT_RENT_QUARTER = "20262"
 DEFAULT_MARGIN_M = 300
@@ -285,6 +286,16 @@ def safe_slug(value: str) -> str:
     return value or "run"
 
 
+def normalize_admin_dong_name(value: str) -> str:
+    """Normalize catalog text to the shapefile's 행정동 spelling.
+
+    Some exported Seoul CSV snapshots replace the middle dot in names such
+    as ``상계3·4동`` with ``?``. The shapefile is the spatial source of truth,
+    so the API catalog and resolver use the same canonical spelling.
+    """
+    return unicodedata.normalize("NFC", str(value or "").strip()).replace("?", "·")
+
+
 def load_layers() -> tuple[ShapeLayer, ShapeLayer, ShapeLayer, dict[str, str]]:
     trdar = ShapeLayer(find_shape(ROOT / "data/영역/상권", "영역-상권"), "TRDAR_CD", "TRDAR_CD_N")
     hinterland = ShapeLayer(find_shape(ROOT / "data/영역/상권배후지", "영역-상권배후지"), "ALLEY_TRDA", "ALLEY_TR_1")
@@ -318,7 +329,8 @@ def resolve_region(
         raise PipelineError(f"행정동 데이터에서 시군구가 비어 있습니다: {request.sigungu}")
 
     if request.dong:
-        exact = [r for r in in_gu if r.name == request.dong]
+        requested_dong = normalize_admin_dong_name(request.dong)
+        exact = [r for r in in_gu if normalize_admin_dong_name(r.name) == requested_dong]
         selected = exact or [r for r in in_gu if r.name in LEGAL_DONG_ALIASES.get(request.dong, ())]
         if not selected:
             choices = ", ".join(r.name for r in in_gu[:20])
@@ -1624,7 +1636,7 @@ class DbSource:
     mode = "db"
 
     def __init__(self):
-        import serving_db
+        from . import serving_db
 
         self._db = serving_db
         try:
@@ -1958,6 +1970,8 @@ def run_pipeline(
 ) -> dict[str, Any]:
     if request.industry_code is not None and request.industry_code not in SUPPORTED_INDUSTRIES:
         raise PipelineError(f"지원하지 않는 업종 코드: {request.industry_code}")
+    if limit is not None and not 1 <= limit <= 50:
+        raise PipelineError("limit은 1 이상 50 이하이어야 합니다.")
     selected_region = {"sido": request.sido, "sigungu": request.sigungu, "dong": request.dong}
     try:
         input_interpretation = plan_input(

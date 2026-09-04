@@ -10,7 +10,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from llm_runtime import (
+from .llm_runtime import (
     LLMConfig,
     LLMRuntimeError,
     OpenAICompatibleJsonClient,

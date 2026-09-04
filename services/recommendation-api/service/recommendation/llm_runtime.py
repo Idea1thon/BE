@@ -15,13 +15,9 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-try:
-    from _env import load_env
-except ImportError:  # pragma: no cover - direct standalone import fallback
-    load_env = None
+from .env import load_env
 
-if load_env is not None:
-    load_env()
+load_env()
 
 
 class LLMRuntimeError(RuntimeError):

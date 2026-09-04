@@ -2,12 +2,16 @@ import sys
 import unittest
 from pathlib import Path
 
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVICE_ROOT))
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from llm_explanation import validate_card  # noqa: E402
-from llm_input_planner import _normalize_remote_conditions, parse_conditions, plan_input  # noqa: E402
+from service.recommendation.llm_explanation import validate_card
+from service.recommendation.llm_input_planner import (
+    _normalize_remote_conditions,
+    parse_conditions,
+    plan_input,
+)
 
 
 class LLMInputPlannerTests(unittest.TestCase):

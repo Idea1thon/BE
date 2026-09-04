@@ -2,20 +2,21 @@
 
 This service is called by the middle backend, not directly by the UI:
 
-    UI -> middle backend -> this REST API -> recommendation_pipeline
+    UI -> middle backend -> this REST API -> service.recommendation
                                       <- validated candidates and Evidence
     UI <- middle backend <- this REST API
 
 The middle backend owns the UI-facing request handling and correlation ID.
 This API transports the selected region and special-condition text to the
 existing pipeline without interpreting or rewriting the user's request.
-The pipeline itself still performs its configured input-planning,
+The recommendation package itself still performs its configured input-planning,
 deterministic validation, data analysis, Evidence validation, and explanation
-stages. A risk-siren service is intentionally not included yet.
+stages. Risk-siren development is intentionally isolated in
+`/Users/parkjunwoo/Documents/siren` and is not connected to this route yet.
 
 Run locally from the repository root with::
 
-    .venv/bin/uvicorn api.main:app --reload
+    .venv/bin/uvicorn --app-dir services/recommendation-api api.main:app --reload
 
 The heavy pipeline is synchronous and is dispatched through FastAPI's
 threadpool. Each request gets an isolated output directory so concurrent
@@ -39,23 +40,26 @@ from typing import Any, Literal
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "scripts"
-if str(SCRIPTS) not in sys.path:
-    # The existing pipeline is also a CLI module and imports its sibling
-    # scripts directly. Keep the API import path compatible with that entry.
-    sys.path.insert(0, str(SCRIPTS))
+SERVICE_ROOT = Path(__file__).resolve().parents[1]
+if str(SERVICE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVICE_ROOT))
 
-from llm_input_planner import INDUSTRY_NAMES  # noqa: E402
-from recommendation_pipeline import (  # noqa: E402
+from service.recommendation.paths import find_project_root
+
+ROOT = find_project_root(__file__)
+
+from service.recommendation.llm_input_planner import INDUSTRY_NAMES
+from service.recommendation.pipeline import (
     DEFAULT_QUARTER,
     PipelineError,
     RecommendationRequest,
     SUPPORTED_INDUSTRIES,
+    normalize_admin_dong_name,
     run_pipeline,
+    validate_candidates,
 )
 
 
@@ -110,6 +114,15 @@ class RecommendationApiResponse(BaseModel):
     candidates: list[dict[str, Any]]
     explanations: dict[str, Any]
 
+    @field_validator("candidates")
+    @classmethod
+    def candidates_follow_evidence_schema(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Keep the loose transport type while enforcing the shared schema."""
+        errors = validate_candidates(value)
+        if errors:
+            raise ValueError("candidates[]가 LocationCandidateEvidence 스키마를 만족하지 않습니다: " + "; ".join(errors[:3]))
+        return value
+
 
 def _validate_common_input(payload: PipelineRecommendationRequest) -> None:
     if payload.region.sido not in {"서울특별시", "서울"}:
@@ -137,7 +150,7 @@ def _region_options() -> list[tuple[str, str]]:
     with path.open(encoding="utf-8-sig", newline="") as handle:
         rows = csv.DictReader(handle)
         return sorted({
-            (str(row.get("자치구", "")).strip(), str(row.get("행정동", "")).strip())
+            (str(row.get("자치구", "")).strip(), normalize_admin_dong_name(row.get("행정동", "")))
             for row in rows
             if str(row.get("자치구", "")).strip() and str(row.get("행정동", "")).strip()
         })
@@ -354,7 +367,7 @@ async def readyz() -> dict[str, Any]:
     config = _service_config()
     if config.source == "db":
         try:
-            from serving_db import ping
+            from service.recommendation.serving_db import ping
 
             checks["db"] = {"ok": True, "target": ping()}
         except Exception as exc:  # readiness must never leak connection details
