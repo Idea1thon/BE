@@ -25,16 +25,16 @@
   "properties": {
     "candidate_id": {"type": "string", "description": "APT-{kaptCode} / STN-{역번호} / LST-{매물id}. (구) TRDAR-{상권코드} 는 상권 fallback 때만."},
     "candidate_type": {
-      "enum": ["아파트단지_인근", "역_인근", "카카오POI_인근", "생성지점_격자", "매물", "commercial_area", "hinterland", "admin_dong"],
-      "description": "2026-09-02: 후보 단위가 지점(아파트·역·선택적 카카오POI·격자 생성 좌표). 카카오POI는 관측 장소 seed. 생성지점_격자는 프로젝트가 격자로 만든 좌표(generated-evidence-schema.json)이며 실제 매물·점포가 아니다 — synthetic_anchor=true 필수. commercial_area/hinterland/admin_dong 은 seed 없어 fallback한 경우만."
+      "enum": ["아파트단지_인근", "역_인근", "카카오POI_인근", "상가건물_인근", "생성지점_격자", "매물", "commercial_area", "hinterland", "admin_dong"],
+      "description": "후보 단위는 지점(아파트·역·선택적 카카오POI·건축물대장 건물 centroid·격자 생성 좌표)이다. 상가건물_인근은 GIS건물통합정보의 주용도 상업용 건물 centroid이며 실제 임대 매물·호실·공실이 아니다. 생성지점_격자는 프로젝트가 격자로 만든 좌표(generated-evidence-schema.json)이며 실제 매물·점포가 아니다 — synthetic_anchor=true 필수. commercial_area/hinterland/admin_dong 은 seed 없어 fallback한 경우만."
     },
     "synthetic_anchor": {
       "type": "boolean",
-      "description": "true이면 앵커가 프로젝트 생성 좌표(candidate_type=생성지점_격자). listing_url·address_point는 항상 null, precision은 '지점(생성)'. 실제 임대 가능 호실 미확인이므로 fit_tier는 '추천' 없이 '조건부 검토'가 상한이다(반대근거에 사유 기록). false/생략이면 관측 seed(아파트·역·POI)."
+      "description": "true이면 앵커가 프로젝트 생성 좌표(candidate_type=생성지점_격자). listing_url·address_point는 항상 null, precision은 '지점(생성)'. 실제 임대 가능 호실 미확인이므로 fit_tier는 '추천' 없이 '조건부 검토'가 상한이다(반대근거에 사유 기록). false/생략이면 관측 seed(아파트·역·POI·건축물대장 건물 centroid)이다."
     },
     "spatial_grain": {
       "enum": ["지점", "지점(생성)", "상권", "상권배후지", "행정동", "개별매물"],
-      "description": "후보 공간 단위. 기본 '지점'(아파트·역 좌표). '지점(생성)'은 격자 생성 좌표. candidate_type과 대응."
+      "description": "후보 공간 단위. 기본 '지점'(아파트·역·건축물대장 건물 centroid 좌표). '지점(생성)'은 격자 생성 좌표. candidate_type과 대응."
     },
     "region": {
       "type": "object",
@@ -49,7 +49,7 @@
     },
     "location": {
       "type": "object",
-      "description": "2026-09-02: 후보 = 지점(아파트·역). 앵커명 + '인근' + 좌표 + 참조 상권. 상권 코드로 끝내지 않음. 동·호수·출구번호·매물 월세는 데이터 없으므로 생성 금지.",
+      "description": "후보 = 지점(아파트·역·건축물대장 건물 centroid). 앵커명 + '인근' + 좌표 + 참조 상권. 건축물대장 건물은 주용도·건물규모를 보조 속성으로 보존하지만 동·호수·출구번호·매물 월세·공실은 생성하지 않는다.",
       "required": ["sido", "sigungu", "admin_dong", "anchor", "place_name", "point", "precision", "host_commercial_area", "overlapping_units", "nearby_anchors", "address_point"],
       "properties": {
         "sido": {"type": "string"},
@@ -57,18 +57,26 @@
         "admin_dong": {"type": ["string", "null"], "description": "지점 포함 행정동(영역-행정동 PIP)"},
         "anchor": {
           "type": "object",
-          "description": "지점의 정체(seed). 아파트 단지·역·선택적 카카오POI.",
+          "description": "지점의 정체(seed). 아파트 단지·역·선택적 카카오POI·건축물대장 상업용 건물 centroid.",
           "required": ["name", "type", "id"],
           "properties": {
             "name": {"type": "string"},
-            "type": {"enum": ["아파트단지", "역", "카카오POI", "생성지점"]},
-            "id": {"type": "string", "description": "kaptCode·역번호·Kakao place id·GEN-PT-{region}-{seq}(생성지점)"},
+            "type": {"enum": ["아파트단지", "역", "카카오POI", "상가건물", "생성지점"]},
+            "id": {"type": "string", "description": "kaptCode·역번호·Kakao place id·건물관리번호·GEN-PT-{region}-{seq}(생성지점)"},
             "households": {"type": ["integer", "null"]},
-            "line": {"type": ["string", "null"]}
+            "line": {"type": ["string", "null"]},
+            "lot_address": {"type": ["string", "null"]},
+            "use_group": {"type": ["string", "null"]},
+            "gross_floor_area_m2": {"type": ["number", "null"]},
+            "building_area_m2": {"type": ["number", "null"]},
+            "floors_above": {"type": ["integer", "null"]},
+            "floors_below": {"type": ["integer", "null"]},
+            "building_age_years": {"type": ["integer", "null"]},
+            "area_join_type": {"enum": ["내부", "근접", "미결합", null]}
           },
           "additionalProperties": false
         },
-        "place_name": {"type": "string", "description": "앵커명 + '인근' (예: '리센츠아파트 인근'). 앵커는 방향 기준점이지 그 자리 자체가 아님."},
+        "place_name": {"type": "string", "description": "앵커명 + '인근' (예: '리센츠아파트 인근', '종로구 이화동 건물 인근'). 건축물대장 centroid 앵커도 실제 임대 호실 그 자체가 아님."},
         "point": {
           "type": ["object", "null"],
           "required": ["x", "y", "crs"],
@@ -258,6 +266,8 @@
               "apt_name_geocode_vworld",
               "households_by_radius",
               "flow_per_area_normalize",
+              "building_use_group_from_primary_use",
+              "building_gross_floor_area_m2",
               "foreign_over_resident_ratio",
               "short_foreign_over_flow_ratio",
               "recent_3m_mean_no_seasonal_adjustment",

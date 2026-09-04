@@ -3,9 +3,9 @@
 ``recommendation_pipeline.py --source db`` 가 사용한다. 드라이버를 설치하지 않고
 ``migrate_postgres.py`` 와 동일하게 ``psql`` 의 ``COPY (SELECT …) TO STDOUT`` 을 쓴다.
 
-접속 대상은 ``.env`` 의 ``DATABASE_URL`` (없으면 ``POSTGRES_*``)다. FastAPI나
-CLI를 EC2 호스트에서 실행할 때는 Docker DB 공개 주소인 ``127.0.0.1:55432``를
-사용한다.
+접속 대상은 ``.env`` 의 ``DATABASE_URL`` (없으면 ``POSTGRES_*``)다. Docker를
+사용하는지 여부는 배포 환경의 접속 설정으로 결정하며, 이 모듈은 특정 포트를
+가정하지 않는다.
 """
 from __future__ import annotations
 

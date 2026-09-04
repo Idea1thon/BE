@@ -32,10 +32,15 @@ cd services/recommendation-api
 ../../.venv/bin/uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-`source=db`는 PostgreSQL/PostGIS가 이미 실행 중이고 이 저장소의 스키마·데이터
-이식이 완료된 환경을 전제로 한다. Compose와 migration 파일은 이 서비스 커밋에
-포함하지 않으므로 DB 인프라 저장소의 배포 절차로 준비해야 한다. DB를 사용할 때는
-FastAPI 호스트에 `psql` 클라이언트도 필요하다.
+`source=db`는 PostgreSQL/PostGIS가 이미 실행 중이고 기본 스키마·핵심 데이터
+이식이 완료된 환경을 전제로 한다. Compose와 기본 스키마 migration은 DB 인프라
+저장소의 배포 절차로 준비하고, 이 서비스에는 서빙 누락 테이블 보완 DDL·스크립트를
+포함한다. DB를 사용할 때는 FastAPI 호스트에 `psql` 클라이언트도 필요하다.
+
+누락된 서빙 테이블과 최신 파생 데이터를 보완할 때는
+`scripts/supplement_serving_tables.py`를 실행한다. 이 스크립트는
+`location.area_store_totals`를 `data/점포/2026년`의 전 업종 행에서 집계하고,
+`context.commercial_building`에 `data/건축물대장/상가건물_서울.csv`를 upsert한다.
 
 ```bash
 docker compose version
@@ -114,6 +119,7 @@ LLM 설명 단계는 이 컨텍스트를 참고할 수 있지만 관측 설명�
 RECOMMENDATION_QUARTER=20261
 RECOMMENDATION_SOURCE=db
 RECOMMENDATION_LLM_MODE=auto
+RECOMMENDATION_SEED_MODE=buildings
 RECOMMENDATION_DEFAULT_LIMIT=5
 RECOMMENDATION_REQUEST_TIMEOUT_SECONDS=180
 RECOMMENDATION_READINESS_TIMEOUT_SECONDS=3
@@ -162,6 +168,6 @@ RECOMMENDATION_MAX_CONCURRENT=4
 - 지역 선택값은 UI 입력을 그대로 사용하며 LLM이 지역을 바꾸도록 허용하지 않는다.
 - LLM은 업종·조건·자연어 preference·읽기 전용 검색 계획의 제안자일 뿐이며, 허용 목록 검증 후에만 파이프라인을 진행한다. preference는 `source_text`가 없거나 허용되지 않은 anchor를 사용하면 폐기한다. retrieval 요청은 임의 SQL·테이블·조인을 받지 않는다.
 - planner의 `clarification_questions`와 `unsupported_conditions`는 결정론적 파서가 생성한 값만 사용한다. 원격 LLM의 동일 필드는 확인 중단이나 후보 등급에 영향을 주지 않는다.
-- `source=db`의 데이터 조회와 후보/Evidence 생성은 `services/recommendation-api/recommendation/pipeline.py`가 수행한다. `services/recommendation-api/scripts/recommendation_pipeline.py`는 CLI 호출을 위한 forwarding entrypoint다.
+- `source=db`의 데이터 조회와 후보/Evidence 생성은 `services/recommendation-api/recommendation/pipeline.py`가 수행한다. `services/recommendation-api/scripts/recommendation_pipeline.py`는 CLI 호출을 위한 forwarding entrypoint다. 기본 seed는 `context.commercial_building`의 건축물대장 건물 centroid이며, `RECOMMENDATION_SEED_MODE=anchors`는 기존 역·아파트·POI·생성점 seed로, `hybrid`는 두 모집단을 함께 사용한다. 건축물대장 건물은 실제 임대 매물·공실·호실이 아니므로 `상가건물_인근` 후보는 조건부 검토 상한을 가진다.
 - 후보가 만들어진 뒤 설명 LLM의 `reasons`, `counter_evidence`, `context_notes`, `missing_features`는 후보의 결정론적 원문 항목만 복사할 수 있고, `summary`도 후보 등급 기반 canonical 문장만 허용한다. 추가 주소·수치·분기·매물·공실률·성공확률·수익률·인과관계는 `inference_hypotheses`에 `status=unverified`로만 담을 수 있으며, 후보 등급·정렬·하드 조건과 관측 Evidence에는 사용하지 않는다.
 - `CORS_ALLOW_ORIGINS`를 콤마로 설정한 경우에만 CORS 미들웨어를 활성화한다.

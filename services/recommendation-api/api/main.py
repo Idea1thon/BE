@@ -118,6 +118,7 @@ class ServiceConfig:
     request_timeout_s: float = 180.0
     readiness_timeout_s: float = 3.0
     max_concurrent: int = 4
+    seed_mode: Literal["anchors", "buildings", "hybrid"] = "buildings"
 
 
 class RecommendationApiResponse(BaseModel):
@@ -238,6 +239,7 @@ def _service_config() -> ServiceConfig:
     quarter = os.getenv("RECOMMENDATION_QUARTER", DEFAULT_QUARTER).strip() or DEFAULT_QUARTER
     source = os.getenv("RECOMMENDATION_SOURCE", "db").strip() or "db"
     llm_mode = os.getenv("RECOMMENDATION_LLM_MODE", "auto").strip() or "auto"
+    seed_mode = os.getenv("RECOMMENDATION_SEED_MODE", "buildings").strip() or "buildings"
     try:
         limit = int(os.getenv("RECOMMENDATION_DEFAULT_LIMIT", "5"))
     except ValueError as exc:
@@ -274,6 +276,7 @@ def _service_config() -> ServiceConfig:
         not re.fullmatch(r"\d{4}[1-4]", quarter)
         or source not in {"db", "files"}
         or llm_mode not in {"auto", "required", "offline"}
+        or seed_mode not in {"anchors", "buildings", "hybrid"}
         or not 1 <= limit <= 50
         or not 5 <= request_timeout_s <= 900
         or not 0.1 <= readiness_timeout_s <= 30
@@ -281,7 +284,7 @@ def _service_config() -> ServiceConfig:
     ):
         raise HTTPException(status_code=503, detail={
             "code": "invalid_service_config",
-            "message": "RECOMMENDATION_QUARTER/SOURCE/LLM_MODE/DEFAULT_LIMIT/REQUEST_TIMEOUT/READINESS_TIMEOUT/MAX_CONCURRENT 설정을 확인해 주세요.",
+            "message": "RECOMMENDATION_QUARTER/SOURCE/LLM_MODE/SEED_MODE/DEFAULT_LIMIT/REQUEST_TIMEOUT/READINESS_TIMEOUT/MAX_CONCURRENT 설정을 확인해 주세요.",
             "questions": [],
         })
     return ServiceConfig(
@@ -289,6 +292,7 @@ def _service_config() -> ServiceConfig:
         source=source,  # type: ignore[arg-type]
         llm_mode=llm_mode,  # type: ignore[arg-type]
         limit=limit,
+        seed_mode=seed_mode,  # type: ignore[arg-type]
         include_poi=_env_bool("RECOMMENDATION_INCLUDE_POI", False),
         include_poi_context=_env_bool("RECOMMENDATION_INCLUDE_POI_CONTEXT", False),
         include_news=_env_bool("RECOMMENDATION_INCLUDE_NEWS", True),
@@ -340,6 +344,7 @@ def _run_pipeline_with_slot(
             config.include_news,
             config.source,
             config.llm_mode,
+            seed_mode=config.seed_mode,
         )
     finally:
         _release_recommendation_slot()

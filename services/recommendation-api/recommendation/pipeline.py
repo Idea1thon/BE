@@ -508,6 +508,38 @@ def _poi_seed(row: dict[str, str], point: Point, source_path: str) -> dict[str, 
             "category_name": row.get("category_name"), "source_path": source_path}
 
 
+def _building_seed(row: dict[str, str], point: Point, source_path: str) -> dict[str, Any]:
+    """건축물대장 파생 CSV의 개별 건물을 후보 지점 seed로 만든다.
+
+    건물 centroid는 실제 임대 가능 호실이나 점포 주소가 아니다. 따라서 이
+    seed는 좌표 기준점으로만 사용하고, build_candidate에서 조건부 검토 상한과
+    ``매물·공실·호실 아님`` caveat를 강제한다.
+    """
+    building_id = nfc(row.get("건물관리번호"))
+    lot_address = nfc(row.get("대지위치"))
+    use_group = nfc(row.get("용도군"))
+    name = lot_address or f"상가건물 {building_id[-8:]}"
+    return {
+        "kind": "상가건물", "id": building_id, "name": name, "pt": point,
+        "households": None, "line": None, "transfer": None,
+        "building_pk": building_id, "pnu": nfc(row.get("PNU")),
+        "lot_address": lot_address, "lot_number": nfc(row.get("지번")),
+        "use_code": nfc(row.get("용도코드")), "use_name": nfc(row.get("용도명")),
+        "use_group": use_group, "floors_above": as_int(num(row, "지상층수")),
+        "floors_below": as_int(num(row, "지하층수")),
+        "building_area_m2": num(row, "건축면적_㎡"),
+        "gross_floor_area_m2": num(row, "연면적_㎡"),
+        "building_age_years": as_int(num(row, "건물연식_년")),
+        "area_join_type": nfc(row.get("상권_결합")) or "미결합",
+        "host_area_code": nfc(row.get("상권_코드")),
+        "admin_dong_code": nfc(row.get("행정동_코드")),
+        "admin_dong_name": nfc(row.get("행정동_명")),
+        "snapshot": "20260809",
+        "source_paths": {source_path},
+        "source_path": source_path,
+    }
+
+
 def merge_seeds(seeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """80m 병합 + 우선순위 정렬. 입력 순서와 무관하게 결정적."""
     priority = {"역": 0, "아파트단지": 1, "카카오POI": 2, "생성지점": 3}
@@ -543,7 +575,38 @@ def _poi_seeds_from_files(target_buffer: Any) -> list[dict[str, Any]]:
     return out
 
 
-def load_seeds(target_buffer: Any, include_poi: bool, generated_path: Path | None = None) -> list[dict[str, Any]]:
+def load_building_seeds(target_buffer: Any, rows: Iterable[dict[str, str]], source_path: str) -> list[dict[str, Any]]:
+    """유효한 건물 centroid를 공간 버퍼 안에서 결정적으로 반환한다."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        building_id = nfc(row.get("건물관리번호"))
+        if not building_id or building_id in seen:
+            continue
+        try:
+            point = Point(float(row["x_5181"]), float(row["y_5181"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not target_buffer.covers(point):
+            continue
+        seen.add(building_id)
+        out.append(_building_seed(row, point, source_path))
+    return sorted(out, key=lambda seed: (seed["name"], seed["id"]))
+
+
+def load_seeds(
+    target_buffer: Any,
+    include_poi: bool,
+    generated_path: Path | None = None,
+    seed_mode: str = "buildings",
+) -> list[dict[str, Any]]:
+    if seed_mode not in {"anchors", "buildings", "hybrid"}:
+        raise PipelineInputError("seed_mode는 anchors, buildings, hybrid 중 하나여야 합니다.")
+    if seed_mode == "buildings":
+        building_path = find_file(ROOT / "data/건축물대장", "상가건물_서울")
+        building_src = str(building_path.relative_to(ROOT))
+        return load_building_seeds(target_buffer, read_csv(building_path), building_src)
+
     seeds: list[dict[str, Any]] = []
     apt_path = find_file(ROOT / "data/공동주택", "아파트단지_서울")
     apt_src = str(apt_path.relative_to(ROOT))
@@ -571,6 +634,13 @@ def load_seeds(target_buffer: Any, include_poi: bool, generated_path: Path | Non
         seeds.extend(_poi_seeds_from_files(target_buffer))
     if generated_path is not None:
         seeds.extend(load_generated_seeds(generated_path, target_buffer))
+    if seed_mode == "hybrid":
+        # 80m merge는 건물별 seed를 합쳐 버리므로 building seed는 개별성을
+        # 보존하고, 기존 역·단지·POI·생성점만 레거시 규칙으로 병합한다.
+        building_path = find_file(ROOT / "data/건축물대장", "상가건물_서울")
+        building_src = str(building_path.relative_to(ROOT))
+        buildings = load_building_seeds(target_buffer, read_csv(building_path), building_src)
+        return merge_seeds(seeds) + buildings
     return merge_seeds(seeds)
 
 
@@ -1019,6 +1089,7 @@ def build_candidate(
 ) -> dict[str, Any]:
     point = seed["pt"]
     synthetic = seed["kind"] == "생성지점"
+    is_building = seed["kind"] == "상가건물"
     dong_hits = dong_layer.covering(point)
     dong_rec = choose_most_specific(dong_hits)
     host_hits = trdar_layer.covering(point)
@@ -1133,6 +1204,11 @@ def build_candidate(
                 f"반경 500m 영업 중 음식점 인허가 {gm.get('active_food_license_count_500m', 0)}개 "
                 f"(업종별: {brk or '없음'}) — 합성 격자 좌표 기준 경쟁 규모이며 매물 수·공실·수요·성공 아님, 판정·정렬 미반영"
             )
+    if is_building:
+        context_notes.append(
+            f"건축물대장 주용도 '{seed.get('use_group') or '미상'}' 건물 centroid 기준. "
+            "실제 개별 호실·점포·공실·임대료·주차를 확인한 매물이 아니므로 건물 인근 탐색용 seed로만 사용"
+        )
 
     # 신호 없음 — 서술만: FC-01 유동밀도, FC-30 동종 점포밀도, FC-07 역거리
     if flow_p is not None:
@@ -1242,6 +1318,9 @@ def build_candidate(
     if synthetic and tier == "추천":
         tier = "조건부 검토"
         counter.append("합성 격자 좌표 — 실제 임대 가능 상가·호실 미확인이므로 추천 상한은 조건부")
+    if is_building and tier == "추천":
+        tier = "조건부 검토"
+        counter.append("건축물대장 건물 centroid — 실제 임대 가능 호실·공실 미확인이므로 추천 상한은 조건부")
 
     nearby_anchors = []
     for distance, row in nearby_stations[:4]:
@@ -1255,9 +1334,9 @@ def build_candidate(
 
     anchor_type = seed["kind"]
     candidate_type = {"아파트단지": "아파트단지_인근", "역": "역_인근", "카카오POI": "카카오POI_인근",
-                      "생성지점": "생성지점_격자"}[anchor_type]
+                      "생성지점": "생성지점_격자", "상가건물": "상가건물_인근"}[anchor_type]
     candidate_id = str(seed["id"]) if synthetic else \
-        f"{ {'아파트단지': 'APT', '역': 'STN', '카카오POI': 'POI'}[anchor_type] }-{seed['id']}"
+        f"{ {'아파트단지': 'APT', '역': 'STN', '카카오POI': 'POI', '상가건물': 'BLDG'}[anchor_type] }-{seed['id']}"
     proxy_scope = f_scope in ("상권", "행정동")
     source_list = sorted({relative_path(p) for p in source_paths.values()} | seed["source_paths"])
     if rone_path:
@@ -1289,6 +1368,25 @@ def build_candidate(
     ev.append(evidence("반경500m_아파트_세대수", households, "세대", "derived", "none", "2026-08", "지점", False,
                        relative_path(source_paths["apartment"]), "스냅샷", ["households_by_radius", "apt_name_geocode_vworld"],
                        f"지점 반경 500m 내 아파트 {apartment_count}단지 {households}세대", "K-apt 의무관리 위주이며 소형 빌라·연립 누락, 좌표 89.7%"))
+    if is_building:
+        building_source = seed["source_path"]
+        building_period = seed.get("snapshot") or "20260809"
+        ev.append(evidence(
+            "건물_용도군", seed.get("use_group") or None, "건축물대장 용도군", "derived", "none",
+            building_period, "지점", False, building_source, building_source,
+            ["building_use_group_from_primary_use"],
+            f"건물 centroid의 건축물대장 주용도군: {seed.get('use_group') or '미상'}",
+            "건물 주용도 파생값이며 층별 용도·전유부 호실·실제 점포·공실을 뜻하지 않음",
+            missing_reason="건축물대장 주용도군 결측" if not seed.get("use_group") else None,
+        ))
+        ev.append(evidence(
+            "건물_연면적", seed.get("gross_floor_area_m2"), "㎡", "observed", "none",
+            building_period, "지점", False, building_source, building_source,
+            ["building_gross_floor_area_m2"],
+            f"건축물대장 연면적 {seed.get('gross_floor_area_m2') or '미상'}㎡",
+            "건물 전체 연면적이며 임대 가능한 상가 면적·호실 면적이 아님",
+            missing_reason="연면적 결측" if seed.get("gross_floor_area_m2") is None else None,
+        ))
     if poi_context:
         snapshot_date = poi_context.retrieved_at[:10]
         for radius in POI_CONTEXT_RADIUS_M:
@@ -1411,19 +1509,37 @@ def build_candidate(
                 dong_limit,
                 proxy_note="후보 지점이 아닌 행정동 보도량 proxy",
             ))
+    anchor = {
+        "name": seed["name"], "type": ("생성지점" if synthetic else anchor_type), "id": str(seed["id"]),
+        "households": seed.get("households"),
+        "line": "·".join(sorted(seed["lines"])) if seed.get("lines") else seed.get("line"),
+    }
+    if is_building:
+        anchor.update({
+            "lot_address": seed.get("lot_address") or None,
+            "use_group": seed.get("use_group") or None,
+            "gross_floor_area_m2": seed.get("gross_floor_area_m2"),
+            "building_area_m2": seed.get("building_area_m2"),
+            "floors_above": seed.get("floors_above"),
+            "floors_below": seed.get("floors_below"),
+            "building_age_years": seed.get("building_age_years"),
+            "area_join_type": seed.get("area_join_type") or "미결합",
+        })
     location = {
         "sido": "서울특별시", "sigungu": target_sigungu, "admin_dong": admin_name,
-        "anchor": {"name": seed["name"], "type": ("생성지점" if synthetic else anchor_type), "id": str(seed["id"]),
-                    "households": seed.get("households"), "line": "·".join(sorted(seed["lines"])) if seed.get("lines") else seed.get("line")},
-        "place_name": (f"{seed['id']} (격자 생성 좌표 · 실제 매물·점포 아님)" if synthetic else f"{seed['name']} 인근"),
+        "anchor": anchor,
+        "place_name": (f"{seed['id']} (격자 생성 좌표 · 실제 매물·점포 아님)" if synthetic
+                       else f"{seed['name']} 건물 인근" if is_building else f"{seed['name']} 인근"),
         "point": {"x": round(point.x, 2), "y": round(point.y, 2), "crs": "EPSG:5181"},
         "precision": "지점(생성)" if synthetic else "지점",
         "host_commercial_area": ({"code": host.code, "name": host.name, "relation": host_relation, "distance_m": host_distance} if host else None),
         "overlapping_units": {"commercial_area": [host.code] if host else [], "hinterland": [rec.code for rec in hinterland], "admin_dong": [admin_code] if admin_code else [], "sigungu": target_sigungu},
         "nearby_anchors": nearby_anchors, "address_point": None,
     }
-    confidence = "low" if sales_per_store is None or host is None else "medium" if proxy_scope or not rent_specific else "high"
+    confidence = "low" if sales_per_store is None or host is None or is_building else "medium" if proxy_scope or not rent_specific else "high"
     confidence_reasons = ["지점 반경 지표는 직접 계산"]
+    if is_building:
+        confidence_reasons.append("건물 centroid는 실제 임대 가능 호실·점포 위치가 아니며 주용도 기반 seed")
     if weak_only:
         confidence_reasons.append("긍정 근거가 전부 '약한 배경 신호'(FC-08·31·07) — 검증된 품질 신호 아님")
     if proxy_scope:
@@ -1439,6 +1555,8 @@ def build_candidate(
         "coord_reproject_5186_to_5181", "nearest_station_distance", "nearest_bus_stop_distance",
         "transit_count_by_radius", "households_by_radius", "flow_per_area_normalize", "rent_unpivot",
     ]
+    if is_building:
+        normalizations.extend(["building_use_group_from_primary_use", "building_gross_floor_area_m2"])
     if naver_industry_attention:
         normalizations.extend(["rel_index_by_anchor", "recent_3m_mean_no_seasonal_adjustment", "yoy_clean_recent_mean", "seasonal_phase_label"])
     if synthetic and gen_ev:
@@ -1469,6 +1587,13 @@ def build_candidate(
         "apartment": {"observed_end_period": "2026-08", "periods_behind_latest": 0, "update_cadence": "snapshot", "is_partial_latest": False},
         "rent": {"observed_end_period": rent_period, "periods_behind_latest": 0, "update_cadence": "quarterly", "is_partial_latest": False},
     }
+    if is_building:
+        freshness["commercial_building"] = {
+            "observed_end_period": seed.get("snapshot") or "20260809",
+            "periods_behind_latest": 0,
+            "update_cadence": "snapshot",
+            "is_partial_latest": False,
+        }
     if include_poi_context:
         coverage_payload["poi_context"] = {
             "matched": 1 if poi_context else 0,
@@ -1599,7 +1724,19 @@ def _preference_anchor_rank(candidate: dict[str, Any], preferences: dict[str, An
         for item in preferences.get("location_preferences", [])
         if isinstance(item, dict) and item.get("mode", "prefer") == "prefer" and item.get("anchor_type") in type_map
     }
-    return 0 if anchor_type in requested else 1
+    if anchor_type in requested:
+        return 0
+    # 건축물대장 seed처럼 후보 자체가 역이 아닌 경우에도 "역에서
+    # 장사하고 싶음"을 무시하지 않는다. 후보 주변 관측 anchor가 300m
+    # 이내인 경우 같은 fit_tier 안에서 우선 노출한다. 이는 선호 정렬이지
+    # 후보 등급·Evidence를 바꾸는 판정이 아니다.
+    nearby = candidate.get("location", {}).get("nearby_anchors", [])
+    if any(
+        item.get("type") in requested and (item.get("distance_m") or float("inf")) <= 300
+        for item in nearby if isinstance(item, dict)
+    ):
+        return 0
+    return 1
 
 
 def _order_by_preferences(candidates: list[dict[str, Any]], preferences: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1619,8 +1756,9 @@ def _order_by_preferences(candidates: list[dict[str, Any]], preferences: dict[st
 # 두 소스는 로더의 **반환 자료구조를 100% 동일하게** 유지한다. build_candidate
 # 이하 판정·근거·스키마 로직은 소스를 구분하지 않는다. DB 소스는 스코어링에
 # 들어가는 무거운 분기 팩트(점포·추정매출·유동인구·상권변화지표)와 영역
-# 폴리곤만 담당하고, seed·반경·뉴스·임대료·네이버·POI컨텍스트 등 경량 스냅샷·
-# 파생·보조 맥락은 두 모드 모두 원천 파일에서 읽는다.
+# 폴리곤을 DB에서 읽는다. seed·반경·뉴스·임대료·네이버·POI컨텍스트 등 경량
+# 스냅샷·파생·보조 맥락도 DB에 보완 적재된 경우 DB에서 읽으며, 파일 모드는
+# 동일한 자료구조를 원천 파일에서 만든다.
 
 # (folder, token) → (dataset, grain). run_pipeline 의 load_scope_index 호출과 1:1.
 _DB_SCOPE_MAP: dict[tuple[str, str], tuple[str, str]] = {
@@ -1656,8 +1794,8 @@ class FileSource:
         return build_environment(current, previous, quarter, scope_key)
 
     # seed·반경·네이버·뉴스·임대료·crosswalk — 원천 파일 그대로
-    def seeds(self, target_buffer, include_poi, generated_path):
-        return load_seeds(target_buffer, include_poi, generated_path)
+    def seeds(self, target_buffer, include_poi, generated_path, seed_mode="buildings"):
+        return load_seeds(target_buffer, include_poi, generated_path, seed_mode)
 
     def radius_points(self):
         return load_radius_points()
@@ -1685,7 +1823,7 @@ class FileSource:
 
 
 class DbSource:
-    """PostgreSQL(Docker ideaton-db) 소스 (--source db, 기본).
+    """PostgreSQL/PostGIS 소스 (--source db, 기본).
 
     영역 폴리곤 = location.area, 분기 팩트 = location.{store,sales,flow}_quarter +
     context.metric_snapshot(상권변화지표), 지역 배경 = location.area_store_totals.
@@ -1847,7 +1985,32 @@ class DbSource:
         )
         return [json.loads(r["attributes"]) for r in rows]
 
-    def seeds(self, target_buffer, include_poi, generated_path):
+    def _building_rows(self) -> list[dict[str, str]]:
+        rows = self._query(
+            "SELECT building_pk AS \"건물관리번호\", pnu AS \"PNU\", "
+            "sigungu_code AS \"시군구코드\", sigungu_name AS \"시군구명\", "
+            "legal_dong_code AS \"법정동코드\", lot_address AS \"대지위치\", "
+            "lot_number AS \"지번\", lot_kind AS \"지번구분\", "
+            "use_code AS \"용도코드\", use_name AS \"용도명\", use_group AS \"용도군\", "
+            "floors_above AS \"지상층수\", floors_below AS \"지하층수\", "
+            "building_area_m2 AS \"건축면적_㎡\", gross_floor_area_m2 AS \"연면적_㎡\", "
+            "building_age_years AS \"건물연식_년\", "
+            "area_join_type AS \"상권_결합\", "
+            "replace(host_area_id, 'commercial_area:', '') AS \"상권_코드\", "
+            "admin_dong_code AS \"행정동_코드\", admin_dong_name AS \"행정동_명\", "
+            "ST_X(point) AS x_5181, ST_Y(point) AS y_5181 "
+            "FROM context.commercial_building WHERE point IS NOT NULL "
+            "ORDER BY building_pk, snapshot"
+        )
+        return rows
+
+    def seeds(self, target_buffer, include_poi, generated_path, seed_mode="buildings"):
+        if seed_mode not in {"anchors", "buildings", "hybrid"}:
+            raise PipelineInputError("seed_mode는 anchors, buildings, hybrid 중 하나여야 합니다.")
+        if seed_mode == "buildings":
+            building_src = self._prov_str("data/건축물대장", "상가건물_서울")
+            return load_building_seeds(target_buffer, self._building_rows(), building_src)
+
         out: list[dict[str, Any]] = []
         apt_src = self._prov_str("data/공동주택", "아파트단지_서울")
         for row in self._anchor_rows("apartment"):
@@ -1883,6 +2046,10 @@ class DbSource:
                     out.append(_poi_seed(row, point, r["source_file"]))
         if generated_path is not None:
             out.extend(load_generated_seeds(generated_path, target_buffer))
+        if seed_mode == "hybrid":
+            building_src = self._prov_str("data/건축물대장", "상가건물_서울")
+            buildings = load_building_seeds(target_buffer, self._building_rows(), building_src)
+            return merge_seeds(out) + buildings
         return merge_seeds(out)
 
     def radius_points(self):
@@ -2043,12 +2210,14 @@ def run_pipeline(
     request: RecommendationRequest, out_dir: Path | None = None, include_poi: bool = False,
     include_poi_context: bool = False, limit: int | None = None,
     generated_points: Path | None = None, include_news: bool = True,
-    source: str = "db", llm_mode: str = "auto",
+    source: str = "db", llm_mode: str = "auto", seed_mode: str = "buildings",
 ) -> dict[str, Any]:
     if request.industry_code is not None and request.industry_code not in SUPPORTED_INDUSTRIES:
         raise PipelineInputError(f"지원하지 않는 업종 코드: {request.industry_code}")
     if limit is not None and not 1 <= limit <= 50:
         raise PipelineInputError("limit은 1 이상 50 이하이어야 합니다.")
+    if seed_mode not in {"anchors", "buildings", "hybrid"}:
+        raise PipelineInputError("seed_mode는 anchors, buildings, hybrid 중 하나여야 합니다.")
     selected_region = {"sido": request.sido, "sigungu": request.sigungu, "dong": request.dong}
     try:
         input_interpretation = plan_input(
@@ -2072,6 +2241,7 @@ def run_pipeline(
     preferences = input_interpretation.get("preferences", {})
     src = make_source(source)
     data_source_manifest = src.describe()
+    data_source_manifest["seed_mode"] = seed_mode
     trdar_layer, hinterland_layer, dong_layer, sigungu_by_prefix = src.layers()
     selected_dongs, target_poly, target_buffer = resolve_region(request, dong_layer, sigungu_by_prefix)
     target_sigungu = request.sigungu
@@ -2112,7 +2282,7 @@ def run_pipeline(
     all_sales_pp = [num(all_sales_rows[key], "당월_매출_금액") / num(all_store_rows[key], "전체_점포_수") for key in all_sales_rows if key in all_store_rows and num(all_sales_rows[key], "당월_매출_금액") is not None and num(all_store_rows[key], "전체_점포_수") not in (None, 0)]
     stations, buses, apts, radius_paths = src.radius_points()
     poi_context = load_completed_poi_context(request) if include_poi_context else None
-    seeds = src.seeds(target_buffer, include_poi, generated_points)
+    seeds = src.seeds(target_buffer, include_poi, generated_points, seed_mode)
     if not seeds:
         raise PipelineDependencyError("선택 범위에 추천 seed 데이터가 없습니다.")
 
@@ -2203,6 +2373,7 @@ def run_pipeline(
         "generated_points": str(generated_points) if generated_points else None,
         "include_poi": include_poi, "include_poi_context": include_poi_context,
         "include_news": include_news,
+        "seed_mode": seed_mode,
         "news_context": {
             "used": bool(news_catalogs),
             "query_label": " | ".join(catalog.query_label for catalog in news_catalogs) or None,
@@ -2269,7 +2440,7 @@ def run_pipeline(
         manifest_source_paths.update(candidate["feature_build"].get("sources", []))
     manifest = {"pipeline": "recommendation_pipeline_v2_llm_input", "build_passed": not errors, "request": request_payload,
                 "candidate_count": len(candidates), "source_paths": sorted(manifest_source_paths),
-                "data_source": data_source_manifest,
+                "data_source": data_source_manifest, "seed_mode": seed_mode,
                 "input_interpretation": input_interpretation,
                 "explanation": explanations["llm"],
                 "validation": {"schema_errors": errors, "generated_by": "GPT(Codex)", "generated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()}}
@@ -2285,6 +2456,7 @@ def run_pipeline(
         f"- 입력 해석: {input_interpretation['planner']['execution']} · confidence={input_interpretation['parse_confidence']}",
         f"- 분석 계획: {len(input_interpretation['analysis_plan'])}개(read-only)",
         f"- 설명 생성: {explanations['explanation_mode']} · degraded={explanations['degraded']}",
+        f"- seed_mode: {seed_mode}",
         "- 매물·공실·성공 outcome이 없는 조건은 `missing_features`/`unsupported_conditions`로 유지한다.",
     ]
     if errors:
@@ -2328,6 +2500,8 @@ def main() -> int:
                         help="분기 팩트·영역 폴리곤 소스. db(기본)=PostgreSQL(Docker ideaton-db), files=원천 CSV/shp")
     parser.add_argument("--llm-mode", choices=("auto", "required", "offline"), default="auto",
                         help="auto=설정된 hosted LLM 사용·없으면 폴백, required=LLM 필수, offline=LLM 호출 안 함")
+    parser.add_argument("--seed-mode", choices=("anchors", "buildings", "hybrid"), default="buildings",
+                        help="buildings(건축물대장 건물 centroid 기본), anchors(기존 역·단지·POI), hybrid(둘 다)")
     parser.add_argument("--db-url", help="--source db 접속 문자열 오버라이드(기본: .env DATABASE_URL 또는 POSTGRES_*)")
     parser.add_argument("--limit", type=int)
     args = parser.parse_args()
@@ -2338,7 +2512,7 @@ def main() -> int:
     try:
         result = run_pipeline(request, args.out, args.include_poi, args.include_poi_context, args.limit,
                               args.include_generated_points, include_news=not args.no_news_context,
-                              source=args.source, llm_mode=args.llm_mode)
+                              source=args.source, llm_mode=args.llm_mode, seed_mode=args.seed_mode)
     except PipelineError as exc:
         print(f"FAIL: {exc}")
         return 2
