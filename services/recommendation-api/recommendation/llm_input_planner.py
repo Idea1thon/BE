@@ -1,7 +1,8 @@
 """Natural-language input interpretation for the recommendation pipeline.
 
-LLM output is a proposal. The returned conditions are normalized and the
-caller must still validate the resolved request before querying data.
+LLM output is a proposal. Conditions and natural-language preferences are
+normalized separately; the caller must still validate the resolved request
+before querying data.
 """
 from __future__ import annotations
 
@@ -40,6 +41,13 @@ ALLOWED_CONDITION_KEYS = {
     "monthly_rent_max_krw", "deposit_max_krw", "store_area_min_m2", "store_area_max_m2",
     "parking_required", "target_customer", "operating_hours", "business_mode",
 }
+ALLOWED_PREFERENCE_KEYS = {
+    "location_preferences", "demand_preferences", "time_preferences",
+    "competition_preferences", "business_preferences", "comparison_requests",
+}
+ALLOWED_ANCHOR_TYPES = {"station", "apartment", "bus_stop", "poi"}
+ALLOWED_PREFERENCE_STRENGTHS = {"explicit", "inferred", "weak"}
+ALLOWED_PREFERENCE_MODES = {"prefer", "avoid", "require"}
 ALLOWED_PLAN_TOOLS = {
     "feature_store.lookup", "candidate_engine.select_candidates",
     "evidence_builder.build", "quality_gate.validate",
@@ -170,6 +178,61 @@ def parse_conditions(text: str) -> dict[str, Any]:
     }
 
 
+def parse_preferences(text: str) -> dict[str, list[dict[str, Any]]]:
+    """Extract non-numeric user intent into separate, extensible contracts.
+
+    These are not hard conditions. They preserve what the user wants (or what
+    the planner inferred) so the candidate engine can apply a documented
+    policy instead of forcing every request into the rent/area condition map.
+    """
+    text = text or ""
+    location: list[dict[str, Any]] = []
+    demand: list[dict[str, Any]] = []
+    time: list[dict[str, Any]] = []
+    competition: list[dict[str, Any]] = []
+
+    if re.search(r"지하철\s*(역|역세권)|역\s*(근처|앞|에서)|역세권", text):
+        location.append({
+            "type": "near_anchor", "anchor_type": "station", "distance_max_m": None,
+            "mode": "prefer", "strength": "explicit", "source_text": text[:240],
+        })
+    if re.search(r"버스\s*(정류장|정류소)\s*(근처|앞)|버스\s*접근성", text):
+        location.append({
+            "type": "near_anchor", "anchor_type": "bus_stop", "distance_max_m": None,
+            "mode": "prefer", "strength": "explicit", "source_text": text[:240],
+        })
+
+    customer_map = {
+        "직장인": "office_worker", "회사원": "office_worker", "학생": "student",
+        "대학생": "student", "관광객": "tourist", "주민": "resident",
+        "가족": "family", "외국인": "foreigner",
+    }
+    for term, value in customer_map.items():
+        if term in text:
+            demand.append({"type": "target_customer", "value": value, "strength": "explicit", "source_text": text[:240]})
+    if re.search(r"직장인|회사원", text) and re.search(r"많|주요|대상|상권", text):
+        demand.append({"type": "demand_profile", "value": "office_worker", "strength": "explicit", "source_text": text[:240]})
+
+    time_map = (("아침|출근|오전|모닝", "morning"), ("점심|낮", "afternoon"),
+                ("저녁|퇴근", "evening"), ("밤|야간|새벽", "night"))
+    for pattern, value in time_map:
+        if re.search(pattern, text):
+            time.append({"type": "preferred_demand_window", "value": value, "strength": "explicit", "source_text": text[:240]})
+
+    if re.search(r"경쟁(이|은|는)?\s*(적|낮|덜)|경쟁이\s*심하지|경쟁\s*과하지", text):
+        competition.append({"type": "avoid_high_competition", "strength": "explicit", "source_text": text[:240]})
+
+    return {
+        "location_preferences": location,
+        "demand_preferences": demand,
+        "time_preferences": time,
+        "competition_preferences": competition,
+        "business_preferences": [],
+        "comparison_requests": [],
+        "unsupported_requests": [],
+    }
+
+
 def _industry_candidates(text: str, explicit_code: str | None) -> list[dict[str, Any]]:
     if explicit_code:
         return [{"industry_code": explicit_code, "name": INDUSTRY_NAMES[explicit_code], "confidence": 1.0, "source": "ui"}]
@@ -181,11 +244,11 @@ def _industry_candidates(text: str, explicit_code: str | None) -> list[dict[str,
     return found
 
 
-def _default_plan(industry_code: str | None, conditions: dict[str, Any]) -> list[dict[str, Any]]:
+def _default_plan(industry_code: str | None, conditions: dict[str, Any], preferences: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     dimensions = ["현재수요", "경쟁·시장수용", "진입건전성", "비용부담", "수요구성", "미래신호", "데이터신뢰도"]
     return [
         {"tool": "feature_store.lookup", "purpose": "선택 지역·업종·분기별 검증된 피처 조회", "read_only": True, "dimensions": dimensions},
-        {"tool": "candidate_engine.select_candidates", "purpose": "경계·seed·하드조건 기준 후보 생성 및 판정", "read_only": True, "industry_code": industry_code, "condition_keys": sorted(k for k in conditions if k in ALLOWED_CONDITION_KEYS)},
+        {"tool": "candidate_engine.select_candidates", "purpose": "경계·seed·하드조건·입지 선호 기준 후보 생성 및 판정", "read_only": True, "industry_code": industry_code, "condition_keys": sorted(k for k in conditions if k in ALLOWED_CONDITION_KEYS), "preference_keys": sorted(k for k in (preferences or {}) if k in ALLOWED_PREFERENCE_KEYS)},
         {"tool": "evidence_builder.build", "purpose": "후보별 출처·기간·공간 단위·반대 근거가 있는 Evidence 조립", "read_only": True},
         {"tool": "quality_gate.validate", "purpose": "스키마·grain·출처·주장 유형 검증", "read_only": True},
     ]
@@ -302,6 +365,44 @@ def _valid_inference_hypotheses(raw: Any) -> list[dict[str, Any]]:
     return output
 
 
+def _valid_preferences(raw: Any, baseline: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    """Validate LLM preference contracts without letting them become filters."""
+    output = {key: list(value) for key, value in baseline.items() if key in ALLOWED_PREFERENCE_KEYS or key == "unsupported_requests"}
+    if not isinstance(raw, dict):
+        return output
+    for key in ALLOWED_PREFERENCE_KEYS:
+        items = raw.get(key)
+        if not isinstance(items, list):
+            continue
+        accepted: list[dict[str, Any]] = []
+        for item in items[:12]:
+            if not isinstance(item, dict) or not str(item.get("type") or "").strip():
+                continue
+            record = {"type": str(item["type"]).strip()[:80], "source_text": str(item.get("source_text") or "").strip()[:240]}
+            if not record["source_text"]:
+                continue
+            strength = item.get("strength")
+            record["strength"] = strength if strength in ALLOWED_PREFERENCE_STRENGTHS else "inferred"
+            if item.get("value") is not None:
+                record["value"] = str(item["value"]).strip()[:80]
+            mode = item.get("mode")
+            if mode in ALLOWED_PREFERENCE_MODES:
+                record["mode"] = mode
+            anchor_type = item.get("anchor_type")
+            if anchor_type is not None and anchor_type not in ALLOWED_ANCHOR_TYPES:
+                continue
+            if record["type"] == "near_anchor" and anchor_type not in ALLOWED_ANCHOR_TYPES:
+                continue
+            if anchor_type in ALLOWED_ANCHOR_TYPES:
+                record["anchor_type"] = item["anchor_type"]
+            distance = item.get("distance_max_m")
+            if isinstance(distance, (int, float)) and math.isfinite(distance) and 0 <= distance <= 5000:
+                record["distance_max_m"] = round(float(distance), 1)
+            accepted.append(record)
+        output[key] = list(output.get(key, [])) + accepted
+    return output
+
+
 def plan_input(
     selected_region: dict[str, str | None],
     raw_user_text: str,
@@ -311,8 +412,9 @@ def plan_input(
     """Return a validated input proposal; no data query is performed here."""
     text = raw_user_text or ""
     baseline_conditions = parse_conditions(text)
+    baseline_preferences = parse_preferences(text)
     fallback_candidates = _industry_candidates(text, explicit_industry_code)
-    fallback_plan = _default_plan(explicit_industry_code or (fallback_candidates[0]["industry_code"] if len(fallback_candidates) == 1 else None), baseline_conditions)
+    fallback_plan = _default_plan(explicit_industry_code or (fallback_candidates[0]["industry_code"] if len(fallback_candidates) == 1 else None), baseline_conditions, baseline_preferences)
     config = LLMConfig.from_env(llm_mode)
     planner_mode = "deterministic_fallback"
     remote_error = None
@@ -325,6 +427,7 @@ def plan_input(
 선택 지역은 절대 변경하지 말고, 자유 텍스트에 실제로 표현된 값만 반환하라.
 업종은 CS100001~CS100010 중에서만 고르며, 업종을 확정할 수 없으면 후보를 억지로 하나로 만들지 말고 확인 질문을 반환하라.
 숫자는 원화 또는 m²로 정규화할 수 있다. 원문에 없는 값은 조건 필드로 확정하지 말고, 필요하면 별도 분석 가설로 표시하라.
+사용자가 "지하철역에서 장사하고 싶다", "직장인이 많은 곳", "경쟁이 덜한 곳"처럼 말하면 이를 conditions에 끼워 넣지 말고 preferences에 의도·선호 계약으로 보존하라. preferences는 location_preferences, demand_preferences, time_preferences, competition_preferences, business_preferences, comparison_requests 배열을 사용한다. 각 항목에는 type, source_text, strength를 넣고, 역·아파트·버스정류장·POI 근접 선호는 anchor_type으로 표현하라. 선호 방향은 prefer/avoid/require 중 하나로 표현하되, 원문에 없는 구체적 거리·수치·사실은 만들지 말라.
 매물·공실·성공확률·미래 결과는 관측 사실이 아니라면 추정·가설·시나리오로 명시하라.
 analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
 추가 분석 가설이 필요하면 inference_hypotheses에만 넣고 status=unverified를 사용하라.
@@ -335,8 +438,10 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
             "raw_user_text": text,
             "allowed_industries": INDUSTRY_NAMES,
             "allowed_condition_keys": sorted(ALLOWED_CONDITION_KEYS),
+            "allowed_preference_keys": sorted(ALLOWED_PREFERENCE_KEYS),
+            "allowed_anchor_types": sorted(ALLOWED_ANCHOR_TYPES),
             "allowed_tools": sorted(ALLOWED_PLAN_TOOLS),
-            "output_shape": {"industry_candidates": [], "conditions": {}, "clarification_questions": [], "unsupported_conditions": [], "analysis_plan": [], "inference_hypotheses": []},
+            "output_shape": {"industry_candidates": [], "conditions": {}, "preferences": {}, "clarification_questions": [], "unsupported_conditions": [], "analysis_plan": [], "inference_hypotheses": []},
         }
         try:
             remote = OpenAICompatibleJsonClient(config).generate_json(prompt, payload)
@@ -373,6 +478,7 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
             elif not candidates:
                 candidates = fallback_candidates
         conditions = _normalize_remote_conditions(remote.get("conditions"), baseline_conditions)
+        preferences = _valid_preferences(remote.get("preferences"), baseline_preferences)
         # These two fields affect pipeline control flow and fit_tier. They
         # must come only from the deterministic parser; an LLM response is
         # never allowed to inject a confirmation stop or an unsupported
@@ -387,6 +493,7 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
         conditions = baseline_conditions
         questions = []
         plan = fallback_plan
+        preferences = baseline_preferences
         inference_hypotheses = []
         parse_confidence = "high" if explicit_industry_code or len(candidates) == 1 else "low"
 
@@ -402,6 +509,7 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
         "industry_candidates": candidates,
         "resolved_industry_code": resolved,
         "conditions": conditions,
+        "preferences": preferences,
         "parse_confidence": parse_confidence if parse_confidence in {"high", "medium", "low"} else "medium",
         "clarification_questions": _dedupe(questions),
         "confirmation_required": bool(questions),

@@ -96,7 +96,7 @@ macOS는 `brew install libpq` 후 `psql`이 PATH에 있는지 확인하고, Debi
 
 응답은 `request_id`, `run_id`, `status`, `summary`, `candidates`, `explanations`, `input_interpretation`을 반환한다. LLM이 생성한 추가 추론은 `inference_hypotheses`로 분리되어 `status=unverified`로 표시된다.
 
-특별조건의 현재 판정 경계도 명시한다. 개별 매물 데이터가 없는 월세·보증금·면적·주차 조건은 `unsupported_conditions`와 `missing_features`에 남기고, 후보 `fit_tier`는 `추천`으로 올리지 않는다. 고객층·영업시간·영업 방식은 현재 입력 해석 결과에는 보존되지만 후보 필터·등급에는 연결하지 않으므로, 화면에서는 “해석·설명 전용”으로 표시한다. 이 세 조건을 FC-03·04·05 기반 판정에 반영하는 것은 별도 계약 변경이다.
+특별조건의 현재 판정 경계도 명시한다. 개별 매물 데이터가 없는 월세·보증금·면적·주차 조건은 `unsupported_conditions`와 `missing_features`에 남기고, 후보 `fit_tier`는 `추천`으로 올리지 않는다. 자연어 요구는 `conditions`에 억지로 매핑하지 않고 `input_interpretation.preferences`의 별도 계약으로 보존한다. 예를 들어 “지하철역에서 장사하고 싶음”은 `location_preferences[{type: "near_anchor", anchor_type: "station"}]`이 된다. 현재는 명시적 위치 선호를 Evidence 등급 변경 없이 같은 등급 안에서 우선 노출하며, 고객층·영업시간·영업 방식·경쟁 회피는 해석·설명용으로 보존한다. 이 계약들을 FC 기반 판정에 반영하는 것은 각 데이터 연결을 확인한 뒤 별도 정책으로 추가한다.
 
 실행 정책은 FastAPI 서버 환경변수로 설정한다.
 
@@ -150,7 +150,7 @@ RECOMMENDATION_MAX_CONCURRENT=4
 ## 운영 경계
 
 - 지역 선택값은 UI 입력을 그대로 사용하며 LLM이 지역을 바꾸도록 허용하지 않는다.
-- LLM은 업종·조건·읽기 전용 분석 계획의 제안자일 뿐이며, 허용 목록 검증 후에만 파이프라인을 진행한다.
+- LLM은 업종·조건·자연어 preference·읽기 전용 분석 계획의 제안자일 뿐이며, 허용 목록 검증 후에만 파이프라인을 진행한다. preference는 `source_text`가 없거나 허용되지 않은 anchor를 사용하면 폐기한다.
 - planner의 `clarification_questions`와 `unsupported_conditions`는 결정론적 파서가 생성한 값만 사용한다. 원격 LLM의 동일 필드는 확인 중단이나 후보 등급에 영향을 주지 않는다.
 - `source=db`의 데이터 조회와 후보/Evidence 생성은 `services/recommendation-api/recommendation/pipeline.py`가 수행한다. `services/recommendation-api/scripts/recommendation_pipeline.py`는 CLI 호출을 위한 forwarding entrypoint다.
 - 후보가 만들어진 뒤 설명 LLM의 `reasons`, `counter_evidence`, `context_notes`, `missing_features`는 후보의 결정론적 원문 항목만 복사할 수 있고, `summary`도 후보 등급 기반 canonical 문장만 허용한다. 추가 주소·수치·분기·매물·공실률·성공확률·수익률·인과관계는 `inference_hypotheses`에 `status=unverified`로만 담을 수 있으며, 후보 등급·정렬·하드 조건과 관측 Evidence에는 사용하지 않는다.

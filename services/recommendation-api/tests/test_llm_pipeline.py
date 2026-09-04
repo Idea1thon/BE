@@ -11,7 +11,9 @@ if str(SERVICE_ROOT) not in sys.path:
 from recommendation.llm_explanation import template_card, validate_card
 from recommendation.llm_input_planner import (
     _normalize_remote_conditions,
+    _valid_preferences,
     parse_conditions,
+    parse_preferences,
     plan_input,
 )
 from recommendation.llm_runtime import LLMRuntimeError
@@ -39,6 +41,29 @@ class LLMInputPlannerTests(unittest.TestCase):
         self.assertIsNone(result["resolved_industry_code"])
         self.assertTrue(result["confirmation_required"])
         self.assertTrue(result["clarification_questions"])
+
+    def test_natural_language_location_intent_is_preserved_as_preference(self):
+        result = plan_input(
+            self.REGION,
+            "지하철역에서 장사하고 싶음",
+            explicit_industry_code="CS100010",
+            llm_mode="offline",
+        )
+        self.assertEqual(result["conditions"]["unsupported_conditions"], [])
+        self.assertEqual(result["preferences"]["location_preferences"][0]["anchor_type"], "station")
+        self.assertEqual(result["preferences"]["location_preferences"][0]["mode"], "prefer")
+
+    def test_llm_preference_contract_requires_source_and_known_anchor(self):
+        baseline = parse_preferences("커피 매장")
+        result = _valid_preferences({
+            "location_preferences": [
+                {"type": "near_anchor", "anchor_type": "station", "source_text": "역 근처", "strength": "inferred"},
+                {"type": "near_anchor", "anchor_type": "unknown", "source_text": "알 수 없는 곳"},
+                {"type": "near_anchor", "anchor_type": "station"},
+            ],
+        }, baseline)
+        self.assertEqual(len(result["location_preferences"]), 1)
+        self.assertEqual(result["location_preferences"][0]["strength"], "inferred")
 
     def test_llm_cannot_invent_condition_values(self):
         baseline = parse_conditions("월세 300만원 이하, 20평 이상, 주차 가능")

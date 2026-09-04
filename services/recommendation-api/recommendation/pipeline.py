@@ -1582,6 +1582,36 @@ def validate_candidates(candidates: list[dict[str, Any]]) -> list[str]:
     return errors
 
 
+def _preference_anchor_rank(candidate: dict[str, Any], preferences: dict[str, Any]) -> int:
+    """Rank explicit anchor preferences without changing evidence-based tiers.
+
+    A natural-language preference such as "역에서 장사하고 싶다" is a
+    presentation preference, not proof that a location is good.  It therefore
+    only affects deterministic ordering among candidates with the same tier.
+    Missing or unsupported preference data leaves the normal ordering intact.
+    """
+    anchor_type = candidate.get("location", {}).get("anchor", {}).get("type")
+    type_map = {"station": "역", "apartment": "아파트단지", "bus_stop": "버스정류장", "poi": "카카오POI"}
+    requested = {
+        type_map[item.get("anchor_type")]
+        for item in preferences.get("location_preferences", [])
+        if isinstance(item, dict) and item.get("mode", "prefer") == "prefer" and item.get("anchor_type") in type_map
+    }
+    return 0 if anchor_type in requested else 1
+
+
+def _order_by_preferences(candidates: list[dict[str, Any]], preferences: dict[str, Any]) -> list[dict[str, Any]]:
+    """Keep tier and evidence ordering, surfacing requested anchor types first."""
+    if not preferences.get("location_preferences"):
+        return candidates
+    indexed = list(enumerate(candidates))
+    return [candidate for _, candidate in sorted(indexed, key=lambda pair: (
+        0 if pair[1].get("fit_tier") == "추천" else 1 if pair[1].get("fit_tier") == "조건부 검토" else 2,
+        _preference_anchor_rank(pair[1], preferences),
+        pair[0],
+    ))]
+
+
 # ─── 데이터 소스: 원천 파일 vs PostgreSQL ────────────────────────────
 #
 # 두 소스는 로더의 **반환 자료구조를 100% 동일하게** 유지한다. build_candidate
@@ -2021,6 +2051,7 @@ def run_pipeline(
     if not re.fullmatch(r"[0-9]{4}[1-4]", request.quarter):
         raise PipelineInputError(f"분기 코드는 YYYYQ 형식(마지막 자리는 1~4)이어야 합니다: {request.quarter}")
     conditions = input_interpretation["conditions"]
+    preferences = input_interpretation.get("preferences", {})
     src = make_source(source)
     data_source_manifest = src.describe()
     trdar_layer, hinterland_layer, dong_layer, sigungu_by_prefix = src.layers()
@@ -2101,6 +2132,7 @@ def run_pipeline(
                     ordered.append(buckets[t][cursors[t]])
                     cursors[t] += 1
     candidates = ordered
+    candidates = _order_by_preferences(candidates, preferences)
     if limit is not None:
         candidates = candidates[:limit]
     try:
@@ -2138,6 +2170,7 @@ def run_pipeline(
         "greenfield_count": sum(c["greenfield"] for c in candidates),
         "schema_error_count": len(errors), "coverage": dict(coverage),
         "unsupported_conditions": conditions["unsupported_conditions"],
+        "preferences": preferences,
         "synthetic_anchor_count": sum(1 for c in candidates if c.get("synthetic_anchor")),
         "generated_points": str(generated_points) if generated_points else None,
         "include_poi": include_poi, "include_poi_context": include_poi_context,
