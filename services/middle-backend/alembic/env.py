@@ -7,6 +7,7 @@ from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
+from app.db.autogenerate import include_object as _include_object
 from app.db.base import Base
 from app import models  # noqa: F401  — 모델 등록
 
@@ -27,15 +28,6 @@ def run_migrations_offline() -> None:
     )
     with context.begin_transaction():
         context.run_migrations()
-
-
-def _include_object(obj, name, type_, reflected, compare_to) -> bool:
-    """물리 스키마 정본은 DB_SCHEMA.md의 DDL이다.
-
-    ORM 모델에는 인덱스를 선언하지 않으므로, 그대로 두면 autogenerate가
-    마이그레이션이 만든 인덱스를 전부 삭제 대상으로 제안한다. 인덱스는 비교에서 뺀다.
-    """
-    return type_ != "index"
 
 
 def _do_run_migrations(connection) -> None:
