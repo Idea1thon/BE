@@ -96,6 +96,12 @@ class PipelineRecommendationRequest(BaseModel):
     region: RegionInput
     industry_code: str | None = Field(default=None, max_length=20)
     special_condition_text: str = Field(default="", max_length=2_000)
+    limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=50,
+        description="반환할 후보 수. 생략하면 서버 기본값을 사용합니다.",
+    )
 
 
 @dataclass(frozen=True)
@@ -315,6 +321,7 @@ def _run_pipeline_with_slot(
     pipeline_request: RecommendationRequest,
     out_dir: Path,
     config: ServiceConfig,
+    limit: int,
 ) -> dict[str, Any]:
     """Run in the worker and release capacity only after the worker exits.
 
@@ -328,7 +335,7 @@ def _run_pipeline_with_slot(
             out_dir,
             config.include_poi,
             config.include_poi_context,
-            config.limit,
+            limit,
             None,
             config.include_news,
             config.source,
@@ -363,6 +370,7 @@ def _response_payload(run_id: str, payload: PipelineRecommendationRequest, resul
         },
         "industry_code": result["input_interpretation"].get("resolved_industry_code") or payload.industry_code,
         "special_condition_text": payload.special_condition_text,
+        "limit": result["summary"].get("applied_limit"),
     }
     # Do not expose the local filesystem path. The run is already persisted
     # under RECOMMENDATION_API_OUT_ROOT for later operational retrieval.
@@ -469,6 +477,7 @@ async def create_recommendation(
             })
     _validate_common_input(payload)
     config = _service_config()
+    applied_limit = payload.limit if payload.limit is not None else config.limit
     if not _try_acquire_recommendation_slot(config.max_concurrent):
         raise HTTPException(status_code=429, detail={
             "code": "recommendation_capacity_exceeded",
@@ -484,6 +493,7 @@ async def create_recommendation(
                 _pipeline_request(payload, config),
                 out_dir,
                 config,
+                applied_limit,
             ),
             timeout=config.request_timeout_s,
         )
@@ -514,6 +524,7 @@ async def create_recommendation(
             detail=_pipeline_error_detail(exc, payload.request_id, run_id),
         ) from exc
 
+    result["summary"]["applied_limit"] = applied_limit
     return _response_payload(run_id, payload, result)
 
 

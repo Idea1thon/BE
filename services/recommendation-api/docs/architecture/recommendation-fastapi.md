@@ -65,7 +65,21 @@ macOS는 `brew install libpq` 후 `psql`이 PATH에 있는지 확인하고, Debi
 
 ### `POST /internal/recommendations`
 
-중간 백엔드가 호출하는 핵심 파이프라인 REST API다. `/api/recommendations`는 기존 호출 호환용 alias다. FastAPI는 `region`, `industry_code`, `special_condition_text`를 자체 해석하지 않고 기존 파이프라인에 전달한다. `quarter`, `source`, `limit`, `include_poi`, `include_poi_context`, `include_news`, `llm_mode`는 호출자가 보내지 않으며 FastAPI 배포 환경변수로 관리한다. `limit`은 현재 서비스 기본값을 고정하는 정책이며, 화면별 N이 필요해지는 시점에 서버 상한을 둔 선택 필드로 별도 계약을 추가한다.
+중간 백엔드가 호출하는 핵심 파이프라인 REST API다. `/api/recommendations`는 기존 호출 호환용 alias다. FastAPI는 `region`, `industry_code`, `special_condition_text`를 자체 해석하지 않고 기존 파이프라인에 전달한다. `limit`은 선택 요청 필드이며 `1~50` 범위에서만 허용한다. 생략하면 `RECOMMENDATION_DEFAULT_LIMIT`을 사용하고, 응답의 `request.limit`과 `summary.applied_limit`에 실제 적용값을 기록한다. `quarter`, `source`, `include_poi`, `include_poi_context`, `include_news`, `llm_mode`는 호출자가 보내지 않으며 FastAPI 배포 환경변수로 관리한다.
+
+요청 예시:
+
+```json
+{
+  "request_id": "backend-request-123",
+  "region": {"sido": "서울특별시", "sigungu": "송파구", "dong": "잠실동"},
+  "industry_code": "CS100010",
+  "special_condition_text": "월세 300만원 이하",
+  "limit": 3
+}
+```
+
+`limit`이 `0` 이하 또는 `51` 이상이면 요청 계약 위반으로 422를 반환한다.
 
 ```json
 {

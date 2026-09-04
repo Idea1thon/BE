@@ -2133,7 +2133,7 @@ def run_pipeline(
         except LLMRuntimeError as exc:
             raise PipelineDependencyError("추천 설명 LLM을 사용할 수 없습니다.") from exc
     summary = {
-        "candidate_count": len(candidates), "seed_count_before_limit": len(seeds),
+        "candidate_count": len(candidates), "seed_count_before_limit": len(seeds), "applied_limit": limit,
         "fit_tier_counts": dict(Counter(c["fit_tier"] for c in candidates)),
         "greenfield_count": sum(c["greenfield"] for c in candidates),
         "schema_error_count": len(errors), "coverage": dict(coverage),

@@ -112,6 +112,21 @@ class FastApiBoundaryTests(unittest.TestCase):
                 source="files",
             )
 
+    def test_transport_contract_accepts_bounded_limit_and_rejects_invalid_bounds(self) -> None:
+        payload = PipelineRecommendationRequest(
+            region={"sigungu": "송파구", "dong": "잠실동"},
+            industry_code="CS100010",
+            limit=3,
+        )
+        self.assertEqual(payload.limit, 3)
+        for invalid_limit in (0, -1, 51):
+            with self.subTest(limit=invalid_limit), self.assertRaises(ValidationError):
+                PipelineRecommendationRequest(
+                    region={"sigungu": "송파구", "dong": "잠실동"},
+                    industry_code="CS100010",
+                    limit=invalid_limit,
+                )
+
     def test_response_validates_candidates_against_evidence_schema(self) -> None:
         with self.assertRaises(ValidationError):
             RecommendationApiResponse(
@@ -139,6 +154,7 @@ class FastApiBoundaryTests(unittest.TestCase):
             region={"sido": "서울특별시", "sigungu": "송파구", "dong": "잠실동"},
             industry_code="CS100010",
             special_condition_text="월세 300만원 이하, 주차 가능",
+            limit=3,
         )
         with patch("api.main.run_pipeline", return_value=fake_result) as mocked:
             response = asyncio.run(create_recommendation(payload))
@@ -150,6 +166,9 @@ class FastApiBoundaryTests(unittest.TestCase):
         self.assertEqual(forwarded.special_condition_text, "월세 300만원 이하, 주차 가능")
         self.assertEqual(response["request_id"], "backend-42")
         self.assertEqual(response["status"], "completed")
+        self.assertEqual(mocked.call_args.args[4], 3)
+        self.assertEqual(response["request"]["limit"], 3)
+        self.assertEqual(response["summary"]["applied_limit"], 3)
 
     def test_pipeline_errors_are_mapped_without_leaking_server_details(self) -> None:
         payload = PipelineRecommendationRequest(
