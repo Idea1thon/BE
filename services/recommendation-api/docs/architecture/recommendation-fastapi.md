@@ -12,6 +12,7 @@ UI
 FastAPI 파이프라인 경계
         └─ 중간 백엔드 요청을 그대로 recommendation_pipeline에 전달
                 └─ 입력 해석·결정론적 계약 검증
+                └─ LLM retrieval_requests 검증 → allowlisted read-only DB tool 실행
                 └─ 읽기 전용 데이터 분석
                 └─ 후보·Evidence 생성 및 검증
                 └─ LLM 설명(검증 실패 시 안전한 템플릿 폴백)
@@ -98,6 +99,15 @@ macOS는 `brew install libpq` 후 `psql`이 PATH에 있는지 확인하고, Debi
 
 특별조건의 현재 판정 경계도 명시한다. 개별 매물 데이터가 없는 월세·보증금·면적·주차 조건은 `unsupported_conditions`와 `missing_features`에 남기고, 후보 `fit_tier`는 `추천`으로 올리지 않는다. 자연어 요구는 `conditions`에 억지로 매핑하지 않고 `input_interpretation.preferences`의 별도 계약으로 보존한다. 예를 들어 “지하철역에서 장사하고 싶음”은 `location_preferences[{type: "near_anchor", anchor_type: "station"}]`이 된다. 현재는 명시적 위치 선호를 Evidence 등급 변경 없이 같은 등급 안에서 우선 노출하며, 고객층·영업시간·영업 방식·경쟁 회피는 해석·설명용으로 보존한다. 이 계약들을 FC 기반 판정에 반영하는 것은 각 데이터 연결을 확인한 뒤 별도 정책으로 추가한다.
 
+LLM은 임의 SQL을 생성하거나 실행하지 않는다. 입력 해석 결과의 `retrieval_requests`에는
+`search_region_evidence`와 `sales/stores/flow/change` dimension만 요청할 수 있다.
+서버가 지역·업종·분기를 요청 DTO에서 바인딩하고, 허용된 테이블·조인·행 수로 SQL을
+생성한다. 실행 결과는 `summary.retrieval`과 `input_interpretation.retrieval`에
+출처가 붙은 보조 컨텍스트로 남으며, 후보 Evidence·등급·정렬을 직접 덮어쓰지 않는다.
+LLM 설명 단계는 이 컨텍스트를 참고할 수 있지만 관측 설명에는 후보 Evidence만 사용할
+수 있다. `source=files` 또는 오프라인 모드에서는 도구 호출을 실행하지 않고 skip으로
+기록한다.
+
 실행 정책은 FastAPI 서버 환경변수로 설정한다.
 
 ```text
@@ -150,7 +160,7 @@ RECOMMENDATION_MAX_CONCURRENT=4
 ## 운영 경계
 
 - 지역 선택값은 UI 입력을 그대로 사용하며 LLM이 지역을 바꾸도록 허용하지 않는다.
-- LLM은 업종·조건·자연어 preference·읽기 전용 분석 계획의 제안자일 뿐이며, 허용 목록 검증 후에만 파이프라인을 진행한다. preference는 `source_text`가 없거나 허용되지 않은 anchor를 사용하면 폐기한다.
+- LLM은 업종·조건·자연어 preference·읽기 전용 검색 계획의 제안자일 뿐이며, 허용 목록 검증 후에만 파이프라인을 진행한다. preference는 `source_text`가 없거나 허용되지 않은 anchor를 사용하면 폐기한다. retrieval 요청은 임의 SQL·테이블·조인을 받지 않는다.
 - planner의 `clarification_questions`와 `unsupported_conditions`는 결정론적 파서가 생성한 값만 사용한다. 원격 LLM의 동일 필드는 확인 중단이나 후보 등급에 영향을 주지 않는다.
 - `source=db`의 데이터 조회와 후보/Evidence 생성은 `services/recommendation-api/recommendation/pipeline.py`가 수행한다. `services/recommendation-api/scripts/recommendation_pipeline.py`는 CLI 호출을 위한 forwarding entrypoint다.
 - 후보가 만들어진 뒤 설명 LLM의 `reasons`, `counter_evidence`, `context_notes`, `missing_features`는 후보의 결정론적 원문 항목만 복사할 수 있고, `summary`도 후보 등급 기반 canonical 문장만 허용한다. 추가 주소·수치·분기·매물·공실률·성공확률·수익률·인과관계는 `inference_hypotheses`에 `status=unverified`로만 담을 수 있으며, 후보 등급·정렬·하드 조건과 관측 Evidence에는 사용하지 않는다.

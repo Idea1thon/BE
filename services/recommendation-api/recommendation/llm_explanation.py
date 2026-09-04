@@ -191,7 +191,11 @@ def validate_card(candidate: dict[str, Any], card: Any) -> tuple[bool, list[str]
     return not errors, errors
 
 
-def explain_candidates(candidates: list[dict[str, Any]], llm_mode: str = "auto") -> dict[str, Any]:
+def explain_candidates(
+    candidates: list[dict[str, Any]],
+    llm_mode: str = "auto",
+    retrieval_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     config = LLMConfig.from_env(llm_mode)
     if llm_mode == "required" and not config.available:
         raise LLMRuntimeError("llm-mode=required지만 LLM_API_URL/LLM_API_KEY/LLM_MODEL 설정이 없습니다.")
@@ -214,6 +218,7 @@ reasons, counter_evidence, context_notes는 후보 JSON의 같은 배열 원소�
 missing_features는 후보 JSON의 각 객체를 "feature: reason" 문자열로 변환해 그대로 반환하라.
 각 문장은 관측된 사실 또는 관측된 한계를 설명하는 표현으로만 작성하라.
 후보 JSON에 없는 내용을 관측 Evidence처럼 observed 필드에 넣지 말라.
+retrieval_context는 서버가 실행한 읽기 전용 검색 도구의 보조 컨텍스트다. 후보 JSON의 Evidence와 일치하지 않는 수치를 설명 카드에 추가하지 말라. 검색 결과 자체를 후보 Evidence로 승격하거나 후보 등급·정렬을 변경하지 말라.
 추가 분석이 필요하면 주소·수치·분기·매물·공실률·성공확률·수익률·인과관계도 생성할 수 있지만, 반드시 inference_hypotheses에만 넣고 status=unverified, basis_refs, confidence를 함께 반환하라.
 inference_hypotheses의 값은 관측 Evidence, 후보 등급·정렬, 하드 조건으로 사용되지 않는 분석 가설이다.
 성공·수익을 보장하는 표현은 관측 필드에 쓰지 말고, 인과관계는 causal_hypothesis로만 표시하라.
@@ -223,7 +228,10 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         card = None
         if client:
             try:
-                card = client.generate_json(system_prompt, {"candidate_evidence": candidate})
+                card = client.generate_json(system_prompt, {
+                    "candidate_evidence": candidate,
+                    "retrieval_context": retrieval_context or {"results": []},
+                })
                 valid, validation_errors = validate_card(candidate, card)
                 if valid:
                     card["explanation_mode"] = "llm"

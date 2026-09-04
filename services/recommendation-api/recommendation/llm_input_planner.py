@@ -17,6 +17,7 @@ from .llm_runtime import (
     OpenAICompatibleJsonClient,
     RECOMMENDATION_LLM_POLICY,
 )
+from .rag_tools import validate_retrieval_requests
 
 
 SUPPORTED_INDUSTRIES = {f"CS100{i:03d}" for i in range(1, 11)}
@@ -428,6 +429,7 @@ def plan_input(
 업종은 CS100001~CS100010 중에서만 고르며, 업종을 확정할 수 없으면 후보를 억지로 하나로 만들지 말고 확인 질문을 반환하라.
 숫자는 원화 또는 m²로 정규화할 수 있다. 원문에 없는 값은 조건 필드로 확정하지 말고, 필요하면 별도 분석 가설로 표시하라.
 사용자가 "지하철역에서 장사하고 싶다", "직장인이 많은 곳", "경쟁이 덜한 곳"처럼 말하면 이를 conditions에 끼워 넣지 말고 preferences에 의도·선호 계약으로 보존하라. preferences는 location_preferences, demand_preferences, time_preferences, competition_preferences, business_preferences, comparison_requests 배열을 사용한다. 각 항목에는 type, source_text, strength를 넣고, 역·아파트·버스정류장·POI 근접 선호는 anchor_type으로 표현하라. 선호 방향은 prefer/avoid/require 중 하나로 표현하되, 원문에 없는 구체적 거리·수치·사실은 만들지 말라.
+필요한 근거를 조회해야 하면 retrieval_requests에 search_region_evidence 도구 요청을 넣어라. SQL, 테이블명, 지역명, 업종 코드, 분기를 직접 넣지 말고 dimensions(sales/stores/flow/change)와 조회 이유만 지정하라. 도구 요청은 사용자 의도에 필요한 경우에만 만들고, 서버가 허용 목록을 벗어난 요청을 폐기한다.
 매물·공실·성공확률·미래 결과는 관측 사실이 아니라면 추정·가설·시나리오로 명시하라.
 analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
 추가 분석 가설이 필요하면 inference_hypotheses에만 넣고 status=unverified를 사용하라.
@@ -441,7 +443,7 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
             "allowed_preference_keys": sorted(ALLOWED_PREFERENCE_KEYS),
             "allowed_anchor_types": sorted(ALLOWED_ANCHOR_TYPES),
             "allowed_tools": sorted(ALLOWED_PLAN_TOOLS),
-            "output_shape": {"industry_candidates": [], "conditions": {}, "preferences": {}, "clarification_questions": [], "unsupported_conditions": [], "analysis_plan": [], "inference_hypotheses": []},
+            "output_shape": {"industry_candidates": [], "conditions": {}, "preferences": {}, "retrieval_requests": [], "clarification_questions": [], "unsupported_conditions": [], "analysis_plan": [], "inference_hypotheses": []},
         }
         try:
             remote = OpenAICompatibleJsonClient(config).generate_json(prompt, payload)
@@ -479,6 +481,7 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
                 candidates = fallback_candidates
         conditions = _normalize_remote_conditions(remote.get("conditions"), baseline_conditions)
         preferences = _valid_preferences(remote.get("preferences"), baseline_preferences)
+        retrieval_requests = validate_retrieval_requests(remote.get("retrieval_requests"))
         # These two fields affect pipeline control flow and fit_tier. They
         # must come only from the deterministic parser; an LLM response is
         # never allowed to inject a confirmation stop or an unsupported
@@ -494,6 +497,7 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
         questions = []
         plan = fallback_plan
         preferences = baseline_preferences
+        retrieval_requests = []
         inference_hypotheses = []
         parse_confidence = "high" if explicit_industry_code or len(candidates) == 1 else "low"
 
@@ -510,6 +514,7 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
         "resolved_industry_code": resolved,
         "conditions": conditions,
         "preferences": preferences,
+        "retrieval_requests": retrieval_requests,
         "parse_confidence": parse_confidence if parse_confidence in {"high", "medium", "low"} else "medium",
         "clarification_questions": _dedupe(questions),
         "confirmation_required": bool(questions),

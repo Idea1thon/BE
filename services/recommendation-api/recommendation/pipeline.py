@@ -2,8 +2,9 @@
 
 이 모듈은 ``sample_jamsil_coffee.py``의 잠실·커피 하드코딩을 일반화한
 재사용 가능한 실행 입구다. 성공확률이나 운영용 Top-K 모델을 만들지 않고,
-지역·자연어 입력 → LLM 입력 해석·분석 계획 → 계약 검증 → 읽기 전용 데이터 분석
-→ 지점 seed → host 상권/행정동 배경값 → 반경 지표 → 후보·Evidence 검증
+지역·자연어 입력 → LLM 입력 해석·분석 계획·검색 도구 선택 → 계약 검증
+→ 허용된 읽기 전용 DB 검색 도구 실행 → 데이터 분석 → 지점 seed
+→ host 상권/행정동 배경값 → 반경 지표 → 후보·Evidence 검증
 → LLM 설명(실패 시 템플릿) 순서로 실행한다.
 
 실행 예:
@@ -40,6 +41,7 @@ from .llm_explanation import explain_candidates
 from .llm_input_planner import parse_conditions, plan_input
 from .llm_runtime import LLMRuntimeError
 from .paths import SERVICE_ROOT, find_project_root
+from .rag_tools import execute_retrieval_requests
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Point, shape
 from shapely.ops import unary_union
@@ -1672,6 +1674,15 @@ class FileSource:
     def crosswalk(self):
         return parse_trdar_crosswalk()
 
+    def retrieve_requests(self, requests, selected_region, industry_code, quarter):
+        return {
+            "mode": "files",
+            "requested_count": len(requests),
+            "executed_count": 0,
+            "results": [],
+            "skipped_reason": "controlled DB retrieval은 source=db에서만 실행됩니다.",
+        }
+
 
 class DbSource:
     """PostgreSQL(Docker ideaton-db) 소스 (--source db, 기본).
@@ -1902,11 +1913,10 @@ class DbSource:
         if not points:
             return None, {}
         name = NAVER_INDUSTRY_NAMES[industry_code]
-        season_rows = self._query(
-            "SELECT attributes FROM context.naver_seasonality "
-            f"WHERE grain = '업종' AND key = '{name}'"
-        )
-        season = json.loads(season_rows[0]["attributes"]) if season_rows else {}
+        # 계절성은 후보 판정에 사용하지 않는 선택적 보조 맥락이다. 현재
+        # migration에는 이 테이블이 없을 수 있으며, 파일 모드도 동일하게
+        # 계절성 CSV가 없으면 빈 dict로 계산한다.
+        season = {}
         attn = _naver_attention_compute(points, name, industry_code, season)
         return attn, {"naver_trend": self._provenance("data/네이버트렌드", "업종_검색트렌드_월")}
 
@@ -1937,6 +1947,14 @@ class DbSource:
             "WHERE relation_type = 'rone_to_commercial_proxy' AND join_eligible"
         )
         return {r["trdar"]: {"R_ONE_상권": r["rone"]} for r in rows if r.get("trdar")}
+
+    def retrieve_requests(self, requests, selected_region, industry_code, quarter):
+        try:
+            return execute_retrieval_requests(
+                self._query, requests, selected_region, industry_code, quarter,
+            )
+        except (ValueError, self._db.ServingDbError) as exc:
+            raise PipelineDependencyError("RAG 읽기 전용 검색 도구를 실행하지 못했습니다.") from exc
 
     # -- 뉴스 (context.news_snapshot + news_manifest) ---------------
     def news_catalogs(self, include_news):
@@ -2057,6 +2075,13 @@ def run_pipeline(
     trdar_layer, hinterland_layer, dong_layer, sigungu_by_prefix = src.layers()
     selected_dongs, target_poly, target_buffer = resolve_region(request, dong_layer, sigungu_by_prefix)
     target_sigungu = request.sigungu
+    retrieval_context = src.retrieve_requests(
+        input_interpretation.get("retrieval_requests", []),
+        selected_region,
+        request.industry_code,
+        request.quarter,
+    )
+    input_interpretation["retrieval"] = retrieval_context
 
     # 현재 분기 정규화 feature table용 인덱스. 중복 키는 index_rows에서 즉시 중단한다.
     store_trdar, store_path = src.scope_index("data/점포/2026년", "점포-상권", request.quarter, "상권_코드", request.industry_code)
@@ -2161,7 +2186,9 @@ def run_pipeline(
         }
     else:
         try:
-            explanations = explain_candidates(candidates, llm_mode=llm_mode)
+            explanations = explain_candidates(
+                candidates, llm_mode=llm_mode, retrieval_context=retrieval_context,
+            )
         except LLMRuntimeError as exc:
             raise PipelineDependencyError("추천 설명 LLM을 사용할 수 없습니다.") from exc
     summary = {
@@ -2171,6 +2198,7 @@ def run_pipeline(
         "schema_error_count": len(errors), "coverage": dict(coverage),
         "unsupported_conditions": conditions["unsupported_conditions"],
         "preferences": preferences,
+        "retrieval": retrieval_context,
         "synthetic_anchor_count": sum(1 for c in candidates if c.get("synthetic_anchor")),
         "generated_points": str(generated_points) if generated_points else None,
         "include_poi": include_poi, "include_poi_context": include_poi_context,

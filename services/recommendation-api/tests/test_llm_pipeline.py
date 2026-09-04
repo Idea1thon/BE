@@ -18,6 +18,7 @@ from recommendation.llm_input_planner import (
 )
 from recommendation.llm_runtime import LLMRuntimeError
 from recommendation.pipeline import PipelineDependencyError, RecommendationRequest, run_pipeline
+from recommendation.rag_tools import execute_retrieval_requests, validate_retrieval_requests
 
 
 class LLMInputPlannerTests(unittest.TestCase):
@@ -64,6 +65,34 @@ class LLMInputPlannerTests(unittest.TestCase):
         }, baseline)
         self.assertEqual(len(result["location_preferences"]), 1)
         self.assertEqual(result["location_preferences"][0]["strength"], "inferred")
+
+    def test_retrieval_contract_rejects_arbitrary_sql_and_bounds_dimensions(self):
+        requests = validate_retrieval_requests([
+            {"tool": "search_region_evidence", "dimensions": ["sales", "not_a_table"], "limit": 999},
+            {"tool": "run_sql", "sql": "DROP TABLE location.area"},
+        ])
+        self.assertEqual(requests[0]["dimensions"], ["sales"])
+        self.assertEqual(requests[0]["limit"], 20)
+        self.assertEqual(len(requests), 1)
+
+    def test_retrieval_executor_binds_server_context_and_never_uses_llm_sql(self):
+        captured = []
+
+        def fake_query(sql):
+            captured.append(sql)
+            return [{"spatial_unit_type": "admin_dong", "spatial_unit_code": "A", "spatial_unit_name": "잠실동", "dimension": "sales", "value": "100", "source_table": "location.sales_quarter"}]
+
+        result = execute_retrieval_requests(
+            fake_query,
+            [{"tool": "search_region_evidence", "dimensions": ["sales"], "limit": 2, "reason": "매출 근거"}],
+            {"sido": "서울특별시", "sigungu": "송파구", "dong": "잠실동' OR 1=1 --"},
+            "CS100010",
+            "20261",
+        )
+        self.assertEqual(result["executed_count"], 1)
+        self.assertEqual(len(captured), 1)
+        self.assertIn("잠실동'' OR 1=1 --", captured[0])
+        self.assertNotIn("DROP TABLE", captured[0])
 
     def test_llm_cannot_invent_condition_values(self):
         baseline = parse_conditions("월세 300만원 이하, 20평 이상, 주차 가능")
@@ -129,6 +158,35 @@ class LLMInputPlannerTests(unittest.TestCase):
         self.assertFalse(result["confirmation_required"])
         self.assertEqual(result["clarification_questions"], [])
         self.assertEqual(result["conditions"]["unsupported_conditions"], [])
+
+    def test_llm_can_request_only_allowlisted_retrieval_tool(self):
+        remote = {
+            "industry_candidates": [{"industry_code": "CS100010"}],
+            "conditions": {},
+            "preferences": {},
+            "retrieval_requests": [
+                {"tool": "search_region_evidence", "dimensions": ["sales", "flow"], "limit": 3, "reason": "역세권 수요 확인"},
+                {"tool": "execute_sql", "sql": "SELECT password FROM users"},
+            ],
+            "analysis_plan": [],
+        }
+        with patch.dict(environ, {
+            "LLM_API_URL": "https://llm.example.test",
+            "LLM_API_KEY": "test-key",
+            "LLM_MODEL": "test-model",
+        }, clear=False), patch(
+            "recommendation.llm_input_planner.OpenAICompatibleJsonClient.generate_json",
+            return_value=remote,
+        ):
+            result = plan_input(
+                self.REGION,
+                "커피 매장, 지하철역에서 장사하고 싶음",
+                explicit_industry_code="CS100010",
+                llm_mode="required",
+            )
+        self.assertEqual(len(result["retrieval_requests"]), 1)
+        self.assertEqual(result["retrieval_requests"][0]["dimensions"], ["sales", "flow"])
+        self.assertNotIn("sql", result["retrieval_requests"][0])
 
     def test_required_llm_failure_is_classified_as_dependency_error(self):
         request = RecommendationRequest(
