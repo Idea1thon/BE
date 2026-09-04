@@ -16,7 +16,6 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
-    Enum as SAEnum,
     ForeignKey,
     Numeric,
     SmallInteger,
@@ -25,7 +24,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM as PGEnum, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -39,12 +38,16 @@ from app.models.enums import (
 )
 
 
-def _enum(py_enum, name: str) -> SAEnum:
-    """DB에 이미 존재하는 native enum 타입을 참조한다 (create_type 없음)."""
-    return SAEnum(
+def _enum(py_enum, name: str) -> PGEnum:
+    """DB에 이미 존재하는 native enum 타입을 참조한다.
+
+    generic `sqlalchemy.Enum`은 `create_type`을 인자로 받지 않아 조용히 무시되고,
+    `metadata.create_all()`이 CREATE TYPE을 다시 실행해 마이그레이션이 만든 타입과
+    충돌한다. PostgreSQL 전용 ENUM만 이 옵션을 실제로 적용한다.
+    """
+    return PGEnum(
         py_enum,
         name=name,
-        native_enum=True,
         create_type=False,
         values_callable=lambda e: [m.value for m in e],
     )
