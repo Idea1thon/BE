@@ -6,7 +6,10 @@ from typing import Annotated
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-_INSECURE_DEFAULT_SECRET = "dev-only-change-me"
+# 저장소·예시 파일에 실려 있던 값. 어떤 환경에서도 사용을 막는다.
+_KNOWN_WEAK_SECRETS = frozenset({"dev-only-change-me", "change-me", "changeme", "secret"})
+_MIN_JWT_SECRET_LENGTH = 32
+_SUPPORTED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 
 
 class Settings(BaseSettings):
@@ -23,10 +26,15 @@ class Settings(BaseSettings):
     db_use_null_pool: bool = False
 
     # 인증 (D2: JWT Bearer Access Token + Refresh Token)
-    jwt_secret: str = _INSECURE_DEFAULT_SECRET
+    # JWT_SECRET에는 기본값을 두지 않는다. 기본값이 있으면 .env 없이 기동했을 때
+    # 저장소에 공개된 값으로 임의 계정 토큰을 위조할 수 있다.
+    jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 14
+
+    # 시드 전용 (scripts/seed.py). 기본값을 두지 않는다 — 알려진 비밀번호로 계정이 생긴다.
+    seed_password: str = ""
 
     # CORS — FE(Vite dev server)가 브라우저에서 호출한다.
     # 쉼표로 구분된 문자열 또는 JSON 배열을 받는다. 와일드카드는 허용하지 않는다.
@@ -57,11 +65,33 @@ class Settings(BaseSettings):
             )
         return value
 
-    @model_validator(mode="after")
-    def _reject_default_secret_outside_dev(self) -> "Settings":
-        if self.environment != "development" and self.jwt_secret == _INSECURE_DEFAULT_SECRET:
+    @field_validator("jwt_algorithm")
+    @classmethod
+    def _supported_algorithm(cls, value: str) -> str:
+        if value not in _SUPPORTED_JWT_ALGORITHMS:
             raise ValueError(
-                "JWT_SECRET must be set explicitly when ENVIRONMENT is not 'development'"
+                f"JWT_ALGORITHM must be one of {sorted(_SUPPORTED_JWT_ALGORITHMS)} (got {value!r})"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _require_strong_jwt_secret(self) -> "Settings":
+        """개발 환경을 포함해 모든 환경에서 JWT_SECRET을 요구한다.
+
+        환경으로 조건을 걸면 ENVIRONMENT가 누락됐을 때 기본값 'development'로
+        떨어져 가드가 통과한다. 그래서 환경과 무관하게 검사한다.
+        """
+        secret = self.jwt_secret.strip()
+        if not secret:
+            raise ValueError(
+                "JWT_SECRET is required. 생성: "
+                "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+        if secret in _KNOWN_WEAK_SECRETS:
+            raise ValueError("JWT_SECRET must not be a placeholder value shipped with this repository")
+        if len(secret) < _MIN_JWT_SECRET_LENGTH:
+            raise ValueError(
+                f"JWT_SECRET must be at least {_MIN_JWT_SECRET_LENGTH} characters (got {len(secret)})"
             )
         return self
 

@@ -14,6 +14,7 @@ import os
 
 from sqlalchemy import func, select
 
+from app.core.config import settings
 from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.models import (
@@ -27,8 +28,22 @@ from app.models import (
 )
 from app.models.enums import RegionLevel, RiskLevel, UserType
 
-# 개발용 비밀번호. 운영 환경에서는 이 스크립트를 실행하지 않는다.
-DEV_PASSWORD = os.getenv("SEED_PASSWORD", "devpass1234")
+# 이 스크립트는 알려진 자격 증명의 계정을 만든다. 운영 DB에 실행되면 그 자체가 사고다.
+# 그래서 DB에 연결하기 전에 환경과 비밀번호를 확인하고, 기본 비밀번호는 두지 않는다.
+_ALLOWED_ENVIRONMENTS = frozenset({"development", "test"})
+
+
+def _guarded_password() -> str:
+    if settings.environment not in _ALLOWED_ENVIRONMENTS:
+        raise SystemExit(
+            f"seed는 {sorted(_ALLOWED_ENVIRONMENTS)} 환경에서만 실행할 수 있다 "
+            f"(ENVIRONMENT={settings.environment!r})."
+        )
+    # settings 를 거쳐 읽는다. .env 는 pydantic-settings 가 읽으므로 os.environ 에는 없다.
+    password = settings.seed_password.strip()
+    if not password:
+        raise SystemExit("SEED_PASSWORD가 필요하다. .env에 개발용 비밀번호를 설정한다.")
+    return password
 
 # F11: branch.region_code에는 시군구 코드만 들어간다.
 REGIONS = [
@@ -100,6 +115,7 @@ FINANCIAL_PRODUCTS = [
 
 
 async def seed() -> None:
+    dev_password = _guarded_password()  # DB 연결 전에 막는다
     async with SessionLocal() as session:
         # 기준정보
         for code, parent, level, name in REGIONS:
@@ -131,7 +147,7 @@ async def seed() -> None:
             await session.flush()
 
         # 계정 + 점포
-        password_hash = hash_password(DEV_PASSWORD)
+        password_hash = hash_password(dev_password)
         for email, name, user_type, branch_info in ACCOUNTS:
             existing = (
                 await session.execute(select(UserAccount).where(UserAccount.email == email))
@@ -181,7 +197,7 @@ async def seed() -> None:
 
     print("seed 완료")
     print(f"  계정: {', '.join(a[0] for a in ACCOUNTS)}")
-    print(f"  비밀번호(개발용): {DEV_PASSWORD}  — bcrypt 해시로만 저장됨")
+    print("  비밀번호: SEED_PASSWORD 값 — bcrypt 해시로만 저장됨")
     print(f"  입력 항목: {len(INPUT_FIELDS)}개 (필수 {sum(1 for f in INPUT_FIELDS if f[3])}개)")
     print(f"  금융상품: {len(FINANCIAL_PRODUCTS)}개")
 
