@@ -68,12 +68,13 @@ def _subprocess_env() -> dict[str, str]:
     return env
 
 
-def _run(args: list[str], *, stdin_text: str | None = None) -> str:
-    try:
-        timeout_s = float(os.environ.get("SERVING_DB_TIMEOUT_SECONDS", "30"))
-    except ValueError:
-        timeout_s = 30.0
-    timeout_s = max(1.0, min(300.0, timeout_s))
+def _run(args: list[str], *, stdin_text: str | None = None, timeout_s: float | None = None) -> str:
+    if timeout_s is None:
+        try:
+            timeout_s = float(os.environ.get("SERVING_DB_TIMEOUT_SECONDS", "30"))
+        except ValueError:
+            timeout_s = 30.0
+    timeout_s = max(0.1, min(300.0, timeout_s))
     try:
         proc = subprocess.run(
             ["psql", *_dsn_args(), "-v", "ON_ERROR_STOP=1", *args],
@@ -106,12 +107,12 @@ def target() -> str:
     return f"{os.environ.get('POSTGRES_HOST', '127.0.0.1')}:{os.environ.get('POSTGRES_PORT', '5432')}/{os.environ.get('POSTGRES_DB', 'ideaton')}"
 
 
-def ping() -> str:
-    """접속 확인. 실패 시 ServingDbError. 서버 주소(컨테이너 내부 IP 포함)를 돌려준다."""
+def ping(timeout_s: float | None = None) -> str:
+    """접속 확인. timeout_s는 readiness 같은 짧은 probe에서만 오버라이드한다."""
     return _run([
         "-Atc",
         "SELECT current_database() || ' @ ' || coalesce(host(inet_server_addr()), 'local')",
-    ]).strip()
+    ], timeout_s=timeout_s).strip()
 
 
 def query(sql: str) -> list[dict[str, str]]:

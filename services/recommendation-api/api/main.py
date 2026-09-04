@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import datetime as dt
+import logging
 import os
 import re
 import secrets
@@ -50,11 +51,15 @@ if str(SERVICE_ROOT) not in sys.path:
 from service.recommendation.paths import find_project_root
 
 ROOT = find_project_root(__file__)
+logger = logging.getLogger(__name__)
 
 from service.recommendation.llm_input_planner import INDUSTRY_NAMES
 from service.recommendation.pipeline import (
     DEFAULT_QUARTER,
     PipelineError,
+    PipelineDependencyError,
+    PipelineInputError,
+    PipelineInternalError,
     RecommendationRequest,
     SUPPORTED_INDUSTRIES,
     normalize_admin_dong_name,
@@ -101,6 +106,7 @@ class ServiceConfig:
     include_poi_context: bool = False
     include_news: bool = True
     request_timeout_s: float = 180.0
+    readiness_timeout_s: float = 3.0
     max_concurrent: int = 4
 
 
@@ -168,10 +174,25 @@ def _pipeline_error_detail(
     request_id: str | None = None,
     run_id: str | None = None,
 ) -> dict[str, Any]:
-    message = str(exc)
-    questions = _confirmation_questions(message)
+    raw_message = str(exc)
+    if isinstance(exc, PipelineInputError):
+        questions = _confirmation_questions(raw_message)
+        code = "confirmation_required" if questions else "invalid_request"
+        message = raw_message
+    elif isinstance(exc, PipelineDependencyError):
+        code = "dependency_unavailable"
+        message = "추천에 필요한 외부 의존성을 사용할 수 없습니다. 잠시 후 다시 시도해 주세요."
+        questions = []
+    elif isinstance(exc, PipelineInternalError):
+        code = "internal_validation_error"
+        message = "추천 결과 내부 검증에 실패했습니다. 운영 로그를 확인해 주세요."
+        questions = []
+    else:
+        code = "pipeline_error"
+        message = "추천 파이프라인을 처리하지 못했습니다. 운영 로그를 확인해 주세요."
+        questions = []
     detail: dict[str, Any] = {
-        "code": "confirmation_required" if questions else "pipeline_error",
+        "code": code,
         "message": message,
         "questions": questions,
     }
@@ -180,6 +201,14 @@ def _pipeline_error_detail(
     if run_id is not None:
         detail["run_id"] = run_id
     return detail
+
+
+def _pipeline_error_status(exc: PipelineError) -> int:
+    if isinstance(exc, PipelineInputError):
+        return 422
+    if isinstance(exc, PipelineDependencyError):
+        return 503
+    return 500
 
 
 def _output_root() -> Path:
@@ -216,6 +245,14 @@ def _service_config() -> ServiceConfig:
             "questions": [],
         }) from exc
     try:
+        readiness_timeout_s = float(os.getenv("RECOMMENDATION_READINESS_TIMEOUT_SECONDS", "3"))
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "invalid_service_config",
+            "message": "RECOMMENDATION_READINESS_TIMEOUT_SECONDS는 숫자여야 합니다.",
+            "questions": [],
+        }) from exc
+    try:
         max_concurrent = int(os.getenv("RECOMMENDATION_MAX_CONCURRENT", "4"))
     except ValueError as exc:
         raise HTTPException(status_code=503, detail={
@@ -229,11 +266,12 @@ def _service_config() -> ServiceConfig:
         or llm_mode not in {"auto", "required", "offline"}
         or not 1 <= limit <= 50
         or not 5 <= request_timeout_s <= 900
+        or not 0.1 <= readiness_timeout_s <= 30
         or not 1 <= max_concurrent <= 64
     ):
         raise HTTPException(status_code=503, detail={
             "code": "invalid_service_config",
-            "message": "RECOMMENDATION_QUARTER/SOURCE/LLM_MODE/DEFAULT_LIMIT/REQUEST_TIMEOUT/MAX_CONCURRENT 설정을 확인해 주세요.",
+            "message": "RECOMMENDATION_QUARTER/SOURCE/LLM_MODE/DEFAULT_LIMIT/REQUEST_TIMEOUT/READINESS_TIMEOUT/MAX_CONCURRENT 설정을 확인해 주세요.",
             "questions": [],
         })
     return ServiceConfig(
@@ -245,6 +283,7 @@ def _service_config() -> ServiceConfig:
         include_poi_context=_env_bool("RECOMMENDATION_INCLUDE_POI_CONTEXT", False),
         include_news=_env_bool("RECOMMENDATION_INCLUDE_NEWS", True),
         request_timeout_s=request_timeout_s,
+        readiness_timeout_s=readiness_timeout_s,
         max_concurrent=max_concurrent,
     )
 
@@ -360,7 +399,7 @@ async def healthz() -> dict[str, str]:
 @app.get("/readyz", tags=["system"])
 async def readyz() -> dict[str, Any]:
     schema = ROOT / "artifacts/20-method/rag-evidence-schema.json"
-    checks: dict[str, Any] = {
+    checks: dict[str, bool] = {
         "schema_present": schema.is_file(),
         "region_catalog_present": (ROOT / "seoul_gu_dong_list.csv").is_file(),
     }
@@ -369,19 +408,18 @@ async def readyz() -> dict[str, Any]:
         try:
             from service.recommendation.serving_db import ping
 
-            checks["db"] = {"ok": True, "target": ping()}
-        except Exception as exc:  # readiness must never leak connection details
-            checks["db"] = {"ok": False, "error": type(exc).__name__}
+            await asyncio.wait_for(
+                run_in_threadpool(ping, config.readiness_timeout_s),
+                timeout=config.readiness_timeout_s,
+            )
+            checks["db"] = True
+        except Exception:  # readiness must never leak connection details
+            checks["db"] = False
     else:
-        checks["db"] = {"ok": True, "skipped": True}
-    ready = all(
-        value is True or (isinstance(value, dict) and value.get("ok") is True)
-        for value in checks.values()
-    )
-    response = {"status": "ready" if ready else "not_ready", **checks, "default_quarter": config.quarter}
-    if not ready:
-        raise HTTPException(status_code=503, detail=response)
-    return response
+        checks["db"] = True
+    if not all(checks.values()):
+        raise HTTPException(status_code=503, detail={"ok": False, "checks": checks})
+    return {"ok": True}
 
 
 @app.get("/api/industries", tags=["catalog"])
@@ -455,8 +493,21 @@ async def create_recommendation(
             "run_id": run_id,
         }) from exc
     except PipelineError as exc:
+        if isinstance(exc, PipelineInputError):
+            logger.info(
+                "recommendation input rejected request_id=%s run_id=%s reason=%s",
+                payload.request_id,
+                run_id,
+                exc,
+            )
+        else:
+            logger.exception(
+                "recommendation pipeline failed request_id=%s run_id=%s",
+                payload.request_id,
+                run_id,
+            )
         raise HTTPException(
-            status_code=422,
+            status_code=_pipeline_error_status(exc),
             detail=_pipeline_error_detail(exc, payload.request_id, run_id),
         ) from exc
 

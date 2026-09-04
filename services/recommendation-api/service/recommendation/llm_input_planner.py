@@ -74,13 +74,31 @@ def parse_amount(text: str) -> int | None:
         return None
 
 
+def _amount_bound(text: str, match: re.Match[str]) -> str:
+    """Classify a budget expression without treating a lower bound as a cap."""
+    suffix = text[match.end(): match.end() + 12]
+    operator = re.search(
+        r"(?:원\s*)?(이상|초과|부터|넘게|넘는|이하|미만|까지|한도|이내|넘지)",
+        suffix,
+    )
+    if operator and operator.group(1) in {"이상", "초과", "부터", "넘게", "넘는"}:
+        return "min"
+    if operator:
+        return "max"
+    # The transport contract only has *_max_krw. Keep the historical
+    # unqualified-amount behavior, while explicitly rejecting lower bounds.
+    return "max"
+
+
 def parse_conditions(text: str) -> dict[str, Any]:
     """Deterministic minimum parser used as a fallback and a validation baseline."""
     text = text or ""
     monthly_match = re.search(r"월세\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(억|만)?", text)
     deposit_match = re.search(r"(?:보증금|전세금)\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(억|만)?", text)
-    monthly = parse_amount(monthly_match.group(0)) if monthly_match else None
-    deposit = parse_amount(deposit_match.group(0)) if deposit_match else None
+    monthly_bound = _amount_bound(text, monthly_match) if monthly_match else None
+    deposit_bound = _amount_bound(text, deposit_match) if deposit_match else None
+    monthly = parse_amount(monthly_match.group(0)) if monthly_match and monthly_bound == "max" else None
+    deposit = parse_amount(deposit_match.group(0)) if deposit_match and deposit_bound == "max" else None
 
     area_min = area_max = None
     area_match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(평|㎡|m2|제곱미터)", text, re.IGNORECASE)
@@ -102,7 +120,11 @@ def parse_conditions(text: str) -> dict[str, Any]:
             except (InvalidOperation, OverflowError, ValueError):
                 pass
 
-    parking = bool(re.search(r"주차\s*(가능|필수|필요|있|확보)", text))
+    parking_not_required = bool(re.search(
+        r"주차(?:가|는|은)?\s*(?:필요\s*없|불필요|없어도|무관|상관없|아니|안\s*(?:필요|돼))",
+        text,
+    ))
+    parking = not parking_not_required and bool(re.search(r"주차(?:가|는|은)?\s*(가능|필수|필요|있|확보)", text))
     customer_terms = ("직장인", "학생", "관광객", "주민", "가족", "외국인", "아침 손님", "1인 가구")
     target_customer = [term for term in customer_terms if term in text]
     hour = None
@@ -125,8 +147,12 @@ def parse_conditions(text: str) -> dict[str, Any]:
     unsupported: list[str] = []
     if monthly is not None:
         unsupported.append("monthly_rent_max_krw: 개별 매물 월세 데이터 없음")
+    elif monthly_match and monthly_bound == "min":
+        unsupported.append("monthly_rent_min_krw: 월세 하한 조건은 현재 계약에서 지원하지 않음")
     if deposit is not None:
         unsupported.append("deposit_max_krw: 개별 매물 보증금 데이터 없음")
+    elif deposit_match and deposit_bound == "min":
+        unsupported.append("deposit_min_krw: 보증금 하한 조건은 현재 계약에서 지원하지 않음")
     if area_min is not None or area_max is not None:
         unsupported.append("store_area_m2: 개별 매물 면적 데이터 없음")
     if parking:
@@ -347,11 +373,13 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
             elif not candidates:
                 candidates = fallback_candidates
         conditions = _normalize_remote_conditions(remote.get("conditions"), baseline_conditions)
-        remote_questions = remote.get("clarification_questions")
-        questions = [str(x) for x in remote_questions] if isinstance(remote_questions, list) else []
-        remote_unsupported = remote.get("unsupported_conditions")
-        unsupported = _dedupe(baseline_conditions["unsupported_conditions"] + ([str(x) for x in remote_unsupported] if isinstance(remote_unsupported, list) else []))
-        conditions["unsupported_conditions"] = unsupported
+        # These two fields affect pipeline control flow and fit_tier. They
+        # must come only from the deterministic parser; an LLM response is
+        # never allowed to inject a confirmation stop or an unsupported
+        # condition. Remote conditions are still value-matched against the
+        # deterministic baseline by _normalize_remote_conditions above.
+        questions = []
+        conditions["unsupported_conditions"] = list(baseline_conditions["unsupported_conditions"])
         plan = _valid_plan(remote.get("analysis_plan"), fallback_plan)
         inference_hypotheses = _valid_inference_hypotheses(remote.get("inference_hypotheses"))
         parse_confidence = str(remote.get("parse_confidence") or ("high" if len(candidates) == 1 else "low"))

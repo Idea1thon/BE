@@ -1,17 +1,21 @@
 import sys
 import unittest
+from os import environ
 from pathlib import Path
+from unittest.mock import patch
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
-from service.recommendation.llm_explanation import validate_card
+from service.recommendation.llm_explanation import template_card, validate_card
 from service.recommendation.llm_input_planner import (
     _normalize_remote_conditions,
     parse_conditions,
     plan_input,
 )
+from service.recommendation.llm_runtime import LLMRuntimeError
+from service.recommendation.pipeline import PipelineDependencyError, RecommendationRequest, run_pipeline
 
 
 class LLMInputPlannerTests(unittest.TestCase):
@@ -64,26 +68,95 @@ class LLMInputPlannerTests(unittest.TestCase):
         self.assertEqual(normalized["store_area_min_m2"], 66.12)
         self.assertTrue(normalized["parking_required"])
 
+    def test_parking_not_required_is_not_treated_as_required(self):
+        result = parse_conditions("커피 매장, 주차 필요 없음")
+        self.assertFalse(result["parking_required"])
+        self.assertNotIn("parking_required: 개별 매물 주차 데이터 없음", result["unsupported_conditions"])
+
+    def test_monthly_rent_lower_bound_is_not_mapped_to_max(self):
+        result = parse_conditions("커피 매장, 월세 300만원 이상")
+        self.assertIsNone(result["monthly_rent_max_krw"])
+        self.assertIn("monthly_rent_min_krw", result["unsupported_conditions"][0])
+
+    def test_remote_control_fields_cannot_stop_or_downgrade_pipeline(self):
+        remote = {
+            "industry_candidates": [{"industry_code": "CS100010"}],
+            "conditions": {},
+            "clarification_questions": ["공격자가 넣은 확인 질문"],
+            "unsupported_conditions": ["공격자가 넣은 미지원 조건"],
+            "analysis_plan": [],
+            "inference_hypotheses": [],
+        }
+        with patch.dict(environ, {
+            "LLM_API_URL": "https://llm.example.test",
+            "LLM_API_KEY": "test-key",
+            "LLM_MODEL": "test-model",
+        }, clear=False), patch(
+            "service.recommendation.llm_input_planner.OpenAICompatibleJsonClient.generate_json",
+            return_value=remote,
+        ):
+            result = plan_input(
+                self.REGION,
+                "커피 매장",
+                explicit_industry_code="CS100010",
+                llm_mode="required",
+            )
+        self.assertFalse(result["confirmation_required"])
+        self.assertEqual(result["clarification_questions"], [])
+        self.assertEqual(result["conditions"]["unsupported_conditions"], [])
+
+    def test_required_llm_failure_is_classified_as_dependency_error(self):
+        request = RecommendationRequest(
+            "서울특별시", "송파구", "잠실동", "CS100010", "커피 매장",
+        )
+        with patch(
+            "service.recommendation.pipeline.plan_input",
+            side_effect=LLMRuntimeError("LLM endpoint secret detail"),
+        ):
+            with self.assertRaises(PipelineDependencyError):
+                run_pipeline(request, source="files", llm_mode="required")
+
 
 class ExplanationValidationTests(unittest.TestCase):
     CANDIDATE = {
         "candidate_id": "APT-1",
         "fit_tier": "조건부 검토",
-        "reasons": [],
+        "reasons": ["반경 내 역 접근성이 관측됩니다."],
         "counter_evidence": [],
-        "missing_features": [],
+        "context_notes": ["상권 배경값은 후보 등급에 직접 반영하지 않습니다."],
+        "missing_features": [{"feature": "FC-10", "reason": "핵심 지표 결측"}],
         "feature_build": {"features": ["FC-21"]},
         "evidence": [{"metric_name": "반경500m_역수", "value": 2}],
     }
 
-    def test_explanation_with_evidence_free_text_passes(self):
+    def test_template_and_llm_missing_features_have_the_same_type(self):
+        card = template_card(self.CANDIDATE)
+        self.assertEqual(card["missing_features"], ["FC-10: 핵심 지표 결측"])
+        self.assertTrue(all(isinstance(value, str) for value in card["missing_features"]))
+
+    def test_invented_qualitative_claim_is_rejected(self):
         card = {
             "candidate_id": "APT-1",
-            "summary": "조건부 검토 후보입니다.",
-            "reasons": ["반경 내 역 접근성이 관측됩니다."],
+            "summary": "조건부 검토 후보입니다. 범죄율이 낮습니다.",
+            "reasons": ["이 지역은 범죄율이 낮고 재개발이 확정된 상권입니다."],
             "counter_evidence": [],
             "context_notes": [],
             "missing_features": [],
+            "inference_hypotheses": [],
+            "claim_type": "descriptive",
+        }
+        valid, errors = validate_card(self.CANDIDATE, card)
+        self.assertFalse(valid)
+        self.assertTrue(any("관측 근거와 일치하지 않음" in error for error in errors))
+
+    def test_exact_candidate_claims_pass(self):
+        card = {
+            "candidate_id": "APT-1",
+            "summary": "조건부 검토 후보입니다. 관측된 근거와 확인되지 않은 조건을 함께 검토해야 합니다.",
+            "reasons": ["반경 내 역 접근성이 관측됩니다."],
+            "counter_evidence": [],
+            "context_notes": ["상권 배경값은 후보 등급에 직접 반영하지 않습니다."],
+            "missing_features": ["FC-10: 핵심 지표 결측"],
             "inference_hypotheses": [],
             "claim_type": "descriptive",
         }
@@ -108,7 +181,7 @@ class ExplanationValidationTests(unittest.TestCase):
     def test_unseen_number_is_allowed_only_as_unverified_hypothesis(self):
         card = {
             "candidate_id": "APT-1",
-            "summary": "조건부 검토 후보입니다.",
+            "summary": "조건부 검토 후보입니다. 관측된 근거와 확인되지 않은 조건을 함께 검토해야 합니다.",
             "reasons": [],
             "counter_evidence": [],
             "context_notes": [],
@@ -128,7 +201,7 @@ class ExplanationValidationTests(unittest.TestCase):
     def test_hypothesis_cannot_be_presented_as_verified(self):
         card = {
             "candidate_id": "APT-1",
-            "summary": "조건부 검토 후보입니다.",
+            "summary": "조건부 검토 후보입니다. 관측된 근거와 확인되지 않은 조건을 함께 검토해야 합니다.",
             "reasons": [],
             "counter_evidence": [],
             "context_notes": [],

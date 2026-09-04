@@ -5,6 +5,7 @@ import asyncio
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
@@ -16,20 +17,57 @@ from pydantic import ValidationError
 from api.main import (
     PipelineRecommendationRequest,
     RecommendationApiResponse,
+    ServiceConfig,
     _region_options,
     app,
     create_recommendation,
     healthz,
     industries,
+    readyz,
     regions,
 )
-from service.recommendation.pipeline import RecommendationRequest, load_layers, resolve_region
+from service.recommendation.pipeline import (
+    PipelineDependencyError,
+    PipelineInputError,
+    PipelineInternalError,
+    RecommendationRequest,
+    load_layers,
+    resolve_region,
+)
 
 
 class FastApiBoundaryTests(unittest.TestCase):
     def test_healthz(self) -> None:
         response = asyncio.run(healthz())
         self.assertEqual(response["status"], "ok")
+
+    def test_readyz_success_is_minimal_and_uses_threadpool_for_db_probe(self) -> None:
+        config = ServiceConfig(
+            quarter="20261", source="db", llm_mode="offline", limit=5, readiness_timeout_s=0.1,
+        )
+        with patch("api.main._service_config", return_value=config), patch(
+            "api.main.run_in_threadpool", new=AsyncMock(return_value="ideaton @ 127.0.0.1"),
+        ) as probe:
+            response = asyncio.run(readyz())
+        self.assertEqual(response, {"ok": True})
+        self.assertEqual(probe.await_count, 1)
+        self.assertEqual(probe.await_args.args[1], 0.1)
+
+    def test_readyz_timeout_returns_safe_failure(self) -> None:
+        config = ServiceConfig(
+            quarter="20261", source="db", llm_mode="offline", limit=5, readiness_timeout_s=0.01,
+        )
+
+        async def slow_probe(*args):
+            await asyncio.sleep(0.05)
+
+        with patch("api.main._service_config", return_value=config), patch(
+            "api.main.run_in_threadpool", new=slow_probe,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(readyz())
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertNotIn("target", str(raised.exception.detail))
 
     def test_catalog_endpoints_support_the_wireframe_selectors(self) -> None:
         industry_response = asyncio.run(industries())
@@ -112,6 +150,33 @@ class FastApiBoundaryTests(unittest.TestCase):
         self.assertEqual(forwarded.special_condition_text, "월세 300만원 이하, 주차 가능")
         self.assertEqual(response["request_id"], "backend-42")
         self.assertEqual(response["status"], "completed")
+
+    def test_pipeline_errors_are_mapped_without_leaking_server_details(self) -> None:
+        payload = PipelineRecommendationRequest(
+            request_id="error-map-1",
+            region={"sigungu": "송파구", "dong": "잠실동"},
+            industry_code="CS100010",
+            special_condition_text="커피 매장",
+        )
+        config = ServiceConfig(quarter="20261", source="files", llm_mode="offline", limit=5)
+        cases = (
+            (PipelineInputError("입력 확인이 필요합니다: 업종을 선택해 주세요."), 422, "confirmation_required"),
+            (PipelineDependencyError("DB target=postgresql://internal/ideaton; password=secret"), 503, "dependency_unavailable"),
+            (PipelineInternalError("RAG schema at /private/tmp/secret"), 500, "internal_validation_error"),
+        )
+        for error, expected_status, expected_code in cases:
+            with self.subTest(expected_code=expected_code), patch(
+                "api.main._service_config", return_value=config,
+            ), patch("api.main._try_acquire_recommendation_slot", return_value=True), patch(
+                "api.main._run_pipeline_with_slot", side_effect=error,
+            ):
+                with self.assertRaises(HTTPException) as raised:
+                    asyncio.run(create_recommendation(payload))
+            self.assertEqual(raised.exception.status_code, expected_status)
+            self.assertEqual(raised.exception.detail["code"], expected_code)
+            self.assertNotIn("postgresql://internal", str(raised.exception.detail))
+            self.assertNotIn("/private/tmp/secret", str(raised.exception.detail))
+            self.assertNotIn("password=secret", str(raised.exception.detail))
 
 
 if __name__ == "__main__":

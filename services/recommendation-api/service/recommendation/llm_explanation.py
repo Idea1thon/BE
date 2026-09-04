@@ -24,7 +24,7 @@ def template_card(candidate: dict[str, Any]) -> dict[str, Any]:
         "reasons": list(candidate.get("reasons") or []),
         "counter_evidence": list(candidate.get("counter_evidence") or []),
         "context_notes": list(candidate.get("context_notes") or []),
-        "missing_features": list(candidate.get("missing_features") or []),
+        "missing_features": _candidate_claims(candidate, "missing_features"),
         "inference_hypotheses": [],
         "claim_type": "descriptive",
         "explanation_mode": "template",
@@ -47,6 +47,11 @@ def _evidence_numbers(candidate: dict[str, Any]) -> set[str]:
             value = item.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 numbers.update(re.findall(r"(?<![A-Za-z])\d+(?:\.\d+)?", str(value)))
+    # Candidate-derived claims are safe as well because validate_card only
+    # accepts exact members of those arrays below.
+    for key in ("reasons", "counter_evidence", "context_notes", "missing_features"):
+        for claim in _candidate_claims(candidate, key):
+            numbers.update(re.findall(r"(?<![A-Za-z])\d+(?:\.\d+)?", claim))
     return numbers
 
 
@@ -62,6 +67,33 @@ def _candidate_reference_ids(candidate: dict[str, Any]) -> set[str]:
     serialized = json.dumps(candidate, ensure_ascii=False)
     refs.update(re.findall(r"FC-[A-Za-z0-9_-]+", serialized))
     return refs
+
+
+def _candidate_claims(candidate: dict[str, Any], key: str) -> list[str]:
+    """Return the only observed explanation claims the candidate permits.
+
+    Candidate Evidence is the source of truth for explanation cards. Keeping
+    the existing candidate strings verbatim is deliberately stricter than
+    asking an LLM to paraphrase them: a paraphrase can add an unsupported
+    qualitative fact even when it contains no new number.
+    """
+    values = candidate.get(key) or []
+    if key != "missing_features":
+        return [value for value in values if isinstance(value, str)]
+    output: list[str] = []
+    for value in values:
+        if isinstance(value, dict):
+            feature = str(value.get("feature") or "").strip()
+            reason = str(value.get("reason") or "").strip()
+            if feature and reason:
+                output.append(f"{feature}: {reason}")
+            elif feature:
+                output.append(feature)
+            elif reason:
+                output.append(reason)
+        elif isinstance(value, str) and value.strip():
+            output.append(value.strip())
+    return output
 
 
 def _validate_inference_hypotheses(raw: Any) -> list[str]:
@@ -116,6 +148,11 @@ def validate_card(candidate: dict[str, Any], card: Any) -> tuple[bool, list[str]
             errors.append(f"{key}가 문자열 배열이 아님")
         elif len(values) > 12 or any(len(value) > 500 for value in values):
             errors.append(f"{key}의 길이 제한 초과")
+        else:
+            allowed_claims = set(_candidate_claims(candidate, key))
+            for index, value in enumerate(values):
+                if value not in allowed_claims:
+                    errors.append(f"{key}[{index}]가 후보의 관측 근거와 일치하지 않음")
     errors.extend(_validate_inference_hypotheses(card.get("inference_hypotheses")))
     valid_refs = _candidate_reference_ids(candidate)
     for index, item in enumerate(card.get("inference_hypotheses") or []):
@@ -125,6 +162,12 @@ def validate_card(candidate: dict[str, Any], card: Any) -> tuple[bool, list[str]
         for ref in refs:
             if ref not in valid_refs:
                 errors.append(f"inference_hypotheses[{index}]의 근거 참조가 후보 Evidence에 없음: {ref}")
+
+    # The summary is also an observed-channel field. It is intentionally
+    # canonical so a free-form qualitative claim cannot bypass the exact
+    # claim checks above by being placed in summary.
+    if card.get("summary") != template_card(candidate)["summary"]:
+        errors.append("summary가 후보의 관측 등급 요약과 일치하지 않음")
 
     # Numeric and certainty checks apply to observed explanation fields.
     # New estimates are allowed only in the explicitly marked inference
@@ -166,8 +209,11 @@ def explain_candidates(candidates: list[dict[str, Any]], llm_mode: str = "auto")
 
 추가 역할: 검증된 서울 창업 입지 후보를 설명하는 Evidence 기반 설명 카드 작성기다.
 후보 JSON의 Evidence, reasons, counter_evidence, context_notes, missing_features만 사용해 한국어 JSON을 작성하라.
+summary는 각 후보의 fit_tier를 사용한 템플릿 문장("<fit_tier> 후보입니다. 관측된 근거와 확인되지 않은 조건을 함께 검토해야 합니다.")을 그대로 반환하라.
+reasons, counter_evidence, context_notes는 후보 JSON의 같은 배열 원소를 한 글자도 바꾸지 말고 필요한 원소만 그대로 복사하라.
+missing_features는 후보 JSON의 각 객체를 "feature: reason" 문자열로 변환해 그대로 반환하라.
 각 문장은 관측된 사실 또는 관측된 한계를 설명하는 표현으로만 작성하라.
-후보 JSON에 없는 내용을 관측 Evidence처럼 reasons, counter_evidence, context_notes, missing_features에 넣지 말라.
+후보 JSON에 없는 내용을 관측 Evidence처럼 observed 필드에 넣지 말라.
 추가 분석이 필요하면 주소·수치·분기·매물·공실률·성공확률·수익률·인과관계도 생성할 수 있지만, 반드시 inference_hypotheses에만 넣고 status=unverified, basis_refs, confidence를 함께 반환하라.
 inference_hypotheses의 값은 관측 Evidence, 후보 등급·정렬, 하드 조건으로 사용되지 않는 분석 가설이다.
 성공·수익을 보장하는 표현은 관측 필드에 쓰지 말고, 인과관계는 causal_hypothesis로만 표시하라.

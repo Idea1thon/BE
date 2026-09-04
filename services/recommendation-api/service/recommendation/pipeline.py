@@ -94,6 +94,18 @@ class PipelineError(ValueError):
     """입력·공간·결합 계약을 만족하지 못한 경우."""
 
 
+class PipelineInputError(PipelineError):
+    """호출자가 수정할 수 있는 요청·입력 계약 오류."""
+
+
+class PipelineDependencyError(PipelineError):
+    """DB·LLM·원천 데이터 등 외부 의존성 장애."""
+
+
+class PipelineInternalError(PipelineError):
+    """서비스 내부 산출물·검증 계약 위반."""
+
+
 @dataclass(frozen=True)
 class RecommendationRequest:
     sido: str
@@ -220,13 +232,16 @@ def nfc(value: Any) -> str:
 
 def find_file(directory: Path, needle: str, suffix: str = ".csv") -> Path:
     directory = Path(directory)
-    matches = [
-        p for p in directory.iterdir()
-        if p.is_file() and p.suffix.lower() == suffix.lower()
-        and nfc(needle) in nfc(p.name)
-    ]
+    try:
+        matches = [
+            p for p in directory.iterdir()
+            if p.is_file() and p.suffix.lower() == suffix.lower()
+            and nfc(needle) in nfc(p.name)
+        ]
+    except OSError as exc:
+        raise PipelineDependencyError(f"원천 데이터 디렉터리를 읽을 수 없음: {directory}") from exc
     if not matches:
-        raise PipelineError(f"파일을 찾을 수 없음: {directory}/{needle}{suffix}")
+        raise PipelineDependencyError(f"파일을 찾을 수 없음: {directory}/{needle}{suffix}")
     if len(matches) > 1:
         # 파일명에 동일 토큰이 반복되는 경우에는 가장 짧은 정규 파일명을 우선한다.
         matches.sort(key=lambda p: (len(nfc(p.name)), nfc(p.name)))
@@ -234,9 +249,12 @@ def find_file(directory: Path, needle: str, suffix: str = ".csv") -> Path:
 
 
 def find_shape(directory: Path, needle: str) -> Path:
-    matches = [p for p in Path(directory).iterdir() if p.suffix.lower() == ".shp" and nfc(needle) in nfc(p.name)]
+    try:
+        matches = [p for p in Path(directory).iterdir() if p.suffix.lower() == ".shp" and nfc(needle) in nfc(p.name)]
+    except OSError as exc:
+        raise PipelineDependencyError(f"공간 데이터 디렉터리를 읽을 수 없음: {directory}") from exc
     if not matches:
-        raise PipelineError(f"SHP를 찾을 수 없음: {directory}/{needle}")
+        raise PipelineDependencyError(f"SHP를 찾을 수 없음: {directory}/{needle}")
     return sorted(matches, key=lambda p: len(nfc(p.name)))[0]
 
 
@@ -249,7 +267,9 @@ def read_csv(path: Path) -> list[dict[str, str]]:
             return [{EN2KO.get(k, k): v for k, v in row.items()} for row in rows]
         except UnicodeDecodeError as exc:
             errors.append(f"{encoding}: {exc}")
-    raise PipelineError(f"CSV 인코딩을 읽지 못함: {path}; {errors}")
+        except OSError as exc:
+            raise PipelineDependencyError(f"CSV를 읽을 수 없음: {path}") from exc
+    raise PipelineDependencyError(f"CSV 인코딩을 읽지 못함: {path}; {errors}")
 
 
 def num(row: dict[str, Any] | None, key: str) -> float | None:
@@ -320,13 +340,13 @@ def resolve_region(
     sigungu_by_prefix: dict[str, str],
 ) -> tuple[list[LayerRecord], Any, Any]:
     if request.sido not in ("서울특별시", "서울"):
-        raise PipelineError("현재 데이터 계약은 서울특별시만 지원합니다.")
+        raise PipelineInputError("현재 데이터 계약은 서울특별시만 지원합니다.")
     all_sigungus = {name for name in sigungu_by_prefix.values() if name}
     if request.sigungu not in all_sigungus:
-        raise PipelineError(f"시군구를 확인할 수 없습니다: {request.sigungu}")
+        raise PipelineInputError(f"시군구를 확인할 수 없습니다: {request.sigungu}")
     in_gu = [r for r in dong_layer.records if sigungu_by_prefix.get(r.code[:5]) == request.sigungu]
     if not in_gu:
-        raise PipelineError(f"행정동 데이터에서 시군구가 비어 있습니다: {request.sigungu}")
+        raise PipelineDependencyError(f"행정동 데이터에서 시군구가 비어 있습니다: {request.sigungu}")
 
     if request.dong:
         requested_dong = normalize_admin_dong_name(request.dong)
@@ -334,7 +354,7 @@ def resolve_region(
         selected = exact or [r for r in in_gu if r.name in LEGAL_DONG_ALIASES.get(request.dong, ())]
         if not selected:
             choices = ", ".join(r.name for r in in_gu[:20])
-            raise PipelineError(f"행정동을 확인할 수 없습니다: {request.dong}. 후보 예: {choices}")
+            raise PipelineInputError(f"행정동을 확인할 수 없습니다: {request.dong}. 후보 예: {choices}")
     else:
         selected = in_gu
     target_geoms = [dong_layer.geoms[dong_layer.records.index(rec)] for rec in selected]
@@ -351,7 +371,7 @@ def index_rows(rows: Iterable[dict[str, str]], keys: tuple[str, ...], filters: d
         if any(not part for part in key):
             continue
         if key in indexed:
-            raise PipelineError(f"결합 키 중복: keys={keys}, key={key}")
+            raise PipelineInternalError(f"결합 키 중복: keys={keys}, key={key}")
         indexed[key] = row
     return indexed
 
@@ -1642,22 +1662,31 @@ class DbSource:
         try:
             self._server = serving_db.ping()
         except serving_db.ServingDbError as exc:
-            raise PipelineError(
-                f"DB 연결 실패 ({serving_db.target()}). "
-                f"`docker compose up -d db` 후 재시도하거나 `--source files` 를 사용하세요. 원인: {exc}"
-            ) from exc
+            raise PipelineDependencyError("추천 데이터베이스 연결에 실패했습니다.") from exc
+
+    def _query(self, sql: str) -> list[dict[str, str]]:
+        try:
+            return self._db.query(sql)
+        except self._db.ServingDbError as exc:
+            raise PipelineDependencyError("추천 데이터베이스 조회에 실패했습니다.") from exc
+
+    def _data_version(self) -> dict[str, str]:
+        try:
+            return self._db.data_version()
+        except self._db.ServingDbError as exc:
+            raise PipelineDependencyError("추천 데이터베이스 버전 정보를 읽지 못했습니다.") from exc
 
     def describe(self) -> dict[str, Any]:
         return {
             "mode": "db",
             "target": self._db.target(),
             "server": self._server,
-            "db_data_version": self._db.data_version(),
+            "db_data_version": self._data_version(),
         }
 
     # -- 영역 레이어 --------------------------------------------------
     def _layer(self, unit: str) -> ShapeLayer:
-        rows = self._db.query(
+        rows = self._query(
             "SELECT spatial_unit_code AS code, coalesce(spatial_unit_name,'') AS name, "
             "coalesce(area_m2::text,'') AS area, coalesce(sigungu_code,'') AS sg_code, "
             "coalesce(sigungu_name,'') AS sg_name, encode(ST_AsBinary(geom),'hex') AS wkb "
@@ -1705,9 +1734,9 @@ class DbSource:
         dataset, grain = _DB_SCOPE_MAP[(folder, token)]
         path = self._provenance(folder, token)  # 원천 파일 있으면 그 경로, 없으면 논리 참조
         if not re.fullmatch(r"[0-9]{5}", quarter):
-            raise PipelineError(f"분기 코드 형식 오류: {quarter}")
+            raise PipelineInputError(f"분기 코드 형식 오류: {quarter}")
         if industry is not None and industry not in SUPPORTED_INDUSTRIES:
-            raise PipelineError(f"지원하지 않는 업종 코드: {industry}")
+            raise PipelineInputError(f"지원하지 않는 업종 코드: {industry}")
         ind_clause = f" AND industry_code = '{industry}'" if industry else ""
         if dataset == "store":
             sql = (
@@ -1738,19 +1767,19 @@ class DbSource:
                 "GROUP BY spatial_unit_code"
             )
         indexed: dict[str, dict[str, str]] = {}
-        for row in self._db.query(sql):
+        for row in self._query(sql):
             key = (row.get(scope_key) or "").strip()
             if not key:
                 continue
             if key in indexed:
-                raise PipelineError(f"결합 키 중복: {dataset} {key}")
+                raise PipelineInternalError(f"결합 키 중복: {dataset} {key}")
             indexed[key] = row
         return indexed, path
 
     def environment(self, quarter: str, scope_key: str):
         grain = "commercial_area" if scope_key == "상권_코드" else "admin_dong"
         prev_q = previous_quarter(quarter)
-        rows = self._db.query(
+        rows = self._query(
             f'SELECT period AS "기준_년분기_코드", spatial_unit_code AS "{scope_key}", '
             'total_store_count AS "전체_점포_수", open_store_count AS "개업_점포_수", '
             'close_store_count AS "폐업_점포_수" '
@@ -1772,7 +1801,7 @@ class DbSource:
         where = f"anchor_type = '{anchor_type}'"
         if file_like is not None:
             where += f" AND source_file LIKE '{file_like}' AND source_file NOT LIKE 'data/카카오POI/context/%'"
-        rows = self._db.query(
+        rows = self._query(
             f"SELECT attributes FROM context.anchor_snapshot WHERE {where} ORDER BY source_file, row_seq"
         )
         return [json.loads(r["attributes"]) for r in rows]
@@ -1798,7 +1827,7 @@ class DbSource:
             if target_buffer.covers(point):
                 out.append(_station_seed(row, point, stn_src))
         if include_poi:
-            poi = self._db.query(
+            poi = self._query(
                 "SELECT source_file, attributes FROM context.anchor_snapshot "
                 "WHERE anchor_type = 'kakao_poi' AND source_file LIKE 'data/카카오POI/%' "
                 "AND source_file NOT LIKE 'data/카카오POI/context/%' ORDER BY source_file, row_seq"
@@ -1829,7 +1858,7 @@ class DbSource:
     def naver_attention(self, industry_code):
         if industry_code not in NAVER_INDUSTRY_NAMES:
             return None, {}
-        rows = self._db.query(
+        rows = self._query(
             "SELECT period, value_numeric FROM context.metric_snapshot "
             "WHERE metric_name = 'naver_rel_index' AND spatial_unit_type = 'region' "
             f"AND industry_code = '{industry_code}'"
@@ -1843,7 +1872,7 @@ class DbSource:
         if not points:
             return None, {}
         name = NAVER_INDUSTRY_NAMES[industry_code]
-        season_rows = self._db.query(
+        season_rows = self._query(
             "SELECT attributes FROM context.naver_seasonality "
             f"WHERE grain = '업종' AND key = '{name}'"
         )
@@ -1853,7 +1882,7 @@ class DbSource:
 
     # -- 임대료·crosswalk (context.rent_index, location.area_crosswalk) --
     def rent(self):
-        rows = self._db.query(
+        rows = self._query(
             "SELECT grain, rone_area, period AS \"기준_년분기_코드\", value_numeric AS \"값\" "
             "FROM context.rent_index "
             "WHERE store_type = '소규모상가' AND indicator = '임대가격지수' AND grain IN ('상권', '서울전체')"
@@ -1872,7 +1901,7 @@ class DbSource:
         return area_rows, seoul_rows, (prov if isinstance(prov, Path) else None)
 
     def crosswalk(self):
-        rows = self._db.query(
+        rows = self._query(
             "SELECT split_part(source_area_id, ':', 2) AS rone, split_part(target_area_id, ':', 2) AS trdar "
             "FROM location.area_crosswalk "
             "WHERE relation_type = 'rone_to_commercial_proxy' AND join_eligible"
@@ -1885,9 +1914,9 @@ class DbSource:
             return [], {}
         manifests = {
             r["source"]: json.loads(r["manifest"])
-            for r in self._db.query("SELECT source, manifest FROM context.news_manifest")
+            for r in self._query("SELECT source, manifest FROM context.news_manifest")
         }
-        rec_rows = self._db.query(
+        rec_rows = self._query(
             "SELECT source, topic_match, "
             "coalesce((source_attributes->>'seoul_scope')::boolean, false) AS seoul_scope, "
             "array_to_json(sigungu_tags) AS sigungu_tags, array_to_json(dong_tags) AS dong_tags, "
@@ -1969,9 +1998,9 @@ def run_pipeline(
     source: str = "db", llm_mode: str = "auto",
 ) -> dict[str, Any]:
     if request.industry_code is not None and request.industry_code not in SUPPORTED_INDUSTRIES:
-        raise PipelineError(f"지원하지 않는 업종 코드: {request.industry_code}")
+        raise PipelineInputError(f"지원하지 않는 업종 코드: {request.industry_code}")
     if limit is not None and not 1 <= limit <= 50:
-        raise PipelineError("limit은 1 이상 50 이하이어야 합니다.")
+        raise PipelineInputError("limit은 1 이상 50 이하이어야 합니다.")
     selected_region = {"sido": request.sido, "sigungu": request.sigungu, "dong": request.dong}
     try:
         input_interpretation = plan_input(
@@ -1981,16 +2010,16 @@ def run_pipeline(
             llm_mode=llm_mode,
         )
     except LLMRuntimeError as exc:
-        raise PipelineError(str(exc)) from exc
+        raise PipelineDependencyError("입력 해석 LLM을 사용할 수 없습니다.") from exc
     if input_interpretation["confirmation_required"]:
         questions = "; ".join(input_interpretation["clarification_questions"])
-        raise PipelineError(f"입력 확인이 필요합니다: {questions}")
+        raise PipelineInputError(f"입력 확인이 필요합니다: {questions}")
     resolved_industry = input_interpretation["resolved_industry_code"]
     if resolved_industry not in SUPPORTED_INDUSTRIES:
-        raise PipelineError("업종을 확인할 수 없습니다. 업종 코드 또는 업종명을 입력해 주세요.")
+        raise PipelineInputError("업종을 확인할 수 없습니다. 업종 코드 또는 업종명을 입력해 주세요.")
     request = replace(request, industry_code=resolved_industry)
     if not re.fullmatch(r"[0-9]{4}[1-4]", request.quarter):
-        raise PipelineError(f"분기 코드는 YYYYQ 형식(마지막 자리는 1~4)이어야 합니다: {request.quarter}")
+        raise PipelineInputError(f"분기 코드는 YYYYQ 형식(마지막 자리는 1~4)이어야 합니다: {request.quarter}")
     conditions = input_interpretation["conditions"]
     src = make_source(source)
     data_source_manifest = src.describe()
@@ -2029,7 +2058,7 @@ def run_pipeline(
     poi_context = load_completed_poi_context(request) if include_poi_context else None
     seeds = src.seeds(target_buffer, include_poi, generated_points)
     if not seeds:
-        raise PipelineError("선택 범위(경계+300m)에 유효한 아파트·역 seed가 없습니다. POI 또는 매물 이식이 필요합니다.")
+        raise PipelineDependencyError("선택 범위에 추천 seed 데이터가 없습니다.")
 
     source_paths = {
         "store": store_path, "store_dong": store_dong_path,
@@ -2074,7 +2103,10 @@ def run_pipeline(
     candidates = ordered
     if limit is not None:
         candidates = candidates[:limit]
-    errors = validate_candidates(candidates)
+    try:
+        errors = validate_candidates(candidates)
+    except Exception as exc:
+        raise PipelineInternalError("추천 Evidence 스키마 검증을 실행할 수 없습니다.") from exc
 
     if out_dir is None:
         out_dir = ROOT / "output/recommendation_runs" / safe_slug(f"{request.sigungu}-{request.dong or '전체'}-{request.industry_code}-{request.quarter}")
@@ -2099,7 +2131,7 @@ def run_pipeline(
         try:
             explanations = explain_candidates(candidates, llm_mode=llm_mode)
         except LLMRuntimeError as exc:
-            raise PipelineError(str(exc)) from exc
+            raise PipelineDependencyError("추천 설명 LLM을 사용할 수 없습니다.") from exc
     summary = {
         "candidate_count": len(candidates), "seed_count_before_limit": len(seeds),
         "fit_tier_counts": dict(Counter(c["fit_tier"] for c in candidates)),
@@ -2211,7 +2243,7 @@ def run_pipeline(
             notes.append("- POI 한계: supplied 카테고리 스냅샷일 뿐 전체 상가·수요·공실·성공을 뜻하지 않으며 등급·정렬에는 미사용")
     atomic_write_text(out_dir / "run-notes.md", "\n".join(notes) + "\n")
     if errors:
-        raise PipelineError(f"RAG schema 검증 실패 {len(errors)}건; 산출물은 {out_dir}에 보존됨")
+        raise PipelineInternalError("추천 Evidence 내부 검증에 실패했습니다.")
     return {"out_dir": str(out_dir), "summary": summary, "candidates": candidates, "explanations": explanations, "input_interpretation": input_interpretation}
 
 
