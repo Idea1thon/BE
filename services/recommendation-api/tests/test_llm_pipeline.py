@@ -8,14 +8,14 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
-from service.recommendation.llm_explanation import template_card, validate_card
-from service.recommendation.llm_input_planner import (
+from recommendation.llm_explanation import template_card, validate_card
+from recommendation.llm_input_planner import (
     _normalize_remote_conditions,
     parse_conditions,
     plan_input,
 )
-from service.recommendation.llm_runtime import LLMRuntimeError
-from service.recommendation.pipeline import PipelineDependencyError, RecommendationRequest, run_pipeline
+from recommendation.llm_runtime import LLMRuntimeError
+from recommendation.pipeline import PipelineDependencyError, RecommendationRequest, run_pipeline
 
 
 class LLMInputPlannerTests(unittest.TestCase):
@@ -92,7 +92,7 @@ class LLMInputPlannerTests(unittest.TestCase):
             "LLM_API_KEY": "test-key",
             "LLM_MODEL": "test-model",
         }, clear=False), patch(
-            "service.recommendation.llm_input_planner.OpenAICompatibleJsonClient.generate_json",
+            "recommendation.llm_input_planner.OpenAICompatibleJsonClient.generate_json",
             return_value=remote,
         ):
             result = plan_input(
@@ -110,7 +110,7 @@ class LLMInputPlannerTests(unittest.TestCase):
             "서울특별시", "송파구", "잠실동", "CS100010", "커피 매장",
         )
         with patch(
-            "service.recommendation.pipeline.plan_input",
+            "recommendation.pipeline.plan_input",
             side_effect=LLMRuntimeError("LLM endpoint secret detail"),
         ):
             with self.assertRaises(PipelineDependencyError):

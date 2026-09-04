@@ -6,7 +6,7 @@
 services/recommendation-api/
 ├── api/                 # FastAPI HTTP 경계
 ├── scripts/             # 이 서비스의 CLI forwarding entrypoint
-└── service/recommendation/
+└── recommendation/
     ├── pipeline.py
     ├── llm_input_planner.py
     ├── llm_explanation.py
@@ -28,5 +28,5 @@ FastAPI와 추천 로직은 `services/recommendation-api/` 아래에 둔다. 원
 
 ~~~bash
 cd services/recommendation-api
-../../.venv/bin/python -m service.recommendation.pipeline --sido 서울특별시 --sigungu 송파구 --dong 잠실동 --industry-code CS100010 --llm-mode offline --source files
+../../.venv/bin/python -m recommendation.pipeline --sido 서울특별시 --sigungu 송파구 --dong 잠실동 --industry-code CS100010 --llm-mode offline --source files
 ~~~

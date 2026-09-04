@@ -136,6 +136,6 @@ RECOMMENDATION_MAX_CONCURRENT=4
 - 지역 선택값은 UI 입력을 그대로 사용하며 LLM이 지역을 바꾸도록 허용하지 않는다.
 - LLM은 업종·조건·읽기 전용 분석 계획의 제안자일 뿐이며, 허용 목록 검증 후에만 파이프라인을 진행한다.
 - planner의 `clarification_questions`와 `unsupported_conditions`는 결정론적 파서가 생성한 값만 사용한다. 원격 LLM의 동일 필드는 확인 중단이나 후보 등급에 영향을 주지 않는다.
-- `source=db`의 데이터 조회와 후보/Evidence 생성은 `services/recommendation-api/service/recommendation/pipeline.py`가 수행한다. `services/recommendation-api/scripts/recommendation_pipeline.py`는 CLI 호출을 위한 forwarding entrypoint다.
+- `source=db`의 데이터 조회와 후보/Evidence 생성은 `services/recommendation-api/recommendation/pipeline.py`가 수행한다. `services/recommendation-api/scripts/recommendation_pipeline.py`는 CLI 호출을 위한 forwarding entrypoint다.
 - 후보가 만들어진 뒤 설명 LLM의 `reasons`, `counter_evidence`, `context_notes`, `missing_features`는 후보의 결정론적 원문 항목만 복사할 수 있고, `summary`도 후보 등급 기반 canonical 문장만 허용한다. 추가 주소·수치·분기·매물·공실률·성공확률·수익률·인과관계는 `inference_hypotheses`에 `status=unverified`로만 담을 수 있으며, 후보 등급·정렬·하드 조건과 관측 Evidence에는 사용하지 않는다.
 - `CORS_ALLOW_ORIGINS`를 콤마로 설정한 경우에만 CORS 미들웨어를 활성화한다.

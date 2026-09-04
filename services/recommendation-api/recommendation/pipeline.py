@@ -7,7 +7,7 @@
 → LLM 설명(실패 시 템플릿) 순서로 실행한다.
 
 실행 예:
-  .venv/bin/python3 -m service.recommendation.pipeline \
+  .venv/bin/python3 -m recommendation.pipeline \
     --sido 서울특별시 --sigungu 송파구 --dong 잠실동 \
     --industry-code CS100010 \
     --special-condition-text '월세 300만원 이하, 20평 이상, 주차 가능' \

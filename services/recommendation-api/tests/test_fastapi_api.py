@@ -26,7 +26,7 @@ from api.main import (
     readyz,
     regions,
 )
-from service.recommendation.pipeline import (
+from recommendation.pipeline import (
     PipelineDependencyError,
     PipelineInputError,
     PipelineInternalError,

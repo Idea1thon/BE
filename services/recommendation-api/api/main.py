@@ -2,7 +2,7 @@
 
 This service is called by the middle backend, not directly by the UI:
 
-    UI -> middle backend -> this REST API -> service.recommendation
+    UI -> middle backend -> this REST API -> recommendation
                                       <- validated candidates and Evidence
     UI <- middle backend <- this REST API
 
@@ -48,13 +48,13 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
-from service.recommendation.paths import find_project_root
+from recommendation.paths import find_project_root
 
 ROOT = find_project_root(__file__)
 logger = logging.getLogger(__name__)
 
-from service.recommendation.llm_input_planner import INDUSTRY_NAMES
-from service.recommendation.pipeline import (
+from recommendation.llm_input_planner import INDUSTRY_NAMES
+from recommendation.pipeline import (
     DEFAULT_QUARTER,
     PipelineError,
     PipelineDependencyError,
@@ -406,7 +406,7 @@ async def readyz() -> dict[str, Any]:
     config = _service_config()
     if config.source == "db":
         try:
-            from service.recommendation.serving_db import ping
+            from recommendation.serving_db import ping
 
             await asyncio.wait_for(
                 run_in_threadpool(ping, config.readiness_timeout_s),
