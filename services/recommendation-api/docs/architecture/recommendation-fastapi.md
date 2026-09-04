@@ -55,6 +55,8 @@ macOS는 `brew install libpq` 후 `psql`이 PATH에 있는지 확인하고, Debi
 
 기본 추천 소스는 PostgreSQL(`source=db`)이며, 데이터 소스와 LLM 실행 모드는 FastAPI 서버 환경변수로만 설정한다. 배포 전 `services/recommendation-api/.env.example`을 같은 디렉터리의 `.env`로 복사한다. 추천 API는 루트 `.env`를 자동으로 읽지 않으므로 중간 백엔드의 `DATABASE_URL`과 섞이지 않는다. LLM은 기존 환경변수(`LLM_API_URL`, `LLM_API_KEY`, `LLM_MODEL`)를 사용하고, 개발·테스트에서는 `RECOMMENDATION_LLM_MODE=offline`으로 외부 호출 없이 결정론적 폴백을 실행할 수 있다.
 
+대용량 원천 데이터는 서비스 커밋에 포함하지 않고 외부 볼륨으로 제공한다. 볼륨의 절대 경로를 `RECOMMENDATION_DATA_ROOT`에 지정하며, 비워 두면 로컬 개발에서는 `data/` 디렉터리가 있는 저장소 경로를 자동 탐색한다.
+
 ## 주요 엔드포인트
 
 ### `GET /api/industries` · `GET /api/regions?sigungu=송파구`

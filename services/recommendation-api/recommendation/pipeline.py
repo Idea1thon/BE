@@ -39,7 +39,7 @@ import shapefile
 from .llm_explanation import explain_candidates
 from .llm_input_planner import parse_conditions, plan_input
 from .llm_runtime import LLMRuntimeError
-from .paths import find_project_root
+from .paths import SERVICE_ROOT, find_project_root
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Point, shape
 from shapely.ops import unary_union
@@ -1550,7 +1550,7 @@ def build_candidate(
         "dimension_evidence": {
             "현재수요": {"features": ["FC-01", "FC-07", "FC-31"], "status": "mixed", "grain_notes": {"FC-01": f"{f_scope or '없음'} 배경값 · 검증상 신호 없음 → context_notes만, 판정·정렬 미반영", "FC-07": "지점 반경 직접 계산 · bus_n만 약한 배경 신호, 역거리는 서술", "FC-31": f"{u_scope or '없음'}×업종 배경값 · 약한 배경 신호(과거 실적, 신규 성공 아님)"}},
             "경쟁·시장수용": {"features": ["FC-30", "FC-31", "FC-32"], "status": "mixed", "grain_notes": {"all": f"{u_scope or '없음'}×업종 배경값", "observed_poi_context": "완결 Kakao 지점 반경 관측; 상세 맥락만 제공하며 판정·정렬에는 미사용" if poi_context else "Kakao POI context 미사용"}},
-            "진입건전성": {"features": ["FC-10", "FC-11"], "status": "mixed", "entry_health_variant": "core", "entry_health_v1": {"version": "entry_health_v1", "grade": grade, "risk": risk, "formula": "0.25·폐업률분위 + 0.25·(100−개업률분위) + 0.25·(100−점포증감률분위) + 0.25·라벨리스크·100 (전 업종 통합)", "cuts": list(EH_CUTS[eh_scope]) if eh_scope else None, "cut_scope": eh_scope, "inputs": {**eh_inputs, "라벨": label}, "score_is_predictive": False, "used_in_판정": "반대근거 1항목", "ref": "artifacts/20-method/entry-health-v1-cut-design.md"}},
+            "진입건전성": {"features": ["FC-10", "FC-11"], "status": "mixed", "entry_health_variant": "core", "entry_health_v1": {"version": "entry_health_v1", "grade": grade, "risk": risk, "formula": "0.25·폐업률분위 + 0.25·(100−개업률분위) + 0.25·(100−점포증감률분위) + 0.25·라벨리스크·100 (전 업종 통합)", "cuts": list(EH_CUTS[eh_scope]) if eh_scope else None, "cut_scope": eh_scope, "inputs": {**eh_inputs, "라벨": label}, "score_is_predictive": False, "used_in_판정": "반대근거 1항목", "ref": "docs/architecture/recommendation-fastapi.md#entry-health-v1"}},
             "미래신호": {
                 "features": ["FC-42"] + (["FC-51-news"] if news_catalogs else []),
                 "status": "partial" if (naver_industry_attention or news_catalogs) else "inactive",
@@ -1568,7 +1568,7 @@ def build_candidate(
 
 
 def validate_candidates(candidates: list[dict[str, Any]]) -> list[str]:
-    schema_path = ROOT / "artifacts/20-method/rag-evidence-schema.json"
+    schema_path = SERVICE_ROOT / "artifacts/20-method/rag-evidence-schema.json"
     try:
         from jsonschema import Draft202012Validator
     except ImportError:

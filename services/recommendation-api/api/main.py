@@ -48,9 +48,13 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
+from recommendation.env import load_env
 from recommendation.paths import find_project_root
 
+load_env()
 ROOT = find_project_root(__file__)
+REGION_CATALOG_PATH = SERVICE_ROOT / "seoul_gu_dong_list.csv"
+EVIDENCE_SCHEMA_PATH = SERVICE_ROOT / "artifacts/20-method/rag-evidence-schema.json"
 logger = logging.getLogger(__name__)
 
 from recommendation.llm_input_planner import INDUSTRY_NAMES
@@ -146,7 +150,7 @@ def _validate_common_input(payload: PipelineRecommendationRequest) -> None:
 
 
 def _region_options() -> list[tuple[str, str]]:
-    path = ROOT / "seoul_gu_dong_list.csv"
+    path = REGION_CATALOG_PATH
     if not path.is_file():
         raise HTTPException(status_code=503, detail={
             "code": "region_catalog_unavailable",
@@ -214,7 +218,7 @@ def _pipeline_error_status(exc: PipelineError) -> int:
 def _output_root() -> Path:
     configured = os.getenv("RECOMMENDATION_API_OUT_ROOT", "output/recommendation_api_runs").strip()
     path = Path(configured)
-    return path if path.is_absolute() else ROOT / path
+    return path if path.is_absolute() else SERVICE_ROOT / path
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -398,10 +402,9 @@ async def healthz() -> dict[str, str]:
 
 @app.get("/readyz", tags=["system"])
 async def readyz() -> dict[str, Any]:
-    schema = ROOT / "artifacts/20-method/rag-evidence-schema.json"
     checks: dict[str, bool] = {
-        "schema_present": schema.is_file(),
-        "region_catalog_present": (ROOT / "seoul_gu_dong_list.csv").is_file(),
+        "schema_present": EVIDENCE_SCHEMA_PATH.is_file(),
+        "region_catalog_present": REGION_CATALOG_PATH.is_file(),
     }
     config = _service_config()
     if config.source == "db":

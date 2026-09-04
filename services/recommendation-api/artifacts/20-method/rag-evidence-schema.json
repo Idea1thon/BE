@@ -154,7 +154,7 @@
           "entry_health_variant": {"enum": ["core", "enriched"]},
           "entry_health_v1": {
             "type": ["object", "null"],
-            "description": "FC-10 서수 등급. 산식·컷 공개, score_is_predictive=false, 판정에선 반대근거 1항목으로만. artifacts/20-method/entry-health-v1-cut-design.md",
+            "description": "FC-10 서수 등급. 산식·컷 공개, score_is_predictive=false, 판정에선 반대근거 1항목으로만. docs/architecture/recommendation-fastapi.md#entry-health-v1",
             "properties": {
               "version": {"type": "string"},
               "grade": {"enum": ["양호", "보통", "주의", "경계", "정보없음"]},
