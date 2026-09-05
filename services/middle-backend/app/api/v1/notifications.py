@@ -1,4 +1,4 @@
-"""알림 조회. API_SPEC 5-1.
+"""알림 조회·읽음 처리. API_SPEC 5-1 · 5-2.
 
 `branch_name`·`risk_level`은 컬럼이 아니라 조인 결과다 (DB_SCHEMA 4-10).
 
@@ -15,12 +15,24 @@ import binascii
 from datetime import datetime
 
 from fastapi import APIRouter, Query
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import func, select, tuple_, update
 
 from app.api.deps import CurrentUser, SessionDep
-from app.errors import UNAUTHORIZED_401, VALIDATION_400, validation_error
+from app.errors import (
+    FORBIDDEN_403,
+    NOT_FOUND_404,
+    UNAUTHORIZED_401,
+    VALIDATION_400,
+    forbidden,
+    not_found,
+    validation_error,
+)
 from app.models import Branch, Notification, OperationReport, ReportAnalysis
-from app.schemas import NotificationItem, NotificationListResponse
+from app.schemas import (
+    NotificationItem,
+    NotificationListResponse,
+    NotificationReadResponse,
+)
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -106,4 +118,67 @@ async def list_notifications(
             )
             for n, branch_name, risk_level in rows
         ],
+    )
+
+
+@router.patch(
+    "/{notification_id}/read",
+    response_model=NotificationReadResponse,
+    responses={**UNAUTHORIZED_401, **FORBIDDEN_403, **NOT_FOUND_404},
+)
+async def mark_notification_read(
+    notification_id: int, current_user: CurrentUser, session: SessionDep
+) -> NotificationReadResponse:
+    """API_SPEC 5-2. REQ-HQ-10 의 미확인 뱃지가 줄어들려면 필요하다.
+
+    **멱등**: 이미 읽은 알림에 다시 호출해도 200 이고 `read_at` 은 최초 시각을
+    유지한다. 갱신을 `is_read = false` 조건부 UPDATE 로 두는 이유가 이것이다 —
+    무조건 `values(read_at=now())` 면 재호출마다 시각이 밀려 "언제 읽었나"가
+    사라진다. 동시 요청에서도 한쪽만 WHERE 를 통과한다.
+    """
+    row = (
+        await session.execute(
+            select(
+                Notification.recipient_user_id,
+                Notification.is_read,
+                Notification.read_at,
+            ).where(Notification.id == notification_id)
+        )
+    ).first()
+    if row is None:
+        raise not_found("알림을 찾을 수 없습니다")
+    if row.recipient_user_id != current_user.id:
+        raise forbidden("본인 수신 알림만 처리할 수 있습니다")
+    if row.is_read:
+        return NotificationReadResponse(
+            notification_id=notification_id, is_read=True, read_at=row.read_at
+        )
+
+    updated = (
+        await session.execute(
+            update(Notification)
+            .where(
+                Notification.id == notification_id,
+                Notification.recipient_user_id == current_user.id,
+                Notification.is_read.is_(False),
+            )
+            .values(is_read=True, read_at=func.now())
+            .returning(Notification.read_at)
+        )
+    ).first()
+    await session.commit()
+
+    if updated is None:
+        # 위 SELECT 와 UPDATE 사이에 다른 요청이 먼저 읽음 처리했다. 그쪽 시각을 쓴다.
+        read_at = (
+            await session.execute(
+                select(Notification.read_at).where(Notification.id == notification_id)
+            )
+        ).scalar_one()
+        return NotificationReadResponse(
+            notification_id=notification_id, is_read=True, read_at=read_at
+        )
+
+    return NotificationReadResponse(
+        notification_id=notification_id, is_read=True, read_at=updated.read_at
     )

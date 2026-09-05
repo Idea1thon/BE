@@ -274,12 +274,14 @@ async def test_financial_products_forbidden_for_hq(client):
 
 
 # ------------------------------------------------------------------ 범위 밖
-@pytest.mark.parametrize(
-    "path",
-    ["/api/v1/branches", "/api/v1/reports/1", "/api/v1/reports/1/status"],
-)
-async def test_out_of_scope_endpoints_absent(client, path):
-    """3-1 목록·4-5 상세·4-6 상태는 이번 Phase 범위 밖이다."""
-    headers = await _auth(client, HQ)
-    res = await client.get(path, headers=headers)
+async def test_signup_is_not_implemented(client):
+    """API_SPEC 1-4. 회원가입은 별도 Phase 이고 라우터에 없다.
+
+    3-1 목록 · 4-5 상세 · 4-6 상태는 Phase 4 에서 구현됐다
+    (`test_report_queries.py`). 그 자리를 대신하는 범위 확인이다.
+    """
+    res = await client.post(
+        "/api/v1/auth/signup",
+        json={"email": "new@example.com", "password": "devpass1234"},
+    )
     assert res.status_code == 404
