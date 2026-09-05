@@ -25,6 +25,7 @@ from api.main import (
     industries,
     readyz,
     regions,
+    verify_internal_token,
 )
 from recommendation.pipeline import (
     PipelineDependencyError,
@@ -37,6 +38,32 @@ from recommendation.pipeline import (
 
 
 class FastApiBoundaryTests(unittest.TestCase):
+    def test_internal_auth_dependency_fails_closed_and_accepts_matching_token(self) -> None:
+        with patch.dict("os.environ", {"INTERNAL_API_TOKEN": ""}):
+            with self.assertRaises(HTTPException) as raised:
+                verify_internal_token("anything")
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail["code"], "internal_auth_not_configured")
+
+        with patch.dict("os.environ", {"INTERNAL_API_TOKEN": "test-token"}):
+            with self.assertRaises(HTTPException) as raised:
+                verify_internal_token("wrong-token")
+            self.assertEqual(raised.exception.status_code, 401)
+            self.assertIsNone(verify_internal_token("test-token"))
+
+    def test_internal_auth_dependency_is_attached_to_server_to_server_routes(self) -> None:
+        protected_paths = {
+            "/api/industries",
+            "/api/regions",
+            "/internal/recommendations",
+            "/api/recommendations",
+        }
+        routes = {route.path: route for route in app.routes if route.path in protected_paths}
+        self.assertEqual(set(routes), protected_paths)
+        for path, route in routes.items():
+            with self.subTest(path=path):
+                self.assertIn(verify_internal_token, [dependency.call for dependency in route.dependant.dependencies])
+
     def test_healthz(self) -> None:
         response = asyncio.run(healthz())
         self.assertEqual(response["status"], "ok")
@@ -126,6 +153,23 @@ class FastApiBoundaryTests(unittest.TestCase):
                     industry_code="CS100010",
                     limit=invalid_limit,
                 )
+
+    def test_capacity_error_includes_retry_after(self) -> None:
+        payload = PipelineRecommendationRequest(
+            request_id="capacity-1",
+            region={"sigungu": "송파구", "dong": "잠실동"},
+            industry_code="CS100010",
+        )
+        config = ServiceConfig(
+            quarter="20261", source="files", llm_mode="offline", limit=5, request_timeout_s=7.2,
+        )
+        with patch("api.main._service_config", return_value=config), patch(
+            "api.main._try_acquire_recommendation_slot", return_value=False,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(create_recommendation(payload))
+        self.assertEqual(raised.exception.status_code, 429)
+        self.assertEqual(raised.exception.headers, {"Retry-After": "8"})
 
     def test_response_validates_candidates_against_evidence_schema(self) -> None:
         with self.assertRaises(ValidationError):

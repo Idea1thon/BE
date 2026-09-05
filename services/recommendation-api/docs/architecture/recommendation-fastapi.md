@@ -126,12 +126,19 @@ RECOMMENDATION_READINESS_TIMEOUT_SECONDS=3
 RECOMMENDATION_MAX_CONCURRENT=4
 ```
 
-`/internal/recommendations`와 호환 alias는 내부 백엔드 전용이다. 실제 HTTP
-호출에서는 `INTERNAL_API_TOKEN`을 서버에 설정하고 같은 값을
-`X-Internal-Token` 헤더로 전달해야 한다. 토큰이 없거나 일치하지 않으면
-파이프라인을 실행하지 않는다. 개별 요청은 `RECOMMENDATION_REQUEST_TIMEOUT_SECONDS`
-를 넘으면 504로 종료된다.
-동시 실행 수가 `RECOMMENDATION_MAX_CONCURRENT`를 초과하면 429를 반환한다.
+`/internal/recommendations`와 호환 alias, `/api/industries`, `/api/regions`는
+내부 백엔드 전용이다. 실제 HTTP 호출에서는 `INTERNAL_API_TOKEN`을 서버에
+설정하고 같은 값을 `X-Internal-Token` 헤더로 전달해야 한다. 네 엔드포인트는
+공통 FastAPI dependency에서 토큰을 검증하므로, 호출 컨텍스트가 바뀌거나
+라우트 함수가 직접 호출되어도 실제 HTTP 경로의 인증이 생략되지 않는다.
+토큰이 없거나 일치하지 않으면 파이프라인을 실행하지 않는다. `healthz`와
+`readyz`만 프로세스·의존성 상태 확인을 위해 공개한다.
+
+개별 요청은 `RECOMMENDATION_REQUEST_TIMEOUT_SECONDS`를 넘으면 504로 종료된다.
+동시 실행 수가 `RECOMMENDATION_MAX_CONCURRENT`를 초과하면 429를 반환하며,
+클라이언트가 재시도 간격을 정할 수 있도록 `Retry-After`를 함께 보낸다. 값은
+설정된 요청 timeout을 초 단위로 올림한 보수적 지연값이다. 타임아웃 이후에도
+실행 중인 워커가 슬롯을 점유할 수 있으므로 즉시 재시도하지 않아야 한다.
 
 `GET /healthz`는 프로세스 생존만 확인하고, `GET /readyz` 성공 응답은
 `{"ok": true}`만 반환한다. DB readiness probe는 동기 `psql` 호출을 threadpool에서
@@ -160,6 +167,10 @@ RECOMMENDATION_MAX_CONCURRENT=4
   }
 }
 ```
+
+`confirmation_required`의 처리 주체는 중간 백엔드와 UI다. 중간 백엔드는
+`questions[]`를 사용자에게 보여주고 답을 반영한 새 요청을 보내며, 이 API는
+질문을 일반 검증 오류로 눌러서 바꾸거나 임의로 입력을 제한하지 않는다.
 
 분석 결과는 `output/recommendation_api_runs/<run_id>/`에 JSON 아티팩트로도 보존된다. API 응답에는 서버의 절대 경로를 포함하지 않는다.
 

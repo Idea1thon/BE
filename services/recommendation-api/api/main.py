@@ -28,6 +28,7 @@ import asyncio
 import csv
 import datetime as dt
 import logging
+import math
 import os
 import re
 import secrets
@@ -38,7 +39,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -152,6 +153,25 @@ def _validate_common_input(payload: PipelineRecommendationRequest) -> None:
         raise HTTPException(status_code=422, detail={
             "code": "unsupported_industry",
             "message": f"지원하지 않는 업종 코드: {payload.industry_code}",
+            "questions": [],
+        })
+
+
+def verify_internal_token(
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
+) -> None:
+    """Fail closed for every server-to-server route using this dependency."""
+    expected_token = os.getenv("INTERNAL_API_TOKEN", "").strip()
+    if not expected_token:
+        raise HTTPException(status_code=503, detail={
+            "code": "internal_auth_not_configured",
+            "message": "INTERNAL_API_TOKEN이 설정되지 않았습니다.",
+            "questions": [],
+        })
+    if not x_internal_token or not secrets.compare_digest(x_internal_token, expected_token):
+        raise HTTPException(status_code=401, detail={
+            "code": "unauthorized",
+            "message": "유효한 내부 호출 토큰이 필요합니다.",
             "questions": [],
         })
 
@@ -438,13 +458,13 @@ async def readyz() -> dict[str, Any]:
     return {"ok": True}
 
 
-@app.get("/api/industries", tags=["catalog"])
+@app.get("/api/industries", dependencies=[Depends(verify_internal_token)], tags=["catalog"])
 async def industries() -> list[dict[str, str]]:
     """Return the finite industry list used by the input contract."""
     return [{"code": code, "name": INDUSTRY_NAMES[code]} for code in sorted(INDUSTRY_NAMES)]
 
 
-@app.get("/api/regions", tags=["catalog"])
+@app.get("/api/regions", dependencies=[Depends(verify_internal_token)], tags=["catalog"])
 async def regions(
     sigungu: str | None = Query(default=None, max_length=40),
 ) -> dict[str, Any]:
@@ -455,31 +475,23 @@ async def regions(
     return {"sido": "서울특별시", "sigungu": sigungus, "dong": dongs}
 
 
-@app.post("/internal/recommendations", response_model=RecommendationApiResponse, tags=["pipeline"])
-@app.post("/api/recommendations", response_model=RecommendationApiResponse, include_in_schema=False, tags=["pipeline"])
+@app.post(
+    "/internal/recommendations",
+    response_model=RecommendationApiResponse,
+    dependencies=[Depends(verify_internal_token)],
+    tags=["pipeline"],
+)
+@app.post(
+    "/api/recommendations",
+    response_model=RecommendationApiResponse,
+    include_in_schema=False,
+    dependencies=[Depends(verify_internal_token)],
+    tags=["pipeline"],
+)
 async def create_recommendation(
     payload: PipelineRecommendationRequest,
-    request: Request = None,  # type: ignore[assignment]
-    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
 ) -> dict[str, Any]:
     """Run the complete recommendation pipeline for one backend request."""
-    # Direct Python calls used by unit tests do not carry an HTTP Request. All
-    # actual HTTP calls fail closed unless the deployment supplies a shared
-    # internal token through the environment.
-    if request is not None:
-        expected_token = os.getenv("INTERNAL_API_TOKEN", "").strip()
-        if not expected_token:
-            raise HTTPException(status_code=503, detail={
-                "code": "internal_auth_not_configured",
-                "message": "INTERNAL_API_TOKEN이 설정되지 않았습니다.",
-                "questions": [],
-            })
-        if not x_internal_token or not secrets.compare_digest(x_internal_token, expected_token):
-            raise HTTPException(status_code=401, detail={
-                "code": "unauthorized",
-                "message": "유효한 내부 호출 토큰이 필요합니다.",
-                "questions": [],
-            })
     _validate_common_input(payload)
     config = _service_config()
     applied_limit = payload.limit if payload.limit is not None else config.limit
@@ -488,7 +500,7 @@ async def create_recommendation(
             "code": "recommendation_capacity_exceeded",
             "message": "동시 추천 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.",
             "questions": [],
-        })
+        }, headers={"Retry-After": str(max(1, math.ceil(config.request_timeout_s)))})
 
     run_id, out_dir = _new_run_dir()
     try:
@@ -509,7 +521,7 @@ async def create_recommendation(
             "questions": [],
             "request_id": payload.request_id,
             "run_id": run_id,
-        }) from exc
+        }, headers={"Retry-After": str(max(1, math.ceil(config.request_timeout_s)))}) from exc
     except PipelineError as exc:
         if isinstance(exc, PipelineInputError):
             logger.info(
