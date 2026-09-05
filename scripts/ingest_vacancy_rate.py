@@ -80,26 +80,61 @@ def _result_code(payload: dict) -> str | None:
 
 
 def fetch_all_rows(statbl_id: str) -> list[dict]:
+    """Fetch every row and reject an incomplete but syntactically normal response.
+
+    R-ONE can return a successful envelope with ``list_total_count`` larger
+    than the rows returned by a later page. Treating that page as the end of
+    pagination silently creates a partial snapshot, so the first page's total
+    is used as an invariant for every subsequent page.
+    """
     rows: list[dict] = []
     page = 1
+    expected_total: int | None = None
     while True:
         payload = get_table_data(statbl_id, "QY", page=page, size=PAGE_SIZE)
         # 오류/무자료 envelope(RESULT.CODE != INFO-000)를 빈 페이지·정상 종료로
         # 취급하면(이전 버그) 일부 상가유형만 실패해도 나머지로 기존 스냅샷을
         # 덮어써서 그 유형의 공실률이 통째로 사라진다.
         result_code = _result_code(payload)
-        if result_code is not None and result_code != "INFO-000":
+        if result_code != "INFO-000":
             raise VacancyFetchError(
-                f"R-ONE API 오류 응답(STATBL_ID={statbl_id}, page={page}): {result_code}"
+                f"R-ONE API 정상 코드 누락/오류(STATBL_ID={statbl_id}, page={page}): {result_code}"
             )
         page_rows = _data_rows(payload)
-        rows.extend(page_rows)
-        total = None
+        total_value = None
         try:
-            total = payload["SttsApiTblData"][0]["head"][0]["list_total_count"]
-        except (KeyError, IndexError, TypeError):
-            pass
-        if not page_rows or total is None or len(rows) >= int(total):
+            total_value = payload["SttsApiTblData"][0]["head"][0]["list_total_count"]
+            total = int(total_value)
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise VacancyFetchError(
+                f"R-ONE 응답의 list_total_count가 없습니다/올바르지 않습니다 "
+                f"(STATBL_ID={statbl_id}, page={page})"
+            ) from None
+        if total < 0:
+            raise VacancyFetchError(
+                f"R-ONE 응답의 list_total_count가 음수입니다 "
+                f"(STATBL_ID={statbl_id}, page={page}, total={total})"
+            )
+        if expected_total is None:
+            expected_total = total
+        elif total != expected_total:
+            raise VacancyFetchError(
+                f"R-ONE 페이지별 list_total_count가 다릅니다 "
+                f"(STATBL_ID={statbl_id}, page={page}, expected={expected_total}, got={total})"
+            )
+
+        rows.extend(page_rows)
+        if len(rows) > expected_total:
+            raise VacancyFetchError(
+                f"R-ONE 응답 행수가 전체 건수를 초과했습니다 "
+                f"(STATBL_ID={statbl_id}, page={page}, expected={expected_total}, got={len(rows)})"
+            )
+        if not page_rows and len(rows) < expected_total:
+            raise VacancyFetchError(
+                f"R-ONE 페이지가 비어 있지만 전체 건수를 채우지 못했습니다 "
+                f"(STATBL_ID={statbl_id}, page={page}, expected={expected_total}, got={len(rows)})"
+            )
+        if len(rows) == expected_total:
             break
         page += 1
         time.sleep(0.2)
@@ -146,7 +181,15 @@ def main() -> int:
             print(f"  {styp:8s} STATBL_ID={statbl_id}  FAIL: {exc}")
             failures.append(styp)
             continue
+        if not api_rows:
+            print(f"  {styp:8s} STATBL_ID={statbl_id}  FAIL: 정상 응답이지만 원천 행이 0개")
+            failures.append(styp)
+            continue
         seoul_rows = parse_rows(styp, api_rows)
+        if not seoul_rows:
+            print(f"  {styp:8s} STATBL_ID={statbl_id}  FAIL: 서울 공실률 행이 0개")
+            failures.append(styp)
+            continue
         all_rows += seoul_rows
         call_log.append({"상가유형": styp, "statbl_id": statbl_id,
                           "전국_응답행수": len(api_rows), "서울_행수": len(seoul_rows)})
