@@ -217,21 +217,24 @@ def main() -> None:
             first_fire or "-",
         ))
 
-    hq = summarize({
-        "request_id": "demo-hq-001",
-        "franchise_id": "demo-all",
+    # 데모 전체는 여러 본사를 포함한다. 실제 본사 API와 동일하게 각각 집계한다.
+    franchise_ids = sorted({r["branch"]["franchise_id"] for r in final_results})
+    summaries = [summarize({
+        "request_id": f"demo-hq-{franchise_id}",
+        "franchise_id": franchise_id,
         "as_of": final_as_of.isoformat(),
-        "branch_results": final_results,
-    })
-    (OUT_DIR / "hq_summary.json").write_text(json.dumps(hq, ensure_ascii=False, indent=2), encoding="utf-8")
+        "branch_results": [r for r in final_results if r["branch"]["franchise_id"] == franchise_id],
+    }) for franchise_id in franchise_ids]
+    (OUT_DIR / "hq_summary.json").write_text(
+        json.dumps({"summaries": summaries}, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     lines = [
         "# 데모 실행 요약",
         "",
         f"- 생성일 기준 as_of: {final_as_of.isoformat()}",
         f"- 가맹점: {len(summary_rows)}개 × 24개월 = {len(summary_rows) * MONTHS} 운영보고서",
-        f"- 본사 집계: 위험 {hq['grade_distribution']['위험']} / 주의 {hq['grade_distribution']['주의']} / 정상 {hq['grade_distribution']['정상']}"
-        f" (danger_ratio {hq['danger_ratio_pct']}%, avg_score {hq['average_score']})",
+        f"- 본사별 집계: {len(summaries)}개 본사 (hq_summary.json의 summaries)",
         "",
         "| branch | 시나리오 | 구 | 업종 | score | grade | status | 리뷰 | 첫 사이렌 |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",

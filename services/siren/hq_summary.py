@@ -21,7 +21,17 @@ def summarize(request: HqSummaryRequest | dict[str, Any]) -> dict[str, Any]:
     watchlist: list[dict[str, Any]] = []
     contains_synthetic = False
 
+    seen: set[str] = set()
     for res in request.branch_results:
+        branch = res.get("branch")
+        if not isinstance(branch, dict) or branch.get("franchise_id") != request.franchise_id:
+            raise ValueError("every branch result must belong to the requested franchise")
+        branch_id = branch.get("branch_id")
+        if not isinstance(branch_id, str) or not branch_id.strip():
+            raise ValueError("every branch result requires a branch_id")
+        if branch_id in seen:
+            raise ValueError("branch_results must not contain duplicate branches")
+        seen.add(branch_id)
         risk = res.get("risk", {})
         prov = res.get("data_provenance", {})
         contains_synthetic = contains_synthetic or bool(prov.get("contains_synthetic"))
@@ -62,9 +72,6 @@ def summarize(request: HqSummaryRequest | dict[str, Any]) -> dict[str, Any]:
         "danger_ratio_pct": danger_ratio,
         "average_score": average_score,
         "watchlist": watchlist,
-        "unread_alert_count": sum(
-            1 for r in request.branch_results if r.get("alert", {}).get("should_fire")
-        ),
         "data_provenance": {
             "contains_synthetic": contains_synthetic,
             "disclosure": (

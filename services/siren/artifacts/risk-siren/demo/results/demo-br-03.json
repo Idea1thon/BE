@@ -561,5 +561,19 @@
         "disclosure": "가맹점 매출·손익·리뷰는 대회 데모용 합성 데이터입니다. 상권×업종 폐업률·시장 매출·경쟁업체 등장은 서울시 공개데이터 실측입니다."
       }
     }
+  },
+  "franchise_closure": {
+    "status": "missing",
+    "year": null,
+    "previous_year_end_count": null,
+    "new_openings": null,
+    "closures": null,
+    "operating_base_count": null,
+    "operating_base_rate_pct": null,
+    "previous_year_base_rate_pct": null,
+    "source": null,
+    "synthetic": null,
+    "formula_version": "franchise-annual-v1",
+    "formula_authority": "project_defined"
   }
 }

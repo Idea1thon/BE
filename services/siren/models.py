@@ -251,6 +251,39 @@ class RiskOptions(ContractModel):
     send_notifications: bool = False
 
 
+class FranchiseClosureYear(ContractModel):
+    """브랜드 연간 실폐업 집계. 계약 종료·해지 건수를 대신 넣지 않는다."""
+
+    franchise_id: str = Field(min_length=1)
+    year: int = Field(ge=1, le=9999, strict=True)
+    previous_year_end_count: int = Field(ge=0, strict=True)
+    new_openings: int = Field(ge=0, strict=True)
+    closures: int = Field(ge=0, strict=True)
+    source: str = Field(min_length=1)
+    synthetic: bool
+
+    @model_validator(mode="after")
+    def _consistent_population(self) -> "FranchiseClosureYear":
+        if self.closures > self.previous_year_end_count + self.new_openings:
+            raise ValueError("closures exceeds the annual operating population")
+        return self
+
+
+class FranchiseClosureResult(ContractModel):
+    status: Literal["missing", "calculated", "partial", "not_calculable"]
+    year: int | None = None
+    previous_year_end_count: int | None = None
+    new_openings: int | None = None
+    closures: int | None = None
+    operating_base_count: int | None = None
+    operating_base_rate_pct: float | None = None
+    previous_year_base_rate_pct: float | None = None
+    source: str | None = None
+    synthetic: bool | None = None
+    formula_version: str = "franchise-annual-v1"
+    formula_authority: str = "project_defined"
+
+
 class RiskSirenRequest(ContractModel):
     request_id: str = Field(min_length=1)
     franchise_id: str = Field(min_length=1)
@@ -263,9 +296,15 @@ class RiskSirenRequest(ContractModel):
     branch_reports: list[BranchMonthlyReport] = Field(default_factory=list)
     reviews: ReviewsInput | None = None
     options: RiskOptions = Field(default_factory=RiskOptions)
+    franchise_closure: FranchiseClosureYear | None = None
 
     @model_validator(mode="after")
     def _no_dupe_months(self) -> "RiskSirenRequest":
+        if self.franchise_closure is not None:
+            if self.franchise_closure.franchise_id != self.franchise_id:
+                raise ValueError("franchise_closure must belong to the requested franchise")
+            if self.franchise_closure.year >= self.as_of.year:
+                raise ValueError("franchise_closure requires a completed calendar year before as_of")
         months = [r.month for r in self.branch_reports]
         if len(months) != len(set(months)):
             raise ValueError("branch_reports must not contain duplicate months")
@@ -288,6 +327,7 @@ class RiskSirenResponse(ContractModel):
     financial_products: dict
     explanation: dict
     projections: dict
+    franchise_closure: FranchiseClosureResult
 
 
 # --------------------------------------------------------------------------- #
@@ -309,5 +349,4 @@ class HqSummaryResponse(ContractModel):
     danger_ratio_pct: float | None
     average_score: float | None
     watchlist: list[dict]
-    unread_alert_count: int
     data_provenance: dict

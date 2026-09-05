@@ -262,9 +262,13 @@ class RiskSirenV1Tests(unittest.TestCase):
     def test_hq_summary_keeps_ratio_and_average_separate(self) -> None:
         r_danger = analyze(complete_payload(margin_start=0.05, margin_end=-0.22, loan_end=3_000_000))
         r_ok = analyze(complete_payload(margin_start=0.11, margin_end=0.10))
+        from copy import deepcopy
+        r_ok_2 = deepcopy(r_ok)
+        r_ok["branch"]["branch_id"] = "br-002"
+        r_ok_2["branch"]["branch_id"] = "br-003"
         summary = summarize({
             "request_id": "hq-1", "franchise_id": "fr-001", "as_of": "2026-03-31",
-            "branch_results": [r_danger, r_ok, r_ok],
+            "branch_results": [r_danger, r_ok, r_ok_2],
         })
         self.assertEqual(summary["branch_count"], 3)
         self.assertIn("danger_ratio_pct", summary)

@@ -11,6 +11,7 @@ from datetime import date
 from typing import Any
 
 from .alerts import build_alert
+from .franchise import calculate_franchise_closure
 from .explanation import build_explanation
 from .models import RiskSirenRequest, INDUSTRY_LABELS
 from .reports import build_metric_series
@@ -306,15 +307,16 @@ def analyze(
         "profitability": profitability,
     }
 
-    contains_synthetic = any([market_synth, sales_synth, cost_synth, review_synth])
+    franchise_synth = bool(request.franchise_closure and request.franchise_closure.synthetic)
+    contains_synthetic = any([market_synth, sales_synth, cost_synth, review_synth, franchise_synth])
     synthetic_signals = [
         name for name, flag in (
             ("SR-01/02.market/03(시장)", market_synth), ("SR-02.branch(매출)", sales_synth),
             ("SR-05(손익)", cost_synth), ("SR-04(리뷰)", review_synth),
         ) if flag
     ]
-    if not contains_synthetic:
-        disclosure = "모든 신호가 실측 데이터입니다."
+    if not any([market_synth, sales_synth, cost_synth, review_synth]):
+        disclosure = "위험도 계산 신호에는 합성 데이터가 포함되지 않았습니다."
     elif not market_synth:
         disclosure = (
             "가맹점 매출·손익·리뷰는 대회 데모용 합성 데이터입니다. "
@@ -322,6 +324,8 @@ def analyze(
         )
     else:
         disclosure = "합성 데이터가 포함되어 있습니다: " + ", ".join(synthetic_signals) + "."
+    if franchise_synth:
+        disclosure += " 브랜드 연간 폐업 통계는 합성 데이터입니다."
     data_provenance = {
         "contains_synthetic": contains_synthetic,
         "disclosure": disclosure,
@@ -368,6 +372,7 @@ def analyze(
         "financial_products": {"status": "catalog_match_pending", "items": []},
         "explanation": {},
         "projections": {},
+        "franchise_closure": calculate_franchise_closure(request.franchise_closure),
     }
     result["explanation"] = build_explanation(result, request.options.llm_mode)
     result["projections"] = _build_projections(result)

@@ -1,136 +1,234 @@
 {
-  "franchise_id": "demo-all",
-  "as_of": "2026-03-31",
-  "branch_count": 20,
-  "calculated_count": 18,
-  "grade_distribution": {
-    "정상": 6,
-    "주의": 4,
-    "위험": 8
-  },
-  "danger_ratio_pct": 44.4444,
-  "average_score": 60.0773,
-  "watchlist": [
+  "summaries": [
     {
-      "branch_id": "demo-br-06",
-      "grade": "주의",
-      "reasons": [
-        "SR-05",
-        "SR-04"
-      ]
+      "franchise_id": "demo-fr-01",
+      "as_of": "2026-03-31",
+      "branch_count": 4,
+      "calculated_count": 3,
+      "grade_distribution": {
+        "정상": 1,
+        "주의": 1,
+        "위험": 1
+      },
+      "danger_ratio_pct": 33.3333,
+      "average_score": 55.517,
+      "watchlist": [
+        {
+          "branch_id": "demo-br-07",
+          "grade": "주의",
+          "reasons": [
+            "SR-05",
+            "SR-04"
+          ]
+        },
+        {
+          "branch_id": "demo-br-13",
+          "grade": "위험",
+          "reasons": [
+            "grade:위험",
+            "SR-05",
+            "SR-04"
+          ]
+        },
+        {
+          "branch_id": "demo-br-19",
+          "grade": null,
+          "reasons": [
+            "partial"
+          ]
+        }
+      ],
+      "data_provenance": {
+        "contains_synthetic": true,
+        "disclosure": "일부 가맹점 결과에 대회 데모용 합성 데이터가 포함되어 있습니다."
+      }
     },
     {
-      "branch_id": "demo-br-07",
-      "grade": "주의",
-      "reasons": [
-        "SR-05",
-        "SR-04"
-      ]
+      "franchise_id": "demo-fr-02",
+      "as_of": "2026-03-31",
+      "branch_count": 4,
+      "calculated_count": 3,
+      "grade_distribution": {
+        "정상": 1,
+        "주의": 1,
+        "위험": 1
+      },
+      "danger_ratio_pct": 33.3333,
+      "average_score": 53.9767,
+      "watchlist": [
+        {
+          "branch_id": "demo-br-08",
+          "grade": "주의",
+          "reasons": [
+            "SR-05",
+            "SR-04"
+          ]
+        },
+        {
+          "branch_id": "demo-br-14",
+          "grade": "위험",
+          "reasons": [
+            "grade:위험",
+            "SR-05",
+            "SR-04"
+          ]
+        },
+        {
+          "branch_id": "demo-br-20",
+          "grade": null,
+          "reasons": [
+            "SR-04",
+            "partial"
+          ]
+        }
+      ],
+      "data_provenance": {
+        "contains_synthetic": true,
+        "disclosure": "일부 가맹점 결과에 대회 데모용 합성 데이터가 포함되어 있습니다."
+      }
     },
     {
-      "branch_id": "demo-br-08",
-      "grade": "주의",
-      "reasons": [
-        "SR-05",
-        "SR-04"
-      ]
+      "franchise_id": "demo-fr-03",
+      "as_of": "2026-03-31",
+      "branch_count": 3,
+      "calculated_count": 3,
+      "grade_distribution": {
+        "정상": 2,
+        "주의": 1,
+        "위험": 0
+      },
+      "danger_ratio_pct": 0.0,
+      "average_score": 41.9341,
+      "watchlist": [
+        {
+          "branch_id": "demo-br-15",
+          "grade": "주의",
+          "reasons": [
+            "SR-05"
+          ]
+        }
+      ],
+      "data_provenance": {
+        "contains_synthetic": true,
+        "disclosure": "일부 가맹점 결과에 대회 데모용 합성 데이터가 포함되어 있습니다."
+      }
     },
     {
-      "branch_id": "demo-br-10",
-      "grade": "위험",
-      "reasons": [
-        "grade:위험",
-        "SR-05",
-        "SR-04"
-      ]
+      "franchise_id": "demo-fr-04",
+      "as_of": "2026-03-31",
+      "branch_count": 3,
+      "calculated_count": 3,
+      "grade_distribution": {
+        "정상": 1,
+        "주의": 0,
+        "위험": 2
+      },
+      "danger_ratio_pct": 66.6667,
+      "average_score": 67.5368,
+      "watchlist": [
+        {
+          "branch_id": "demo-br-10",
+          "grade": "위험",
+          "reasons": [
+            "grade:위험",
+            "SR-05",
+            "SR-04"
+          ]
+        },
+        {
+          "branch_id": "demo-br-16",
+          "grade": "위험",
+          "reasons": [
+            "grade:위험",
+            "SR-05",
+            "SR-04"
+          ]
+        }
+      ],
+      "data_provenance": {
+        "contains_synthetic": true,
+        "disclosure": "일부 가맹점 결과에 대회 데모용 합성 데이터가 포함되어 있습니다."
+      }
     },
     {
-      "branch_id": "demo-br-11",
-      "grade": "위험",
-      "reasons": [
-        "grade:위험",
-        "SR-05",
-        "SR-04"
-      ]
+      "franchise_id": "demo-fr-05",
+      "as_of": "2026-03-31",
+      "branch_count": 3,
+      "calculated_count": 3,
+      "grade_distribution": {
+        "정상": 1,
+        "주의": 0,
+        "위험": 2
+      },
+      "danger_ratio_pct": 66.6667,
+      "average_score": 64.8878,
+      "watchlist": [
+        {
+          "branch_id": "demo-br-11",
+          "grade": "위험",
+          "reasons": [
+            "grade:위험",
+            "SR-05",
+            "SR-04"
+          ]
+        },
+        {
+          "branch_id": "demo-br-17",
+          "grade": "위험",
+          "reasons": [
+            "grade:위험",
+            "SR-05",
+            "SR-04"
+          ]
+        }
+      ],
+      "data_provenance": {
+        "contains_synthetic": true,
+        "disclosure": "일부 가맹점 결과에 대회 데모용 합성 데이터가 포함되어 있습니다."
+      }
     },
     {
-      "branch_id": "demo-br-12",
-      "grade": "위험",
-      "reasons": [
-        "grade:위험",
-        "SR-05"
-      ]
-    },
-    {
-      "branch_id": "demo-br-13",
-      "grade": "위험",
-      "reasons": [
-        "grade:위험",
-        "SR-05",
-        "SR-04"
-      ]
-    },
-    {
-      "branch_id": "demo-br-14",
-      "grade": "위험",
-      "reasons": [
-        "grade:위험",
-        "SR-05",
-        "SR-04"
-      ]
-    },
-    {
-      "branch_id": "demo-br-15",
-      "grade": "주의",
-      "reasons": [
-        "SR-05"
-      ]
-    },
-    {
-      "branch_id": "demo-br-16",
-      "grade": "위험",
-      "reasons": [
-        "grade:위험",
-        "SR-05",
-        "SR-04"
-      ]
-    },
-    {
-      "branch_id": "demo-br-17",
-      "grade": "위험",
-      "reasons": [
-        "grade:위험",
-        "SR-05",
-        "SR-04"
-      ]
-    },
-    {
-      "branch_id": "demo-br-18",
-      "grade": "위험",
-      "reasons": [
-        "grade:위험",
-        "SR-05"
-      ]
-    },
-    {
-      "branch_id": "demo-br-19",
-      "grade": null,
-      "reasons": [
-        "partial"
-      ]
-    },
-    {
-      "branch_id": "demo-br-20",
-      "grade": null,
-      "reasons": [
-        "SR-04",
-        "partial"
-      ]
+      "franchise_id": "demo-fr-06",
+      "as_of": "2026-03-31",
+      "branch_count": 3,
+      "calculated_count": 3,
+      "grade_distribution": {
+        "정상": 0,
+        "주의": 1,
+        "위험": 2
+      },
+      "danger_ratio_pct": 66.6667,
+      "average_score": 76.6112,
+      "watchlist": [
+        {
+          "branch_id": "demo-br-06",
+          "grade": "주의",
+          "reasons": [
+            "SR-05",
+            "SR-04"
+          ]
+        },
+        {
+          "branch_id": "demo-br-12",
+          "grade": "위험",
+          "reasons": [
+            "grade:위험",
+            "SR-05"
+          ]
+        },
+        {
+          "branch_id": "demo-br-18",
+          "grade": "위험",
+          "reasons": [
+            "grade:위험",
+            "SR-05"
+          ]
+        }
+      ],
+      "data_provenance": {
+        "contains_synthetic": true,
+        "disclosure": "일부 가맹점 결과에 대회 데모용 합성 데이터가 포함되어 있습니다."
+      }
     }
-  ],
-  "unread_alert_count": 8,
-  "data_provenance": {
-    "contains_synthetic": true,
-    "disclosure": "일부 가맹점 결과에 대회 데모용 합성 데이터가 포함되어 있습니다."
-  }
+  ]
 }
