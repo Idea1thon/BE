@@ -54,7 +54,20 @@ REGIONS = [
     ("1144012000", "11440", RegionLevel.DONG, "서교동"),
 ]
 
-CATEGORIES = [("I201", "한식음식점"), ("I212", "커피전문점")]
+# 업종 코드는 추천 API·위험 사이렌과 같은 체계를 쓴다 (services/recommendation-api,
+# services/siren 의 IndustryCode). 서비스 간 변환 계층을 두지 않기 위해 정본을 맞춘다.
+CATEGORIES = [
+    ("CS100001", "한식음식점"),
+    ("CS100002", "중식음식점"),
+    ("CS100003", "일식음식점"),
+    ("CS100004", "양식음식점"),
+    ("CS100005", "제과점"),
+    ("CS100006", "패스트푸드점"),
+    ("CS100007", "치킨전문점"),
+    ("CS100008", "분식전문점"),
+    ("CS100009", "호프-간이주점"),
+    ("CS100010", "커피-음료"),
+]
 
 # REQ v0.11 「보고서 입력 항목 정의」 35개 항목 (그룹 11개, 필수 9개)
 INPUT_FIELDS: list[tuple[str, str, str, bool]] = [
@@ -97,8 +110,8 @@ INPUT_FIELDS: list[tuple[str, str, str, bool]] = [
 
 ACCOUNTS = [
     ("hq@example.com", "김본사", UserType.HQ, None),
-    ("owner1@example.com", "이점주", UserType.OWNER, ("강남 역삼점", "서울특별시 강남구 역삼동 1-1", "11680", "I201")),
-    ("owner2@example.com", "박점주", UserType.OWNER, ("마포 서교점", "서울특별시 마포구 서교동 2-2", "11440", "I212")),
+    ("owner1@example.com", "이점주", UserType.OWNER, ("강남 역삼점", "서울특별시 강남구 역삼동 1-1", "11680", "CS100001")),
+    ("owner2@example.com", "박점주", UserType.OWNER, ("마포 서교점", "서울특별시 마포구 서교동 2-2", "11440", "CS100010")),
 ]
 
 # REQ-OW-07 등급별 노출 상품. REQ-OW-10이 "현재는 하드코딩 또는 DB 직접 입력"으로 규정한다.

@@ -147,7 +147,8 @@ async def test_business_categories(client):
     assert res.status_code == 200
     items = res.json()["items"]
     assert {"code", "name"} == set(items[0])
-    assert "I201" in {i["code"] for i in items}
+    assert "CS100001" in {i["code"] for i in items}
+    assert len(items) == 10
 
 
 # ------------------------------------------------------------------ 4-1 input fields
@@ -180,7 +181,7 @@ async def test_branch_detail_for_owner(client, danger_report):
     body = res.json()
     assert body["branch_id"] == danger_report["branch_id"]
     assert body["region"] == {"code": "11680", "name": "강남구"}
-    assert body["business_category"]["code"] == "I201"
+    assert body["business_category"]["code"] == "CS100001"
     assert body["owner"]["name"] == "이점주"
 
 
