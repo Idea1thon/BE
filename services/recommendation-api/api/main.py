@@ -27,8 +27,8 @@ from __future__ import annotations
 import asyncio
 import csv
 import datetime as dt
+import json
 import logging
-import math
 import os
 import re
 import secrets
@@ -42,6 +42,7 @@ from typing import Any, Literal
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -68,6 +69,7 @@ from recommendation.pipeline import (
     RecommendationRequest,
     SUPPORTED_INDUSTRIES,
     normalize_admin_dong_name,
+    atomic_write_text,
     run_pipeline,
     validate_candidates,
 )
@@ -120,6 +122,7 @@ class ServiceConfig:
     readiness_timeout_s: float = 3.0
     max_concurrent: int = 4
     seed_mode: Literal["anchors", "buildings", "hybrid"] = "buildings"
+    capacity_retry_after_s: int = 10
 
 
 class RecommendationApiResponse(BaseModel):
@@ -248,6 +251,166 @@ def _output_root() -> Path:
     return path if path.is_absolute() else SERVICE_ROOT / path
 
 
+_RUN_ID_PATTERN = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{12}")
+
+
+def _write_json_artifact(path: Path, payload: dict[str, Any]) -> None:
+    atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _write_run_status(
+    run_id: str,
+    out_dir: Path,
+    status: Literal["running", "completed", "failed"],
+    **extra: Any,
+) -> None:
+    """Persist a small, non-sensitive marker for timeout polling."""
+    payload: dict[str, Any] = {
+        "run_id": run_id,
+        "status": status,
+        "updated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        **extra,
+    }
+    try:
+        _write_json_artifact(out_dir / "run-status.json", payload)
+    except OSError:
+        # A status marker is operational metadata; it must not mask the
+        # original pipeline result or prevent the worker from releasing a slot.
+        logger.exception("could not persist recommendation run status run_id=%s", run_id)
+
+
+def _read_json_value(path: Path) -> Any:
+    try:
+        with path.open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail={
+            "code": "run_artifact_unavailable",
+            "message": "추천 실행 결과를 읽을 수 없습니다.",
+            "questions": [],
+        }) from exc
+    return payload
+
+
+def _read_json_artifact(path: Path) -> dict[str, Any]:
+    payload = _read_json_value(path)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=500, detail={
+            "code": "run_artifact_invalid",
+            "message": "추천 실행 결과 형식이 올바르지 않습니다.",
+            "questions": [],
+        })
+    return payload
+
+
+def _completed_run_response(run_id: str, out_dir: Path) -> dict[str, Any]:
+    response_path = out_dir / "api-response.json"
+    if response_path.is_file():
+        response = _read_json_artifact(response_path)
+    else:
+        # Support artifacts created before the API response cache was added.
+        required = (
+            out_dir / "request.json",
+            out_dir / "candidates.json",
+            out_dir / "explanations.json",
+            out_dir / "coverage-summary.json",
+        )
+        if not all(path.is_file() for path in required):
+            raise HTTPException(status_code=500, detail={
+                "code": "run_artifact_incomplete",
+                "message": "완료된 추천 실행 결과가 불완전합니다.",
+                "questions": [],
+                "run_id": run_id,
+            })
+        request = _read_json_artifact(out_dir / "request.json")
+        summary = _read_json_artifact(out_dir / "coverage-summary.json")
+        response = {
+            "request_id": None,
+            "run_id": run_id,
+            "status": "completed",
+            "request": {
+                "region": {
+                    "sido": request.get("sido"),
+                    "sigungu": request.get("sigungu"),
+                    "dong": request.get("dong"),
+                },
+                "industry_code": request.get("industry_code"),
+                "special_condition_text": request.get("special_condition_text", ""),
+                "limit": summary.get("applied_limit"),
+            },
+            "input_interpretation": request.get("input_interpretation", {}),
+            "summary": summary,
+            "candidates": _read_json_value(out_dir / "candidates.json"),
+            "explanations": _read_json_artifact(out_dir / "explanations.json"),
+        }
+    if response.get("run_id") != run_id or response.get("status") != "completed":
+        raise HTTPException(status_code=500, detail={
+            "code": "run_artifact_invalid",
+            "message": "추천 실행 결과의 식별자가 올바르지 않습니다.",
+            "questions": [],
+            "run_id": run_id,
+        })
+    try:
+        return RecommendationApiResponse.model_validate(response).model_dump(mode="json")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={
+            "code": "run_artifact_invalid",
+            "message": "추천 실행 결과가 API 응답 계약을 만족하지 않습니다.",
+            "questions": [],
+            "run_id": run_id,
+        }) from exc
+
+
+def _load_run_response(run_id: str) -> tuple[int, dict[str, Any]]:
+    if not _RUN_ID_PATTERN.fullmatch(run_id):
+        raise HTTPException(status_code=404, detail={
+            "code": "run_not_found",
+            "message": "추천 실행을 찾을 수 없습니다.",
+            "questions": [],
+        })
+    out_dir = _output_root() / run_id
+    if not out_dir.is_dir():
+        raise HTTPException(status_code=404, detail={
+            "code": "run_not_found",
+            "message": "추천 실행을 찾을 수 없습니다.",
+            "questions": [],
+        })
+
+    status_path = out_dir / "run-status.json"
+    if status_path.is_file():
+        status = _read_json_artifact(status_path)
+        if status.get("status") == "running":
+            return 202, {
+                "run_id": run_id,
+                "request_id": status.get("request_id"),
+                "status": "running",
+                "status_url": f"/internal/recommendations/{run_id}",
+                "message": "추천 파이프라인이 아직 실행 중입니다.",
+            }
+        if status.get("status") == "failed":
+            detail = status.get("error_detail")
+            if not isinstance(detail, dict):
+                detail = {
+                    "code": "pipeline_error",
+                    "message": "추천 파이프라인을 처리하지 못했습니다.",
+                    "questions": [],
+                    "run_id": run_id,
+                }
+            status_code = status.get("status_code", 500)
+            if not isinstance(status_code, int) or not 400 <= status_code <= 599:
+                status_code = 500
+            raise HTTPException(status_code=status_code, detail=detail)
+        if status.get("status") not in {"completed", None}:
+            raise HTTPException(status_code=500, detail={
+                "code": "run_status_invalid",
+                "message": "추천 실행 상태를 확인할 수 없습니다.",
+                "questions": [],
+                "run_id": run_id,
+            })
+
+    return 200, _completed_run_response(run_id, out_dir)
+
+
 def _env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name, "").strip().lower()
     if not value:
@@ -292,6 +455,14 @@ def _service_config() -> ServiceConfig:
             "message": "RECOMMENDATION_MAX_CONCURRENT는 정수여야 합니다.",
             "questions": [],
         }) from exc
+    try:
+        capacity_retry_after_s = int(os.getenv("RECOMMENDATION_CAPACITY_RETRY_AFTER_SECONDS", "10"))
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "invalid_service_config",
+            "message": "RECOMMENDATION_CAPACITY_RETRY_AFTER_SECONDS는 정수여야 합니다.",
+            "questions": [],
+        }) from exc
     if (
         not re.fullmatch(r"\d{4}[1-4]", quarter)
         or source not in {"db", "files"}
@@ -301,10 +472,11 @@ def _service_config() -> ServiceConfig:
         or not 5 <= request_timeout_s <= 900
         or not 0.1 <= readiness_timeout_s <= 30
         or not 1 <= max_concurrent <= 64
+        or not 1 <= capacity_retry_after_s <= 60
     ):
         raise HTTPException(status_code=503, detail={
             "code": "invalid_service_config",
-            "message": "RECOMMENDATION_QUARTER/SOURCE/LLM_MODE/SEED_MODE/DEFAULT_LIMIT/REQUEST_TIMEOUT/READINESS_TIMEOUT/MAX_CONCURRENT 설정을 확인해 주세요.",
+            "message": "RECOMMENDATION_QUARTER/SOURCE/LLM_MODE/SEED_MODE/DEFAULT_LIMIT/REQUEST_TIMEOUT/READINESS_TIMEOUT/MAX_CONCURRENT/CAPACITY_RETRY_AFTER 설정을 확인해 주세요.",
             "questions": [],
         })
     return ServiceConfig(
@@ -319,6 +491,7 @@ def _service_config() -> ServiceConfig:
         request_timeout_s=request_timeout_s,
         readiness_timeout_s=readiness_timeout_s,
         max_concurrent=max_concurrent,
+        capacity_retry_after_s=capacity_retry_after_s,
     )
 
 
@@ -346,6 +519,8 @@ def _run_pipeline_with_slot(
     out_dir: Path,
     config: ServiceConfig,
     limit: int,
+    run_id: str,
+    payload: PipelineRecommendationRequest,
 ) -> dict[str, Any]:
     """Run in the worker and release capacity only after the worker exits.
 
@@ -354,7 +529,7 @@ def _run_pipeline_with_slot(
     block would therefore allow timed-out work to exceed the concurrency cap.
     """
     try:
-        return run_pipeline(
+        result = run_pipeline(
             pipeline_request,
             out_dir,
             config.include_poi,
@@ -366,6 +541,36 @@ def _run_pipeline_with_slot(
             config.llm_mode,
             seed_mode=config.seed_mode,
         )
+        result["summary"]["applied_limit"] = limit
+        _write_json_artifact(out_dir / "api-response.json", _response_payload(run_id, payload, result))
+        _write_run_status(run_id, out_dir, "completed", request_id=payload.request_id)
+        return result
+    except PipelineError as exc:
+        _write_run_status(
+            run_id,
+            out_dir,
+            "failed",
+            request_id=payload.request_id,
+            status_code=_pipeline_error_status(exc),
+            error_detail=_pipeline_error_detail(exc, payload.request_id, run_id),
+        )
+        raise
+    except Exception:
+        _write_run_status(
+            run_id,
+            out_dir,
+            "failed",
+            request_id=payload.request_id,
+            status_code=500,
+            error_detail={
+                "code": "pipeline_error",
+                "message": "추천 파이프라인을 처리하지 못했습니다.",
+                "questions": [],
+                "request_id": payload.request_id,
+                "run_id": run_id,
+            },
+        )
+        raise
     finally:
         _release_recommendation_slot()
 
@@ -500,9 +705,10 @@ async def create_recommendation(
             "code": "recommendation_capacity_exceeded",
             "message": "동시 추천 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.",
             "questions": [],
-        }, headers={"Retry-After": str(max(1, math.ceil(config.request_timeout_s)))})
+        }, headers={"Retry-After": str(config.capacity_retry_after_s)})
 
     run_id, out_dir = _new_run_dir()
+    _write_run_status(run_id, out_dir, "running", request_id=payload.request_id)
     try:
         result = await asyncio.wait_for(
             run_in_threadpool(
@@ -511,6 +717,8 @@ async def create_recommendation(
                 out_dir,
                 config,
                 applied_limit,
+                run_id,
+                payload,
             ),
             timeout=config.request_timeout_s,
         )
@@ -521,7 +729,8 @@ async def create_recommendation(
             "questions": [],
             "request_id": payload.request_id,
             "run_id": run_id,
-        }, headers={"Retry-After": str(max(1, math.ceil(config.request_timeout_s)))}) from exc
+            "status_url": f"/internal/recommendations/{run_id}",
+        }) from exc
     except PipelineError as exc:
         if isinstance(exc, PipelineInputError):
             logger.info(
@@ -543,6 +752,20 @@ async def create_recommendation(
 
     result["summary"]["applied_limit"] = applied_limit
     return _response_payload(run_id, payload, result)
+
+
+@app.get(
+    "/internal/recommendations/{run_id}",
+    response_model=None,
+    dependencies=[Depends(verify_internal_token)],
+    tags=["pipeline"],
+)
+async def get_recommendation_run(run_id: str) -> Any:
+    """Return a completed run or a pollable in-progress status."""
+    status_code, response = await run_in_threadpool(_load_run_response, run_id)
+    if status_code == 202:
+        return JSONResponse(status_code=202, content=response)
+    return response
 
 
 __all__ = ["app"]

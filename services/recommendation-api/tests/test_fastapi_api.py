@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +23,7 @@ from api.main import (
     _region_options,
     app,
     create_recommendation,
+    get_recommendation_run,
     healthz,
     industries,
     readyz,
@@ -57,6 +60,7 @@ class FastApiBoundaryTests(unittest.TestCase):
             "/api/regions",
             "/internal/recommendations",
             "/api/recommendations",
+            "/internal/recommendations/{run_id}",
         }
         routes = {route.path: route for route in app.routes if route.path in protected_paths}
         self.assertEqual(set(routes), protected_paths)
@@ -120,7 +124,9 @@ class FastApiBoundaryTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_recommendation_rejects_ambiguous_input_before_data_access(self) -> None:
-        with self.assertRaises(HTTPException) as raised:
+        with TemporaryDirectory() as temp_dir, patch(
+            "api.main._output_root", return_value=Path(temp_dir),
+        ), self.assertRaises(HTTPException) as raised:
             asyncio.run(create_recommendation(PipelineRecommendationRequest(
                 request_id="middle-backend-test-1",
                 region={"sigungu": "송파구", "dong": "잠실동"},
@@ -161,7 +167,8 @@ class FastApiBoundaryTests(unittest.TestCase):
             industry_code="CS100010",
         )
         config = ServiceConfig(
-            quarter="20261", source="files", llm_mode="offline", limit=5, request_timeout_s=7.2,
+            quarter="20261", source="files", llm_mode="offline", limit=5,
+            request_timeout_s=7.2, capacity_retry_after_s=12,
         )
         with patch("api.main._service_config", return_value=config), patch(
             "api.main._try_acquire_recommendation_slot", return_value=False,
@@ -169,7 +176,68 @@ class FastApiBoundaryTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as raised:
                 asyncio.run(create_recommendation(payload))
         self.assertEqual(raised.exception.status_code, 429)
-        self.assertEqual(raised.exception.headers, {"Retry-After": "8"})
+        self.assertEqual(raised.exception.headers, {"Retry-After": "12"})
+
+    def test_running_run_can_be_polled_until_completion(self) -> None:
+        run_id = "20260905T000000Z-0123456789ab"
+        response_payload = {
+            "request_id": "backend-42",
+            "run_id": run_id,
+            "status": "completed",
+            "request": {},
+            "input_interpretation": {},
+            "summary": {},
+            "candidates": [],
+            "explanations": {},
+        }
+        with TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir) / run_id
+            run_dir.mkdir()
+            (run_dir / "run-status.json").write_text(
+                json.dumps({"run_id": run_id, "status": "running", "request_id": "backend-42"}),
+                encoding="utf-8",
+            )
+            with patch("api.main._output_root", return_value=Path(temp_dir)):
+                running = asyncio.run(get_recommendation_run(run_id))
+            self.assertEqual(running.status_code, 202)
+            self.assertEqual(json.loads(running.body)["status"], "running")
+
+            (run_dir / "run-status.json").write_text(
+                json.dumps({"run_id": run_id, "status": "completed"}),
+                encoding="utf-8",
+            )
+            (run_dir / "api-response.json").write_text(
+                json.dumps(response_payload), encoding="utf-8",
+            )
+            with patch("api.main._output_root", return_value=Path(temp_dir)):
+                completed = asyncio.run(get_recommendation_run(run_id))
+            self.assertEqual(completed["run_id"], run_id)
+            self.assertEqual(completed["request_id"], "backend-42")
+
+    def test_timeout_response_points_to_the_run_status_endpoint(self) -> None:
+        payload = PipelineRecommendationRequest(
+            request_id="timeout-1",
+            region={"sigungu": "송파구", "dong": "잠실동"},
+            industry_code="CS100010",
+        )
+        config = ServiceConfig(
+            quarter="20261", source="files", llm_mode="offline", limit=5, request_timeout_s=5,
+        )
+
+        async def timeout(*args):
+            raise asyncio.TimeoutError
+
+        with TemporaryDirectory() as temp_dir, patch(
+            "api.main._output_root", return_value=Path(temp_dir),
+        ), patch("api.main._service_config", return_value=config), patch(
+            "api.main._try_acquire_recommendation_slot", return_value=True,
+        ), patch("api.main.run_in_threadpool", new=timeout):
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(create_recommendation(payload))
+        self.assertEqual(raised.exception.status_code, 504)
+        run_id = raised.exception.detail["run_id"]
+        self.assertEqual(raised.exception.detail["status_url"], f"/internal/recommendations/{run_id}")
+        self.assertIsNone(raised.exception.headers)
 
     def test_response_validates_candidates_against_evidence_schema(self) -> None:
         with self.assertRaises(ValidationError):
@@ -200,7 +268,9 @@ class FastApiBoundaryTests(unittest.TestCase):
             special_condition_text="월세 300만원 이하, 주차 가능",
             limit=3,
         )
-        with patch("api.main.run_pipeline", return_value=fake_result) as mocked:
+        with TemporaryDirectory() as temp_dir, patch(
+            "api.main._output_root", return_value=Path(temp_dir),
+        ), patch("api.main.run_pipeline", return_value=fake_result) as mocked:
             response = asyncio.run(create_recommendation(payload))
 
         forwarded = mocked.call_args.args[0]
@@ -228,7 +298,9 @@ class FastApiBoundaryTests(unittest.TestCase):
             (PipelineInternalError("RAG schema at /private/tmp/secret"), 500, "internal_validation_error"),
         )
         for error, expected_status, expected_code in cases:
-            with self.subTest(expected_code=expected_code), patch(
+            with self.subTest(expected_code=expected_code), TemporaryDirectory() as temp_dir, patch(
+                "api.main._output_root", return_value=Path(temp_dir),
+            ), patch(
                 "api.main._service_config", return_value=config,
             ), patch("api.main._try_acquire_recommendation_slot", return_value=True), patch(
                 "api.main._run_pipeline_with_slot", side_effect=error,

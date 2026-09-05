@@ -124,6 +124,7 @@ RECOMMENDATION_DEFAULT_LIMIT=5
 RECOMMENDATION_REQUEST_TIMEOUT_SECONDS=180
 RECOMMENDATION_READINESS_TIMEOUT_SECONDS=3
 RECOMMENDATION_MAX_CONCURRENT=4
+RECOMMENDATION_CAPACITY_RETRY_AFTER_SECONDS=10
 ```
 
 `/internal/recommendations`와 호환 alias, `/api/industries`, `/api/regions`는
@@ -135,10 +136,24 @@ RECOMMENDATION_MAX_CONCURRENT=4
 `readyz`만 프로세스·의존성 상태 확인을 위해 공개한다.
 
 개별 요청은 `RECOMMENDATION_REQUEST_TIMEOUT_SECONDS`를 넘으면 504로 종료된다.
-동시 실행 수가 `RECOMMENDATION_MAX_CONCURRENT`를 초과하면 429를 반환하며,
-클라이언트가 재시도 간격을 정할 수 있도록 `Retry-After`를 함께 보낸다. 값은
-설정된 요청 timeout을 초 단위로 올림한 보수적 지연값이다. 타임아웃 이후에도
-실행 중인 워커가 슬롯을 점유할 수 있으므로 즉시 재시도하지 않아야 한다.
+이때 응답의 `run_id`와 `status_url`로 같은 실행을 조회할 수 있다. 동시 실행
+수가 `RECOMMENDATION_MAX_CONCURRENT`를 초과하면 429를 반환하며, 클라이언트가
+재시도 간격을 정할 수 있도록 `Retry-After`를 함께 보낸다. 429의 값은
+`RECOMMENDATION_CAPACITY_RETRY_AFTER_SECONDS`(기본 10초)로 설정한다. 타임아웃
+이후에도 실행 중인 워커가 슬롯을 점유할 수 있으므로 즉시 재시도하지 않아야 한다.
+
+### `GET /internal/recommendations/{run_id}`
+
+타임아웃된 요청의 동일 실행 결과를 조회하는 내부 백엔드용 endpoint다. POST가
+504를 반환해도 파이프라인 워커는 계속 실행하고 결과를 해당 `run_id` 디렉터리에
+보존한다. 조회 결과는 다음과 같다.
+
+- 완료 전: HTTP 202와 `status=running`
+- 완료 후: HTTP 200과 원래 추천 응답과 동일한 `RecommendationApiResponse`
+- 실행을 찾을 수 없음: HTTP 404
+
+완료 응답은 `api-response.json`에서 읽고 동일한 응답 모델로 다시 검증한다.
+실행 상태와 API 응답 파일은 원자적으로 기록해 폴링 중 부분 파일을 읽지 않도록 한다.
 
 `GET /healthz`는 프로세스 생존만 확인하고, `GET /readyz` 성공 응답은
 `{"ok": true}`만 반환한다. DB readiness probe는 동기 `psql` 호출을 threadpool에서
