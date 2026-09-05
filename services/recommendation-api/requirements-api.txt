@@ -1,0 +1,6 @@
+# FastAPI boundary for the recommendation pipeline.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+pyshp>=2.3,<3
+shapely>=2.0,<3
+jsonschema>=4.23,<5

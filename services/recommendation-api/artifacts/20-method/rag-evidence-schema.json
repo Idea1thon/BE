@@ -1,0 +1,486 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LocationCandidateEvidence",
+  "description": "후보 선정 단계가 만든 구조화 결과를 RAG 설명용으로 담는 계약. RAG는 이 객체의 값으로만 문장을 만든다(rag-contract.md). 2026-09-01: grain 출처·결합 근거 필드, 명명된 위치(location), evidence grain에 자치구·권역, 갱신주기에 monthly·semiannual·snapshot 추가(FC-06·41·42·51·52·53 이식 반영).",
+  "type": "object",
+  "required": [
+    "candidate_id",
+    "candidate_type",
+    "spatial_grain",
+    "region",
+    "location",
+    "industry_code",
+    "fit_tier",
+    "score_is_predictive",
+    "greenfield",
+    "data_confidence",
+    "feature_build",
+    "reasons",
+    "counter_evidence",
+    "missing_features",
+    "source_freshness",
+    "evidence",
+    "listing_url"
+  ],
+  "properties": {
+    "candidate_id": {"type": "string", "description": "APT-{kaptCode} / STN-{역번호} / LST-{매물id}. (구) TRDAR-{상권코드} 는 상권 fallback 때만."},
+    "candidate_type": {
+      "enum": ["아파트단지_인근", "역_인근", "카카오POI_인근", "상가건물_인근", "생성지점_격자", "매물", "commercial_area", "hinterland", "admin_dong"],
+      "description": "후보 단위는 지점(아파트·역·선택적 카카오POI·건축물대장 건물 centroid·격자 생성 좌표)이다. 상가건물_인근은 GIS건물통합정보의 주용도 상업용 건물 centroid이며 실제 임대 매물·호실·공실이 아니다. 생성지점_격자는 프로젝트가 격자로 만든 좌표(generated-evidence-schema.json)이며 실제 매물·점포가 아니다 — synthetic_anchor=true 필수. commercial_area/hinterland/admin_dong 은 seed 없어 fallback한 경우만."
+    },
+    "synthetic_anchor": {
+      "type": "boolean",
+      "description": "true이면 앵커가 프로젝트 생성 좌표(candidate_type=생성지점_격자). listing_url·address_point는 항상 null, precision은 '지점(생성)'. 실제 임대 가능 호실 미확인이므로 fit_tier는 '추천' 없이 '조건부 검토'가 상한이다(반대근거에 사유 기록). false/생략이면 관측 seed(아파트·역·POI·건축물대장 건물 centroid)이다."
+    },
+    "spatial_grain": {
+      "enum": ["지점", "지점(생성)", "상권", "상권배후지", "행정동", "개별매물"],
+      "description": "후보 공간 단위. 기본 '지점'(아파트·역·건축물대장 건물 centroid 좌표). '지점(생성)'은 격자 생성 좌표. candidate_type과 대응."
+    },
+    "region": {
+      "type": "object",
+      "description": "사용자가 폼에서 선택한 범위(입력).",
+      "required": ["sido", "sigungu", "dong"],
+      "properties": {
+        "sido": {"type": "string"},
+        "sigungu": {"type": "string"},
+        "dong": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "location": {
+      "type": "object",
+      "description": "후보 = 지점(아파트·역·건축물대장 건물 centroid). 앵커명 + '인근' + 좌표 + 참조 상권. 건축물대장 건물은 주용도·건물규모를 보조 속성으로 보존하지만 동·호수·출구번호·매물 월세·공실은 생성하지 않는다.",
+      "required": ["sido", "sigungu", "admin_dong", "anchor", "place_name", "point", "precision", "host_commercial_area", "overlapping_units", "nearby_anchors", "address_point"],
+      "properties": {
+        "sido": {"type": "string"},
+        "sigungu": {"type": "string"},
+        "admin_dong": {"type": ["string", "null"], "description": "지점 포함 행정동(영역-행정동 PIP)"},
+        "anchor": {
+          "type": "object",
+          "description": "지점의 정체(seed). 아파트 단지·역·선택적 카카오POI·건축물대장 상업용 건물 centroid.",
+          "required": ["name", "type", "id"],
+          "properties": {
+            "name": {"type": "string"},
+            "type": {"enum": ["아파트단지", "역", "카카오POI", "상가건물", "생성지점"]},
+            "id": {"type": "string", "description": "kaptCode·역번호·Kakao place id·건물관리번호·GEN-PT-{region}-{seq}(생성지점)"},
+            "households": {"type": ["integer", "null"]},
+            "line": {"type": ["string", "null"]},
+            "lot_address": {"type": ["string", "null"]},
+            "use_group": {"type": ["string", "null"]},
+            "gross_floor_area_m2": {"type": ["number", "null"]},
+            "building_area_m2": {"type": ["number", "null"]},
+            "floors_above": {"type": ["integer", "null"]},
+            "floors_below": {"type": ["integer", "null"]},
+            "building_age_years": {"type": ["integer", "null"]},
+            "area_join_type": {"enum": ["내부", "근접", "미결합", null]},
+            "has_confirmed_commercial_floor": {"type": ["boolean", "null"], "description": "Tier2 층별용도(getBrFlrOulnInfo)로 상업 공간이 실제 확인됐는지. false/null이면 표제부 주용도·연면적만으로 선정됨"}
+          },
+          "additionalProperties": false
+        },
+        "place_name": {"type": "string", "description": "앵커명 + '인근' (예: '리센츠아파트 인근', '종로구 이화동 건물 인근'). 건축물대장 centroid 앵커도 실제 임대 호실 그 자체가 아님."},
+        "point": {
+          "type": ["object", "null"],
+          "required": ["x", "y", "crs"],
+          "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "crs": {"type": "string"}},
+          "additionalProperties": false
+        },
+        "precision": {
+          "enum": ["지점", "지점(생성)", "매물주소", "상권", "행정동"],
+          "description": "기본 '지점'(앵커 좌표 ±수십 m). '지점(생성)'은 격자 생성 좌표(synthetic_anchor=true). '매물주소'는 매물 확보 후 — 생성지점에는 절대 부여 금지. '상권'·'행정동'은 seed 없어 fallback한 경우만."
+        },
+        "host_commercial_area": {
+          "type": ["object", "null"],
+          "description": "업종·유동 배경값을 가져온 상권. 지점이 상권 밖·300m 초과면 null(행정동 배경값).",
+          "required": ["code", "name", "relation"],
+          "properties": {
+            "code": {"type": "string"},
+            "name": {"type": "string"},
+            "relation": {"enum": ["포함", "최근접"]},
+            "distance_m": {"type": ["number", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "overlapping_units": {
+          "type": "object",
+          "description": "지점이 속한/겹치는 다른 grain 단위(crosswalk / PIP).",
+          "properties": {
+            "commercial_area": {"type": "array", "items": {"type": "string"}},
+            "hinterland": {"type": "array", "items": {"type": "string"}},
+            "admin_dong": {"type": "array", "items": {"type": "string"}},
+            "sigungu": {"type": ["string", "null"]}
+          }
+        },
+        "nearby_anchors": {
+          "type": "array",
+          "description": "지점 반경 500m 내 다른 역·단지(본 앵커 외). 데이터 없으면 빈 배열.",
+          "items": {
+            "type": "object",
+            "required": ["name", "type", "source_type"],
+            "properties": {
+              "name": {"type": "string"},
+              "type": {"enum": ["역", "역출구", "아파트단지", "랜드마크", "학교", "기타"]},
+              "distance_m": {"type": ["number", "null"]},
+              "line": {"type": ["string", "null"], "description": "type=역일 때 정규화 노선명(예: '2호선')"},
+              "transfer": {"type": ["boolean", "null"], "description": "type=역일 때 환승역 여부"},
+              "households": {"type": ["integer", "null"], "description": "type=아파트단지일 때 K-apt 세대수(합산)"},
+              "source_type": {"enum": ["observed", "synthetic"]}
+            }
+          }
+        },
+        "address_point": {
+          "type": ["object", "null"],
+          "description": "이식 슬롯: 개별 매물 또는 역지오코딩된 대표 주소. 검증된 매물 데이터가 있을 때만.",
+          "required": ["road_address", "lat", "lon", "source_type"],
+          "properties": {
+            "road_address": {"type": "string"},
+            "lat": {"type": "number"},
+            "lon": {"type": "number"},
+            "source_type": {"enum": ["listing", "reverse_geocode"]}
+          },
+          "additionalProperties": false
+        },
+        "building_address": {
+          "type": ["object", "null"],
+          "description": "type=상가건물일 때만. 건물 전체의 도로명/지번주소이지 임대 가능 특정 호실 주소가 아니다 — address_point(매물주소 전용)와 절대 혼동하지 말 것. precision은 이 필드가 있어도 '지점' 그대로다.",
+          "required": ["value", "source"],
+          "properties": {
+            "value": {"type": "string"},
+            "source": {"enum": ["도로명주소(Tier2)", "지번주소(Tier1)"]},
+            "building_name": {"type": ["string", "null"]},
+            "limitation": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "profile_ref": {
+      "type": ["object", "null"],
+      "description": "이 지점이 참조한 앵커·host 상권·프로파일.",
+      "properties": {
+        "anchor_id": {"type": "string", "description": "kaptCode / 역번호 / Kakao place id"},
+        "host_area": {"type": ["string", "null"], "description": "업종·유동 배경값 상권 코드. null이면 행정동 배경값"},
+        "as_of_quarter": {"type": "object"},
+        "profile_confidence": {"type": "object"}
+      }
+    },
+    "dimension_evidence": {
+      "type": ["object", "null"],
+      "description": "metric-contract 근거 차원 → 사용 FC id 매핑. 후보 판정 역추적용. FC-51-news는 빅카인즈 시설·개발 보도량 보조 신호이며 공식 사업 상태를 대체하지 않는다.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "features": {"type": "array", "items": {"type": "string"}},
+          "status": {"enum": ["active", "partial", "inactive", "mixed"]},
+          "entry_health_variant": {"enum": ["core", "enriched"]},
+          "entry_health_v1": {
+            "type": ["object", "null"],
+            "description": "FC-10 서수 등급. 산식·컷 공개, score_is_predictive=false, 판정에선 반대근거 1항목으로만. docs/architecture/recommendation-fastapi.md#entry-health-v1",
+            "properties": {
+              "version": {"type": "string"},
+              "grade": {"enum": ["양호", "보통", "주의", "경계", "정보없음"]},
+              "risk": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+              "formula": {"type": "string"},
+              "cuts": {"type": ["array", "null"], "items": {"type": "number"}},
+              "cut_scope": {"enum": ["상권", "행정동", null]},
+              "inputs": {"type": "object", "description": "폐업률분위·개업률분위·점포증감률분위·라벨·라벨리스크"},
+              "score_is_predictive": {"const": false},
+              "used_in_판정": {"type": "string"},
+              "ref": {"type": "string"}
+            },
+            "required": ["version", "grade", "formula", "score_is_predictive"]
+          },
+          "grain_notes": {"type": "object", "description": "feature별 '지점 반경 계산' / '포함/최근접 상권 배경값' / '행정동 배경값'"}
+        }
+      }
+    },
+    "industry_code": {
+      "type": "string",
+      "pattern": "^CS10000[1-9]$|^CS100010$"
+    },
+    "fit_tier": {"enum": ["추천", "조건부 검토", "주의"]},
+    "fit_index": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "score_version": {"type": ["string", "null"]},
+    "score_is_predictive": {"const": false},
+    "greenfield": {"type": "boolean"},
+    "data_confidence": {
+      "type": "object",
+      "required": ["level", "reasons"],
+      "properties": {
+        "level": {"enum": ["high", "medium", "low"]},
+        "reasons": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "feature_build의 커버리지 부족·최신성 격차·프록시 grain 사용을 신뢰도 저하 이유로 인용한다."
+        }
+      },
+      "additionalProperties": false
+    },
+    "feature_build": {
+      "type": "object",
+      "description": "이 후보의 지표가 만들어진 정규화 feature table의 출처. 원천 CSV 직접 조인 금지(spec 0절). build_passed=false면 후보를 내보내지 않는다.",
+      "required": [
+        "build_passed",
+        "merge_key_definition",
+        "merge_key_dup_rate",
+        "quarters_used",
+        "normalizations_applied",
+        "grain_resolution",
+        "coverage",
+        "sources"
+      ],
+      "properties": {
+        "build_passed": {"const": true},
+        "merge_key_definition": {
+          "type": "string",
+          "description": "예: '기준_년분기_코드 + 공간코드 + 서비스_업종_코드'"
+        },
+        "merge_key_dup_rate": {
+          "const": 0,
+          "description": "분기-파일 1:1 배정(0-1) 후 병합 키 중복률. 0이 아니면 빌드 실패."
+        },
+        "quarters_used": {
+          "type": "object",
+          "description": "데이터셋별로 실제 로드한 분기. 점포·추정매출은 2026 파일에서 20261만, 2021~2025 폴더에서 ≤20254만(H1).",
+          "additionalProperties": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^[0-9]{5}$"}
+          }
+        },
+        "normalizations_applied": {
+          "type": "array",
+          "description": "적용한 정규화. 아래는 권장 값이며 새 이식은 같은 규칙으로 추가.",
+          "items": {
+            "enum": [
+              "encoding_detect",
+              "eng_header_rename",
+              "store_count_schema_map",
+              "sales_count_column_fix",
+              "grain_forced_from_code_membership",
+              "year_file_quarter_assignment",
+              "rent_unpivot",
+              "coord_reproject_5174_to_5181",
+              "dong_code_alias",
+              "common_placename_from_dong",
+              "ontology_uptae_map",
+              "halfyear_period_parse",
+              "rel_index_by_anchor",
+              "point_in_polygon_area_assign",
+              "coord_reproject_4326_to_5181",
+              "coord_reproject_5186_to_5181",
+              "kakao_rect_grid",
+              "kakao_place_id_dedup",
+              "poi_radius_count",
+              "station_line_name_normalize",
+              "nearest_station_distance",
+              "nearest_bus_stop_distance",
+              "transit_count_by_radius",
+              "plan_line_by_sigungu",
+              "apt_name_geocode_vworld",
+              "households_by_radius",
+              "flow_per_area_normalize",
+              "building_use_group_from_primary_use",
+              "building_gross_floor_area_m2",
+              "foreign_over_resident_ratio",
+              "short_foreign_over_flow_ratio",
+              "recent_3m_mean_no_seasonal_adjustment",
+              "yoy_clean_recent_mean",
+              "seasonal_phase_label",
+              "radius_license_count_by_industry",
+              "bigkinds_xlsx_export_parse",
+              "news_exclusion_filter",
+              "news_id_url_dedup",
+              "naver_news_api_snapshot",
+              "news_url_exact_dedup",
+              "news_region_topic_match",
+              "dong_common_name_alias"
+            ]
+          }
+        },
+        "grain_resolution": {
+          "type": "object",
+          "required": ["method", "conflicts"],
+          "properties": {
+            "method": {"const": "path_and_code_membership"},
+            "conflicts": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "경로 신호와 코드 소속 신호가 불일치한 파일 수. 0이 아니면 빌드 실패(H4)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "coverage": {
+          "type": "object",
+          "description": "데이터셋별 공간 매칭. 부족분은 0 대체 금지, null 유지(M2·L1).",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["matched", "expected"],
+            "properties": {
+              "matched": {"type": "integer", "minimum": 0},
+              "expected": {"type": "integer", "minimum": 0},
+              "missing_reason": {"type": ["string", "null"]}
+            },
+            "additionalProperties": false
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "이 후보 지표에 실제로 쓰인 원천 파일 경로 목록."
+        }
+      },
+      "additionalProperties": false
+    },
+    "reasons": {"type": "array", "items": {"type": "string"}, "description": "fit_tier 판정·정렬에 반영되는 긍정 근거. FC 신호 등급표(regional-characteristics-profile.md §9-1)의 '범주 신호'·'약한 배경 신호'만 허용하며, '약한 배경 신호'는 단독으로 추천을 승격시키지 못하고 data_confidence를 하향한다. '신호 없음' FC는 넣지 않는다."},
+    "counter_evidence": {"type": "array", "items": {"type": "string"}, "description": "fit_tier 판정에 반영되는 반대 근거. FC 신호 등급표의 '범주 신호'(FC-10 등급·FC-11 라벨)·하드조건 미충족·핵심 데이터 결측만 허용한다. '신호 없음' FC의 낮은 분위를 반대 근거로 쓰지 않는다."},
+    "context_notes": {"type": "array", "items": {"type": "string"}, "description": "fit_tier 판정·정렬에 반영하지 않는 중립 지역 서술. FC 신호 등급표의 '신호 없음(서술만)' FC(FC-01·02·05·06a·06b·30·40·41·51·53), '미신뢰 업종 전체 상수' FC-42·FC-51-news와 '모멘텀(품질 아님)' FC(FC-32·12)의 관측값을 여기에 둔다. FC-42는 최신 원계열·최근 3개월 평균·계절 국면·미검증 급등 여부만 기록한다. FC-51-news는 빅카인즈 보도량이며 공식 도시계획사업·성공 outcome이 아니다. feature-evidential-value.md §9."},
+    "missing_features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["feature", "reason"],
+        "properties": {
+          "feature": {"type": "string"},
+          "reason": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "source_freshness": {
+      "type": "object",
+      "description": "데이터셋별 최신성. build마다 재계산(spec 0-8).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["observed_end_period", "periods_behind_latest", "update_cadence"],
+        "properties": {
+          "observed_end_period": {"type": "string", "description": "분기(20261)·월(202608)·반기(2026H1)·스냅샷일(2026-08-31) 등 데이터 단위에 맞는 값"},
+          "periods_behind_latest": {"type": "integer", "minimum": 0, "description": "해당 데이터 단위 기준 최신 대비 지연"},
+          "update_cadence": {"enum": ["quarterly", "monthly", "semiannual", "stepwise", "snapshot", "manual_snapshot", "static", "unknown"]},
+          "is_partial_latest": {"type": ["boolean", "null"], "description": "최신 기간이 부분 관측인지(외국인 20263, 인허가 20263, 네이버 진행중 월)"},
+          "retrieved_at_utc": {"type": ["string", "null"], "description": "수동 snapshot 수집·정규화 시각(빅카인즈 ingested_at_utc, 네이버 retrieved_at_utc)"},
+          "snapshot_age_days": {"type": ["integer", "null"], "description": "manual_snapshot 전용: observed_end_period 기준 build일까지 경과일. '최신' 기준이 없어 periods_behind_latest 대신 사용"},
+          "is_stale": {"type": "boolean", "description": "manual_snapshot 전용: snapshot_age_days가 stale_threshold_days 초과. 재수집 신호이며 fit_tier·정렬 불변"},
+          "stale_threshold_days": {"type": "integer", "minimum": 0, "description": "manual_snapshot 전용: is_stale 판정 임계 일수"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "metric_name",
+          "value",
+          "unit",
+          "source_type",
+          "comparison_scope",
+          "period",
+          "spatial_grain",
+          "grain_is_proxy",
+          "source_path",
+          "quarter_file_source",
+          "normalization",
+          "interpretation",
+          "limitation"
+        ],
+        "properties": {
+          "metric_name": {"type": "string"},
+          "value": {"type": ["number", "string", "null"]},
+          "missing_reason": {
+            "type": ["string", "null"],
+            "description": "value가 null이면 필수. 0으로 대체 금지."
+          },
+          "unit": {"type": "string"},
+          "source_type": {
+            "enum": ["observed", "derived", "synthetic"],
+            "description": "derived=정규화·역산값(예: 일반_점포_수 = 전체 − 프랜차이즈). synthetic=합성 SNS 등, 생성일·규칙 필수."
+          },
+          "comparison_scope": {
+            "enum": ["sigungu_quantile", "seoul_quantile", "both", "none"]
+          },
+          "comparison_value": {"type": ["number", "string", "null"]},
+          "percentile": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+          "seoul_percentile": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+          "period": {"type": "string", "description": "분기(20261)·월(202608)·반기(2026H1)·스냅샷 등"},
+          "spatial_grain": {
+            "enum": ["지점", "상권", "상권배후지", "행정동", "자치구", "권역", "서울시", "개별매물"],
+            "description": "이 지표의 원 grain. 후보(상권)와 다르면 grain_is_proxy=true. 지점 반경 관측(역·버스·아파트·Kakao POI)은 지점 grain, FC-53·FC-41자치구·FC-52계획도시철도=자치구, FC-20·21=권역."
+          },
+          "grain_is_proxy": {
+            "type": "boolean",
+            "description": "다른 grain의 값을 대리로 붙였는지. 배후지 후보에 상권 지표(0-7), 상권 후보에 자치구 고용률/권역 임대료 등."
+          },
+          "proxy_note": {"type": ["string", "null"]},
+          "source_path": {"type": "string"},
+          "quarter_file_source": {
+            "type": "string",
+            "description": "이 값의 행이 나온 정확한 연도 파일. 20251~20254 중복 소스 추적용(H1)."
+          },
+          "normalization": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "이 지표에 적용한 rename·매핑. 예: 'eng_header_rename', 'store_count_schema_map: 점포_수→전체_점포_수', 'sales_count_column_fix'."
+          },
+          "interpretation": {"type": "string"},
+          "limitation": {"type": "string"}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"value": {"type": "null"}}},
+            "then": {
+              "required": ["missing_reason"],
+              "properties": {"missing_reason": {"type": "string", "minLength": 1}}
+            }
+          },
+          {
+            "if": {"properties": {"grain_is_proxy": {"const": true}}},
+            "then": {
+              "required": ["proxy_note"],
+              "properties": {"proxy_note": {"type": "string", "minLength": 1}}
+            }
+          },
+          {
+            "if": {"properties": {"source_type": {"const": "synthetic"}}},
+            "then": {
+              "required": ["proxy_note"],
+              "properties": {
+                "proxy_note": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "listing_url": {"type": ["string", "null"], "format": "uri"}
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$comment": "생성지점_격자 후보는 항상 합성 앵커 — 매물처럼 표현 금지 (fault F28).",
+      "if": {"properties": {"candidate_type": {"const": "생성지점_격자"}}},
+      "then": {
+        "required": ["synthetic_anchor"],
+        "properties": {
+          "synthetic_anchor": {"const": true},
+          "spatial_grain": {"const": "지점(생성)"},
+          "listing_url": {"const": null},
+          "location": {"properties": {"precision": {"const": "지점(생성)"}, "address_point": {"const": null}}}
+        }
+      }
+    },
+    {
+      "$comment": "합성 앵커: 매물주소·listing_url 금지, fit_tier '추천' 금지(임대 가능 호실 미확인 — 조건부 상한).",
+      "if": {"required": ["synthetic_anchor"], "properties": {"synthetic_anchor": {"const": true}}},
+      "then": {
+        "properties": {
+          "listing_url": {"const": null},
+          "fit_tier": {"not": {"const": "추천"}},
+          "location": {"properties": {"precision": {"const": "지점(생성)"}, "address_point": {"const": null}}}
+        }
+      }
+    }
+  ]
+}
