@@ -235,12 +235,27 @@ def run_gu(gu: str, ops: list[str], with_units: bool, limit: int | None = None) 
         bun_pk[p[:15]].update(pks)
 
     link, m_jibun, m_bonbun = [], 0, 0
+    multi_disambiguated = multi_unresolved = 0
     for pnu, brow in t1.items():
         pks, kind = pnu_to_pk.get(pnu), "지번"
         if not pks and pnu[11:15] != "0000" and len(bun_pk.get(pnu[:15], ())) == 1:
             pks, kind = bun_pk[pnu[:15]], "본번"
         if not pks:
             continue
+        n_candidates = len(pks)
+        unresolved = False
+        if n_candidates > 1:
+            # 한 지번(필지)에 건축물대장이 여러 개(아파트+관리동/상가동 등) — Tier1이
+            # 상업으로 분류한 이 PNU엔 상업 주용도 표제부를 우선 채택한다. 상업 후보가
+            # 하나도 없으면(진짜 애매) 원래 후보 전체를 남겨 미해결로 표시한다.
+            comm = {pk for pk in pks if titles.get(pk, {}).get("용도군")}
+            if comm:
+                if len(comm) < n_candidates:
+                    multi_disambiguated += 1
+                pks = comm
+            else:
+                multi_unresolved += 1
+                unresolved = True
         if kind == "지번":
             m_jibun += 1
         else:
@@ -249,9 +264,11 @@ def run_gu(gu: str, ops: list[str], with_units: bool, limit: int | None = None) 
             t = titles.get(pk, {})
             link.append({"PNU": pnu, "지번주소": brow["대지위치"], "용도군_tier1": brow["용도군"],
                          "mgmBldrgstPk": pk, "도로명주소": t.get("도로명주소", ""),
-                         "대장_주용도": t.get("주용도", ""), "매칭": kind})
+                         "대장_주용도": t.get("주용도", ""), "매칭": kind,
+                         "원후보수": n_candidates, "다중후보_미해결": unresolved})
     n_link = write(f"건물링크_{gu}.csv", link, [
-        "PNU", "지번주소", "도로명주소", "용도군_tier1", "대장_주용도", "mgmBldrgstPk", "매칭"])
+        "PNU", "지번주소", "도로명주소", "용도군_tier1", "대장_주용도", "mgmBldrgstPk", "매칭",
+        "원후보수", "다중후보_미해결"])
     matched = {r["PNU"] for r in link}
 
     manifest = {
@@ -265,12 +282,17 @@ def run_gu(gu: str, ops: list[str], with_units: bool, limit: int | None = None) 
                    "expos_units": n_exp if with_units else None},
         "tier1_link": {"tier1_commercial_pnu": len(t1), "matched_pnu": len(matched),
                        "by_jibun": m_jibun, "by_bonbun": m_bonbun,
+                       "multi_candidate_disambiguated": multi_disambiguated,
+                       "multi_candidate_unresolved": multi_unresolved,
                        "match_rate": round(len(matched) / len(t1), 3) if t1 else None},
         "commercial_filter": COMMERCIAL_PREFIX,
         "budget": budget_status(SERVICE, ops),
         "limitations": [
             "표제부 주용도 기준 상업 필터 + 층별개요로 주상복합 저층상가 일부 포착",
             "대형 필지(아파트단지 등)는 bun-본번 집계라 PNU 정확매칭 안 될 수 있음",
+            f"한 지번에 건축물대장 여러 개인 경우({multi_disambiguated + multi_unresolved}건) 상업 주용도를 "
+            f"우선 채택(정제 {multi_disambiguated}건). 상업 후보가 전혀 없는 {multi_unresolved}건은 "
+            "다중후보_미해결=True로 표시 — 그 지번의 상업 속성은 대장으로 확인 불가",
             "임대료·보증금·권리금·공실·매물 여부는 없음 — 이 데이터로 생성 불가",
         ],
     }
@@ -281,6 +303,8 @@ def run_gu(gu: str, ops: list[str], with_units: bool, limit: int | None = None) 
           f"(주상복합 포함 건물 {len(with_commercial_floor)}) · 전유부 {n_exp} · 링크 {n_link}행")
     print(f"Tier1 상업건물 {len(t1)} 중 대장 매칭 {len(matched)} "
           f"(지번 {m_jibun} + 본번 {m_bonbun}, {manifest['tier1_link']['match_rate']})")
+    if multi_disambiguated or multi_unresolved:
+        print(f"  다중후보 지번: 정제 {multi_disambiguated} / 미해결 {multi_unresolved}")
     print(f"예산: {budget_status(SERVICE, ops)}")
     if failed_dongs:
         print(f"⚠ 미완료(오류): {failed_dongs} — 재실행하면 완료된 법정동은 캐시로 건너뛰고 이어감")
