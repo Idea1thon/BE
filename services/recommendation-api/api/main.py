@@ -376,6 +376,11 @@ def _load_run_response(run_id: str) -> tuple[int, dict[str, Any]]:
             "questions": [],
         })
 
+    # The response is atomically published before the best-effort status marker.
+    # A failed marker write must not leave a completed run polling forever.
+    if (out_dir / "api-response.json").is_file():
+        return 200, _completed_run_response(run_id, out_dir)
+
     status_path = out_dir / "run-status.json"
     if status_path.is_file():
         status = _read_json_artifact(status_path)
@@ -497,6 +502,15 @@ def _service_config() -> ServiceConfig:
 
 _ACTIVE_RECOMMENDATIONS = 0
 _ACTIVE_RECOMMENDATIONS_LOCK = threading.Lock()
+_RECOMMENDATION_TASKS: set[asyncio.Task[dict[str, Any]]] = set()
+
+
+def _recommendation_task_done(task: asyncio.Task[dict[str, Any]]) -> None:
+    _RECOMMENDATION_TASKS.discard(task)
+    if not task.cancelled():
+        # Observe late exceptions even if the HTTP caller has timed out. The
+        # worker persists the terminal error for the polling endpoint.
+        task.exception()
 
 
 def _try_acquire_recommendation_slot(limit: int) -> bool:
@@ -524,9 +538,9 @@ def _run_pipeline_with_slot(
 ) -> dict[str, Any]:
     """Run in the worker and release capacity only after the worker exits.
 
-    ``asyncio.wait_for`` cancels the awaitable on timeout, but it cannot stop a
-    Python worker thread. Releasing the slot in the coroutine's ``finally``
-    block would therefore allow timed-out work to exceed the concurrency cap.
+    The caller shields this task so even queued work survives HTTP timeout.
+    Releasing the slot in the request coroutine would allow timed-out work
+    to exceed the concurrency cap.
     """
     try:
         result = run_pipeline(
@@ -709,17 +723,22 @@ async def create_recommendation(
 
     run_id, out_dir = _new_run_dir()
     _write_run_status(run_id, out_dir, "running", request_id=payload.request_id)
+    task = asyncio.create_task(run_in_threadpool(
+        _run_pipeline_with_slot,
+        _pipeline_request(payload, config),
+        out_dir,
+        config,
+        applied_limit,
+        run_id,
+        payload,
+    ))
+    # Keep a strong reference after the request exits, including while waiting
+    # for threadpool capacity. Timeout must not cancel work that owns a slot.
+    _RECOMMENDATION_TASKS.add(task)
+    task.add_done_callback(_recommendation_task_done)
     try:
         result = await asyncio.wait_for(
-            run_in_threadpool(
-                _run_pipeline_with_slot,
-                _pipeline_request(payload, config),
-                out_dir,
-                config,
-                applied_limit,
-                run_id,
-                payload,
-            ),
+            asyncio.shield(task),
             timeout=config.request_timeout_s,
         )
     except asyncio.TimeoutError as exc:
