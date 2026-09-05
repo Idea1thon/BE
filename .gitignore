@@ -1,0 +1,93 @@
+.venv/
+__pycache__/
+*.pyc
+
+# API 키 — .env.example 만 커밋
+.env
+.env.local
+.env.docker
+
+# API 월 호출 예산 카운터 (로컬 상태)
+.api_budget.json
+.api_budget.json*.tmp
+
+# 서울 생활인구 원천 월별 파일 (행정동×일×시간대, 대용량) — 집계본만 커밋
+LONG_FOREIGNER_DONG_*.csv
+SHORT_FOREIGNER_DONG_*.csv
+LOCAL_PEOPLE_DONG_*.csv
+LONG_FOREIGNER_DONG_*.zip
+SHORT_FOREIGNER_DONG_*.zip
+
+# 식품 인허가 원천 + 업소 단위 중간 파일 (재생성 가능) — 상권분기 패널만 커밋
+식품_일반음식점_*.csv
+식품_휴게음식점_*.csv
+data/인허가/음식점_인허가_서울.csv
+
+# KOSIS 원본 (집계본만 커밋)
+고용률.csv
+경제활동인구*.csv
+
+# 도시계획사업/정비사업 원본 (집계본만 커밋)
+UQ120_도시계획사업/
+사업장목록.xls
+
+# R-ONE 임대동향 원본 (집계본만 커밋)
+임대동향*.csv
+
+# 도시철도역사정보 원본 (집계본만 커밋)
+전체_도시철도역사정보_*.xlsx
+전체_도시철도노선정보_*.xlsx
+지하철출입구_버스연계.csv
+tnSubwayEntrc.csv
+
+# 버스정류소 원본 (집계본만 커밋)
+서울_버스정류소_*.xlsx
+전국_버스정류장_*.csv
+서울시버스정류소위치정보*.xlsx
+
+# 공동주택 원본 (집계본만 커밋) — GIS건물통합정보 dbf 는 1GB+
+공동주택_단지면적정보.xlsx
+공동주택 단지 면적 정보.xlsx
+AL_D010_*.dbf
+AL_D010_*.shp
+AL_D010_*.shx
+AL_D010_*.prj
+AL_D010_*.fix
+GIS건물통합정보*/
+
+# 건축물대장(GIS건물통합정보 파생) 건물 단위 파일 39MB — 요약·manifest·README 만 커밋, 원천에서 재생성
+data/건축물대장/상가건물_서울.csv
+
+# 건축HUB API(건축인허가·건축물대장) 원시 응답 캐시 (재수집 가능) — 정규화 CSV·manifest 만 커밋
+data/건축인허가/_cache/
+data/건축물대장/_cache/
+
+# 건축HUB Tier2 자치구별 원시 CSV 213MB (표제부·건물링크·층별용도) — DB(context.building_register 등)에
+# 전량 적재 완료·검증됨(2026-09-05), 저장소엔 불필요. manifest_*.json(가벼운 커버리지 요약)만 커밋 유지.
+# 재생성: .venv/bin/python3 scripts/ingest_building_register.py --all
+data/건축물대장/api/*.csv
+
+
+# macOS
+.DS_Store
+
+# 로컬 작업·인수인계 메타데이터 — 코드 리뷰 PR에는 포함하지 않음
+/.agents/
+/.claude/
+/.codex/
+/AGENTS.md
+/.vscode/
+/artifacts/
+/docs/
+
+# 로컬 분석 원천·생성 산출물 — 재수집·재생성 가능
+/data/
+/output/
+/dong_lists/*.csv
+/seoul_gu_dong_list.csv
+
+# 서비스 전용 운영 문서·실행 산출물
+/services/recommendation-api/docs/
+/services/recommendation-api/README.md
+/services/recommendation-api/output/
+/scripts/phase1_analysis/README.md
