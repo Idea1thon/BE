@@ -35,9 +35,11 @@ if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from recommendation.env import load_env  # noqa: E402
 from recommendation.paths import find_project_root  # noqa: E402
 from rone_api import get_table_data, _data_rows  # noqa: E402
 
+load_env()
 ROOT = str(find_project_root(__file__))
 OUT = os.path.join(ROOT, "data", "임대료", "R-ONE_공실률_분기.csv")
 MANIFEST = os.path.join(ROOT, "data", "임대료", "manifest_공실률.json")

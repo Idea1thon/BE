@@ -29,10 +29,12 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
-from recommendation import serving_db  # noqa: E402
 from recommendation.env import load_env  # noqa: E402
 from recommendation.paths import find_project_root  # noqa: E402
 
+# serving_db also resolves its working directory at import time.
+load_env()
+from recommendation import serving_db  # noqa: E402
 
 ROOT = find_project_root(__file__)
 BASE_DDL_PATH = SERVICE_ROOT / "db/000_location_schema.sql"
@@ -701,7 +703,6 @@ def main() -> int:
     args = parser.parse_args()
     # 서비스 전용 .env를 우선 사용한다. 로컬 마이그레이션 작업공간에서는
     # 루트 .env만 있는 경우가 많으므로 접속 설정이 비어 있을 때만 fallback한다.
-    load_env(SERVICE_ROOT / ".env")
     if not os.getenv("DATABASE_URL") and not os.getenv("POSTGRES_HOST"):
         load_env(ROOT / ".env")
     if not BASE_DDL_PATH.is_file():
