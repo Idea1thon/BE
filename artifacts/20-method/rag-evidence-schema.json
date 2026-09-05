@@ -23,10 +23,10 @@
     "listing_url"
   ],
   "properties": {
-    "candidate_id": {"type": "string", "description": "APT-{kaptCode} / STN-{역번호} / LST-{매물id}. (구) TRDAR-{상권코드} 는 상권 fallback 때만."},
+    "candidate_id": {"type": "string", "description": "APT-{kaptCode} / STN-{역번호} / BLDG-{건물관리번호} / LST-{매물id}. (구) TRDAR-{상권코드} 는 상권 fallback 때만."},
     "candidate_type": {
-      "enum": ["아파트단지_인근", "역_인근", "카카오POI_인근", "생성지점_격자", "매물", "commercial_area", "hinterland", "admin_dong"],
-      "description": "2026-09-02: 후보 단위가 지점(아파트·역·선택적 카카오POI·격자 생성 좌표). 카카오POI는 관측 장소 seed. 생성지점_격자는 프로젝트가 격자로 만든 좌표(generated-evidence-schema.json)이며 실제 매물·점포가 아니다 — synthetic_anchor=true 필수. commercial_area/hinterland/admin_dong 은 seed 없어 fallback한 경우만."
+      "enum": ["아파트단지_인근", "역_인근", "카카오POI_인근", "상가건물_인근", "생성지점_격자", "매물", "commercial_area", "hinterland", "admin_dong"],
+      "description": "2026-09-02: 후보 단위가 지점(아파트·역·선택적 카카오POI·격자 생성 좌표). 카카오POI는 관측 장소 seed. 상가건물_인근(2026-09-05)은 건축물대장 기반 실재 상업용 건물 seed — synthetic_anchor는 아니지만 매물은 아니다(building_address만, address_point 금지). 생성지점_격자는 프로젝트가 격자로 만든 좌표(generated-evidence-schema.json)이며 실제 매물·점포가 아니다 — synthetic_anchor=true 필수. commercial_area/hinterland/admin_dong 은 seed 없어 fallback한 경우만."
     },
     "synthetic_anchor": {
       "type": "boolean",
@@ -57,14 +57,17 @@
         "admin_dong": {"type": ["string", "null"], "description": "지점 포함 행정동(영역-행정동 PIP)"},
         "anchor": {
           "type": "object",
-          "description": "지점의 정체(seed). 아파트 단지·역·선택적 카카오POI.",
+          "description": "지점의 정체(seed). 아파트 단지·역·선택적 카카오POI·상가건물.",
           "required": ["name", "type", "id"],
           "properties": {
             "name": {"type": "string"},
-            "type": {"enum": ["아파트단지", "역", "카카오POI", "생성지점"]},
-            "id": {"type": "string", "description": "kaptCode·역번호·Kakao place id·GEN-PT-{region}-{seq}(생성지점)"},
+            "type": {"enum": ["아파트단지", "역", "카카오POI", "상가건물", "생성지점"]},
+            "id": {"type": "string", "description": "kaptCode·역번호·Kakao place id·건물관리번호(상가건물)·GEN-PT-{region}-{seq}(생성지점)"},
             "households": {"type": ["integer", "null"]},
-            "line": {"type": ["string", "null"]}
+            "line": {"type": ["string", "null"]},
+            "floor_area_m2": {"type": ["number", "null"], "description": "type=상가건물일 때 연면적(㎡)"},
+            "use_group": {"type": ["string", "null"], "description": "type=상가건물일 때 Tier1 용도군(근린생활1/2·판매시설 등)"},
+            "has_confirmed_commercial_floor": {"type": ["boolean", "null"], "description": "type=상가건물일 때 Tier2 층별용도로 상업 공간이 실제 확인됐는지"}
           },
           "additionalProperties": false
         },
@@ -127,6 +130,18 @@
             "lat": {"type": "number"},
             "lon": {"type": "number"},
             "source_type": {"enum": ["listing", "reverse_geocode"]}
+          },
+          "additionalProperties": false
+        },
+        "building_address": {
+          "type": ["object", "null"],
+          "description": "2026-09-05: type=상가건물일 때만. 건물 전체의 도로명/지번주소이지 임대 가능 특정 호실 주소가 아니다 — address_point(매물주소 전용)와 절대 혼동하지 말 것(F30). precision은 이 필드가 있어도 '지점' 그대로다.",
+          "required": ["value", "source"],
+          "properties": {
+            "value": {"type": "string"},
+            "source": {"enum": ["도로명주소(Tier2)", "지번주소(Tier1)"]},
+            "building_name": {"type": ["string", "null"]},
+            "limitation": {"type": "string"}
           },
           "additionalProperties": false
         }

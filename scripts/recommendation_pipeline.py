@@ -457,9 +457,44 @@ def _poi_seed(row: dict[str, str], point: Point, source_path: str) -> dict[str, 
             "category_name": row.get("category_name"), "source_path": source_path}
 
 
+def _building_seed(
+    building_pk: str, point: Point, source_path: str, *,
+    use_group: str | None, floor_area_m2: float | None, building_age_years: int | None,
+    building_name: str | None, road_address: str | None, lot_address: str | None,
+    has_confirmed_commercial_floor: bool,
+) -> dict[str, Any]:
+    """건축물대장 상업용 건물 seed (2026-09-05, [[building_ledger_ingest]]).
+
+    격자 합성좌표(생성지점)가 메우려던 "개별 상가 매물 데이터 공백"의 실재 모집단
+    대체다 — footprint가 실재 공공데이터 기반이라 `synthetic_anchor`는 아니다.
+    다만 이것도 매물(임대 가능 호실·공실·월세)은 아니다 — build_candidate에서
+    context_notes[0]에 항상 이 사실을 강제 명시한다(candidate-selection-spec.md §1-0).
+    도로명주소(Tier2)는 건물 전체 주소이지 특정 호실 주소가 아니므로 `address_point`가
+    아니라 별도 `building_address`로만 노출한다(F30, precision=매물주소 승격 금지).
+    """
+    building_name = building_name or None
+    road_address = road_address or None
+    lot_address = lot_address or None
+    name = building_name or road_address or lot_address or f"상가건물 {building_pk}"
+    return {
+        "kind": "상가건물", "id": building_pk, "name": name, "pt": point,
+        "households": None, "line": None, "transfer": None,
+        "use_group": use_group, "floor_area_m2": floor_area_m2, "building_age_years": building_age_years,
+        "building_name": building_name, "road_address": road_address, "lot_address": lot_address,
+        "has_confirmed_commercial_floor": has_confirmed_commercial_floor,
+        "source_path": source_path,
+    }
+
+
 def merge_seeds(seeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """80m 병합 + 우선순위 정렬. 입력 순서와 무관하게 결정적."""
-    priority = {"역": 0, "아파트단지": 1, "카카오POI": 2, "생성지점": 3}
+    """80m 병합 + 우선순위 정렬. 입력 순서와 무관하게 결정적.
+
+    상가건물(밀도 115,141동, 아파트 3,396·역 수백보다 압도적으로 높음)을 역·아파트·
+    카카오POI보다 낮게 둔다 — 최우선이면 대부분의 역·아파트 이름이 80m dedup에서
+    상가건물 식별자로 흡수돼 사람이 인지하는 지명이 사라진다(spec §1-0 결정 근거).
+    생성지점(격자)보다는 높여 같은 자리에서 실재 건물이 합성 좌표를 자연 대체한다.
+    """
+    priority = {"역": 0, "아파트단지": 1, "카카오POI": 2, "상가건물": 3, "생성지점": 4}
     merged: list[dict[str, Any]] = []
     for seed in sorted(seeds, key=lambda s: (priority[s["kind"]], s["name"], s["id"])):
         hit = next((item for item in merged if item["pt"].distance(seed["pt"]) <= DEFAULT_DEDUP_M), None)
@@ -492,7 +527,130 @@ def _poi_seeds_from_files(target_buffer: Any) -> list[dict[str, Any]]:
     return out
 
 
-def load_seeds(target_buffer: Any, include_poi: bool, generated_path: Path | None = None) -> list[dict[str, Any]]:
+BUILDING_SEED_CAP = 40  # spec §1-0/§1-1.6 상가건물 밀도 캡 — 아파트·역보다 자릿수가 다른 밀도라 필요
+
+
+def _farthest_point_sample(pts: list[Point], k: int) -> list[int]:
+    """지리적으로 최대한 퍼진 k개 인덱스를 그리디로 고른다(generate_gridpoint_evidence.py와 동일 알고리즘)."""
+    if len(pts) <= k:
+        return list(range(len(pts)))
+    cx = sum(p.x for p in pts) / len(pts)
+    cy = sum(p.y for p in pts) / len(pts)
+    center = Point(cx, cy)
+    chosen = [min(range(len(pts)), key=lambda i: pts[i].distance(center))]
+    mind = [pts[i].distance(pts[chosen[0]]) for i in range(len(pts))]
+    while len(chosen) < k:
+        nxt = max(range(len(pts)), key=lambda i: mind[i] if i not in chosen else -1)
+        chosen.append(nxt)
+        for i in range(len(pts)):
+            d = pts[i].distance(pts[nxt])
+            if d < mind[i]:
+                mind[i] = d
+    return sorted(chosen)
+
+
+def _fps_cap(seeds: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """연면적 상위 풀에서 최원점 표본추출로 limit개 선택 (풀은 넉넉히 limit*3)."""
+    if len(seeds) <= limit:
+        return seeds
+    pool = sorted(seeds, key=lambda s: s.get("floor_area_m2") or 0, reverse=True)[: max(limit * 3, limit)]
+    idxs = _farthest_point_sample([s["pt"] for s in pool], limit)
+    return [pool[i] for i in idxs]
+
+
+def _cap_building_seeds(building_seeds: list[dict[str, Any]], limit: int = BUILDING_SEED_CAP) -> list[dict[str, Any]]:
+    """상가건물 밀도 캡: (a) Tier2 층별용도 확인 건물은 limit 이내 전부 포함 우선
+    (b) 남은 슬롯만 미확인 건물의 연면적 상위 풀에서 (c) 최원점 표본추출로 채운다.
+
+    한 경계 안 상가건물이 아파트(세대수 상위)·역과 자릿수가 다르게 많을 수 있어
+    (예: 잠실동 수백 동) candidate-selection-spec.md §1-0/§1-1.6 결정대로 축소한다.
+    "확인 건물 최우선"을 최원점 표본추출이 덮어쓰지 않도록, confirmed가 limit
+    이내면 무조건 전부 포함하고(H2, 2026-09-05 QA), confirmed가 limit을 넘을
+    때만 confirmed 안에서 연면적·최원점으로 추린다. 캡으로 소실된 원본 개수는
+    `_raw_building_pool_size`로 각 결과 seed에 남겨 run_pipeline이 투명하게
+    보고할 수 있게 한다(H4).
+    """
+    raw_size = len(building_seeds)
+    if raw_size > limit:
+        confirmed = [s for s in building_seeds if s.get("has_confirmed_commercial_floor")]
+        unconfirmed = [s for s in building_seeds if not s.get("has_confirmed_commercial_floor")]
+        if len(confirmed) >= limit:
+            building_seeds = _fps_cap(confirmed, limit)
+        else:
+            building_seeds = confirmed + _fps_cap(unconfirmed, limit - len(confirmed))
+    for s in building_seeds:
+        s["_raw_building_pool_size"] = raw_size
+    return building_seeds
+
+
+def _building_seeds_from_files(target_buffer: Any, sigungu: str) -> list[dict[str, Any]]:
+    """Tier1 건물 모집단(서울 전체) + Tier2(요청 자치구 파일만) 도로명주소·건물명·상업층 확인.
+
+    Tier1은 서울 전체 CSV라 target_buffer(경계+300m)가 인접 자치구로 넘칠 수 있어
+    자치구 사전 필터 없이 전량 스캔한다(아파트·역 seed와 동일 관례). Tier2는
+    자치구별 파일이라 `sigungu`(request.sigungu) 파일만 로드 — 300m 밖 인접
+    자치구로 넘친 건물은 Tier1 좌표는 있지만 Tier2 보강(주소·건물명·상업층 확인)이
+    빠질 수 있다(문서화된 한계, spec §1-0).
+    """
+    tier1_path = ROOT / "data/건축물대장/상가건물_서울.csv"
+    if not tier1_path.is_file():
+        return []
+    tier1_src = str(tier1_path.relative_to(ROOT))
+
+    api_dir = ROOT / "data/건축물대장/api"
+    link_by_pnu: dict[str, dict[str, str]] = {}
+    link_path = api_dir / f"건물링크_{sigungu}.csv"
+    if link_path.is_file():
+        for row in read_csv(link_path):
+            pnu = row.get("PNU")
+            if pnu and row.get("mgmBldrgstPk"):
+                link_by_pnu[pnu] = row  # 정제된 링크(다중후보 상업우선 정리 완료본) — 1지번 1행
+
+    name_by_pk: dict[str, str] = {}
+    title_path = api_dir / f"표제부_{sigungu}.csv"
+    if title_path.is_file():
+        for row in read_csv(title_path):
+            pk = row.get("mgmBldrgstPk")
+            if pk and row.get("건물명"):
+                name_by_pk[pk] = row["건물명"]
+
+    floor_confirmed_pks: set[str] = set()
+    for floor_filename in (f"층별용도_{sigungu}.csv", "층별용도_선별.csv"):
+        floor_path = api_dir / floor_filename
+        if floor_path.is_file():
+            for row in read_csv(floor_path):
+                pk = row.get("mgmBldrgstPk")
+                if pk:
+                    floor_confirmed_pks.add(pk)
+
+    out: list[dict[str, Any]] = []
+    for row in read_csv(tier1_path):
+        try:
+            point = Point(float(row["x_5181"]), float(row["y_5181"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not target_buffer.covers(point):
+            continue
+        pnu = row.get("PNU")
+        link = link_by_pnu.get(pnu) if pnu else None
+        mgm_pk = link.get("mgmBldrgstPk") if link else None
+        road_address = link.get("도로명주소") if link else None
+        out.append(_building_seed(
+            row.get("건물관리번호", ""), point, tier1_src,
+            use_group=row.get("용도군"),
+            floor_area_m2=num(row, "연면적_㎡"),
+            building_age_years=as_int(num(row, "건물연식_년")),
+            building_name=name_by_pk.get(mgm_pk) if mgm_pk else None,
+            road_address=road_address or None,
+            lot_address=row.get("대지위치"),
+            has_confirmed_commercial_floor=bool(mgm_pk and mgm_pk in floor_confirmed_pks),
+        ))
+    return out
+
+
+def load_seeds(
+    target_buffer: Any, include_poi: bool, generated_path: Path | None = None, sigungu: str = "",
+) -> list[dict[str, Any]]:
     seeds: list[dict[str, Any]] = []
     apt_path = find_file(ROOT / "data/공동주택", "아파트단지_서울")
     apt_src = str(apt_path.relative_to(ROOT))
@@ -516,6 +674,8 @@ def load_seeds(target_buffer: Any, include_poi: bool, generated_path: Path | Non
         if target_buffer.covers(point):
             seeds.append(_station_seed(row, point, station_src))
 
+    if sigungu:
+        seeds.extend(_cap_building_seeds(_building_seeds_from_files(target_buffer, sigungu)))
     if include_poi:
         seeds.extend(_poi_seeds_from_files(target_buffer))
     if generated_path is not None:
@@ -1236,10 +1396,15 @@ def build_candidate(
                                "households": as_int(num(row, "세대수")), "source_type": "observed"})
 
     anchor_type = seed["kind"]
+    is_building = anchor_type == "상가건물"
     candidate_type = {"아파트단지": "아파트단지_인근", "역": "역_인근", "카카오POI": "카카오POI_인근",
-                      "생성지점": "생성지점_격자"}[anchor_type]
+                      "상가건물": "상가건물_인근", "생성지점": "생성지점_격자"}[anchor_type]
     candidate_id = str(seed["id"]) if synthetic else \
-        f"{ {'아파트단지': 'APT', '역': 'STN', '카카오POI': 'POI'}[anchor_type] }-{seed['id']}"
+        f"{ {'아파트단지': 'APT', '역': 'STN', '카카오POI': 'POI', '상가건물': 'BLDG'}[anchor_type] }-{seed['id']}"
+    if is_building:
+        # F30: 실재 건물이지 매물이 아니다 — tier 캡은 걸지 않되(synthetic_anchor=false)
+        # 이 사실을 항상 맨 앞에 강제 고지한다(spec §1-0 상가건물 항목, 등급·정렬 미반영).
+        context_notes.insert(0, "실재 상업용 건물(건축물대장 기반)이며 임대 가능 특정 호실·공실 확인 안 됨(매물 아님)")
     proxy_scope = f_scope in ("상권", "행정동")
     source_list = sorted({relative_path(p) for p in source_paths.values()} | seed["source_paths"])
     if rone_path:
@@ -1404,16 +1569,26 @@ def build_candidate(
                 dong_limit,
                 proxy_note="후보 지점이 아닌 행정동 보도량 proxy",
             ))
+    building_address = None
+    if is_building and (seed.get("road_address") or seed.get("lot_address")):
+        building_address = {
+            "value": seed.get("road_address") or seed.get("lot_address"),
+            "source": "도로명주소(Tier2)" if seed.get("road_address") else "지번주소(Tier1)",
+            "building_name": seed.get("building_name"),
+            "limitation": "건물 주소이며 임대 가능 특정 호실 주소가 아님",  # spec §1-3, M3(2026-09-05 QA)
+        }
     location = {
         "sido": "서울특별시", "sigungu": target_sigungu, "admin_dong": admin_name,
         "anchor": {"name": seed["name"], "type": ("생성지점" if synthetic else anchor_type), "id": str(seed["id"]),
-                    "households": seed.get("households"), "line": "·".join(sorted(seed["lines"])) if seed.get("lines") else seed.get("line")},
+                    "households": seed.get("households"), "line": "·".join(sorted(seed["lines"])) if seed.get("lines") else seed.get("line"),
+                    **({"floor_area_m2": seed.get("floor_area_m2"), "use_group": seed.get("use_group"),
+                        "has_confirmed_commercial_floor": seed.get("has_confirmed_commercial_floor")} if is_building else {})},
         "place_name": (f"{seed['id']} (격자 생성 좌표 · 실제 매물·점포 아님)" if synthetic else f"{seed['name']} 인근"),
         "point": {"x": round(point.x, 2), "y": round(point.y, 2), "crs": "EPSG:5181"},
         "precision": "지점(생성)" if synthetic else "지점",
         "host_commercial_area": ({"code": host.code, "name": host.name, "relation": host_relation, "distance_m": host_distance} if host else None),
         "overlapping_units": {"commercial_area": [host.code] if host else [], "hinterland": [rec.code for rec in hinterland], "admin_dong": [admin_code] if admin_code else [], "sigungu": target_sigungu},
-        "nearby_anchors": nearby_anchors, "address_point": None,
+        "nearby_anchors": nearby_anchors, "address_point": None, "building_address": building_address,
     }
     confidence = "low" if sales_per_store is None or host is None else "medium" if proxy_scope or not rent_specific else "high"
     confidence_reasons = ["지점 반경 지표는 직접 계산"]
@@ -1425,6 +1600,10 @@ def build_candidate(
         confidence_reasons.append("R-ONE 상권별 자동 매핑 미허용")
     if conditions["unsupported_conditions"]:
         confidence_reasons.append("특별조건을 매물 데이터로 검증하지 못함")
+    if is_building and not seed.get("has_confirmed_commercial_floor"):
+        # H1(2026-09-05 QA): Tier2 층별용도 미확인 건물은 표제부 주용도·연면적만으로
+        # 밀도 캡을 통과했다는 뜻 — spec §1-0 "Tier2 상업층 미확인 지역" 고지를 후보 단위로 명시.
+        confidence_reasons.append("Tier2 층별용도 미확인 — 표제부 주용도·연면적만으로 선정(상업 공간 실사용 미확인)")
 
     normalizations = [
         "encoding_detect", "eng_header_rename", "store_count_schema_map", "sales_count_column_fix",
@@ -1619,8 +1798,8 @@ class FileSource:
         return build_environment(current, previous, quarter, scope_key)
 
     # seed·반경·네이버·뉴스·임대료·crosswalk — 원천 파일 그대로
-    def seeds(self, target_buffer, include_poi, generated_path):
-        return load_seeds(target_buffer, include_poi, generated_path)
+    def seeds(self, target_buffer, include_poi, generated_path, sigungu=""):
+        return load_seeds(target_buffer, include_poi, generated_path, sigungu)
 
     def radius_points(self):
         return load_radius_points()
@@ -1795,7 +1974,52 @@ class DbSource:
         )
         return [json.loads(r["attributes"]) for r in rows]
 
-    def seeds(self, target_buffer, include_poi, generated_path):
+    def _building_seeds(self, target_buffer) -> list[dict[str, Any]]:
+        """context.commercial_building(Tier1, 좌표 유일 출처) + link/register/floor_use(Tier2 보강).
+
+        Tier1은 서울 전체 테이블이라 자치구 WHERE 필터 없이 전량 조회 후
+        target_buffer.covers(point)로 거른다(아파트·역 seed와 동일 관례 — 300m
+        경계 스필오버를 놓치지 않기 위함). LATERAL로 지번(pnu)당 링크 후보 1개만
+        선택(정제 이미 완료 — multi_candidate_unresolved=false 우선).
+        """
+        rows = self._db.query(
+            "SELECT b.building_pk, b.pnu, b.use_group, b.gross_floor_area_m2, b.building_age_years, "
+            "b.lot_address, encode(ST_AsBinary(b.point),'hex') AS wkb, "
+            "r.building_name, r.road_address, "
+            "EXISTS (SELECT 1 FROM context.building_floor_use f WHERE f.mgm_bldrgst_pk = lk.mgm_bldrgst_pk) "
+            "  AS has_confirmed_commercial_floor "
+            "FROM context.commercial_building b "
+            "LEFT JOIN LATERAL ("
+            "  SELECT * FROM context.commercial_building_link l WHERE l.pnu = b.pnu "
+            "  ORDER BY l.multi_candidate_unresolved ASC, l.match_kind ASC LIMIT 1"
+            ") lk ON true "
+            "LEFT JOIN context.building_register r ON r.mgm_bldrgst_pk = lk.mgm_bldrgst_pk "
+            "WHERE b.point IS NOT NULL "
+            "ORDER BY b.building_pk"  # 캡 슬라이싱이 물리적 스캔 순서에 우연히 기대지 않도록 결정적 정렬(H3)
+        )
+        prov = self._provenance("data/건축물대장", "상가건물_서울")
+        src = str(prov.relative_to(ROOT)) if isinstance(prov, Path) else str(prov)
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                point = shapely_wkb.loads(bytes.fromhex(row["wkb"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+            if not target_buffer.covers(point):
+                continue
+            out.append(_building_seed(
+                row["building_pk"], point, src,
+                use_group=row.get("use_group"),
+                floor_area_m2=num(row, "gross_floor_area_m2"),
+                building_age_years=as_int(num(row, "building_age_years")),
+                building_name=row.get("building_name"),
+                road_address=row.get("road_address"),
+                lot_address=row.get("lot_address"),
+                has_confirmed_commercial_floor=bool(row.get("has_confirmed_commercial_floor")),
+            ))
+        return out
+
+    def seeds(self, target_buffer, include_poi, generated_path, sigungu=""):
         out: list[dict[str, Any]] = []
         apt_src = self._prov_str("data/공동주택", "아파트단지_서울")
         for row in self._anchor_rows("apartment"):
@@ -1815,6 +2039,7 @@ class DbSource:
                 continue
             if target_buffer.covers(point):
                 out.append(_station_seed(row, point, stn_src))
+        out.extend(_cap_building_seeds(self._building_seeds(target_buffer)))
         if include_poi:
             poi = self._db.query(
                 "SELECT source_file, attributes FROM context.anchor_snapshot "
@@ -2062,7 +2287,7 @@ def run_pipeline(
     all_sales_pp = [num(all_sales_rows[key], "당월_매출_금액") / num(all_store_rows[key], "전체_점포_수") for key in all_sales_rows if key in all_store_rows and num(all_sales_rows[key], "당월_매출_금액") is not None and num(all_store_rows[key], "전체_점포_수") not in (None, 0)]
     stations, buses, apts, radius_paths = src.radius_points()
     poi_context = load_completed_poi_context(request) if include_poi_context else None
-    seeds = src.seeds(target_buffer, include_poi, generated_points)
+    seeds = src.seeds(target_buffer, include_poi, generated_points, request.sigungu)
     if not seeds:
         raise PipelineError("선택 범위(경계+300m)에 유효한 아파트·역 seed가 없습니다. POI 또는 매물 이식이 필요합니다.")
 
@@ -2137,6 +2362,9 @@ def run_pipeline(
             explanations = explain_candidates(candidates, llm_mode=llm_mode)
         except LLMRuntimeError as exc:
             raise PipelineError(str(exc)) from exc
+    building_seeds_in_pool = [s for s in seeds if s["kind"] == "상가건물"]
+    building_raw_count = building_seeds_in_pool[0].get("_raw_building_pool_size", len(building_seeds_in_pool)) \
+        if building_seeds_in_pool else 0
     summary = {
         "candidate_count": len(candidates), "seed_count_before_limit": len(seeds),
         "fit_tier_counts": dict(Counter(c["fit_tier"] for c in candidates)),
@@ -2147,6 +2375,16 @@ def run_pipeline(
         "generated_points": str(generated_points) if generated_points else None,
         "include_poi": include_poi, "include_poi_context": include_poi_context,
         "include_news": include_news,
+        "building_context": {
+            # H4(2026-09-05 QA): 밀도 캡(BUILDING_SEED_CAP)으로 소실된 원본 개수를 투명하게 남긴다.
+            "raw_count": building_raw_count,
+            "kept_count": len(building_seeds_in_pool),
+            "cap": BUILDING_SEED_CAP,
+            "capped": building_raw_count > len(building_seeds_in_pool),
+            "confirmed_count": sum(1 for s in building_seeds_in_pool if s.get("has_confirmed_commercial_floor")),
+            "limitation": "실재 상업용 건물이며 임대 가능 특정 호실·공실 확인 안 됨(매물 아님). "
+                          "밀도 캡: Tier2 층별용도 확인 건물 우선 → 연면적 상위 → 최원점 표본추출.",
+        },
         "news_context": {
             "used": bool(news_catalogs),
             "query_label": " | ".join(catalog.query_label for catalog in news_catalogs) or None,
