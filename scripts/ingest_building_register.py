@@ -347,15 +347,29 @@ def _use_group_by_pk() -> dict[str, str]:
 
 
 def _fully_covered_dong_codes() -> set[str]:
-    """이미 층별개요를 법정동 전체 수집한 자치구의 법정동코드 — 선별 대상에서 제외."""
-    covered = set()
+    """층별개요가 실제로 수집된 법정동코드 — 선별 대상에서 제외.
+
+    PR #14 리뷰(ziholee) P2: 이전엔 "파일에 데이터가 1행이라도 있으면 그 구
+    전체가 수집완료"로 판정했다. 하지만 run_gu()는 API 예산 소진·오류로 일부
+    법정동만 처리한 채로도 부분 파일을 저장하므로, 그 구의 나머지(아직 수집
+    안 된) 법정동까지 완료로 오판해 --targeted에서 영구히 제외될 위험이 있었다
+    (실제로 재현됨: 임시 1행 CSV + 법정동 2개로 실행 시 둘 다 완료 반환).
+
+    PNU 앞 10자리가 법정동코드다(PNU 구성 규약) — 파일에 실제로 등장한 PNU의
+    법정동코드만 "수집됨"으로 인정한다. 다운사이드는 legitimate하게 상업층이
+    0개인 법정동이 매번 재조회될 수 있다는 것뿐(추가 API 호출, 데이터 오류 아님)
+    — 반대로 미수집 법정동을 영구 누락하는 것보다 훨씬 안전하다.
+    """
+    covered: set[str] = set()
     for f in sorted(OUT_DIR.glob("층별용도_*.csv")):
         gu = f.stem.replace("층별용도_", "")
         if gu == "선별":
             continue
         with f.open(encoding="utf-8-sig") as fh:
-            if sum(1 for _ in fh) > 1:  # 헤더 외 데이터 있음 = 그 구는 전량 수집됨
-                covered.update(c for c, _, _, _ in dong_codes_for(gu))
+            for row in csv.DictReader(fh):
+                pnu = row.get("PNU", "")
+                if len(pnu) >= 10:
+                    covered.add(pnu[:10])
     return covered
 
 

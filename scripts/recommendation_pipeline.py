@@ -250,6 +250,16 @@ def as_int(value: float | None) -> int | None:
     return None if value is None else int(round(value))
 
 
+def pg_bool(value: Any) -> bool:
+    """serving_db.query()가 COPY ... CSV로 반환하는 postgres boolean('t'/'f' 문자열)을 안전 변환.
+
+    ``bool("f")``는 파이썬에서 True다(비어있지 않은 문자열) — PR #14 리뷰(ziholee) 발견:
+    이 버그로 층별용도 미확인 건물까지 has_confirmed_commercial_floor=True가 돼
+    밀도 캡의 "확인 건물 우선"과 미확인 경고가 둘 다 무력화됐었다.
+    """
+    return str(value).strip().lower() in ("t", "true", "1")
+
+
 def previous_quarter(quarter: str) -> str:
     year, qtr = int(quarter[:4]), int(quarter[4])
     if qtr == 1:
@@ -598,13 +608,22 @@ def _building_seeds_from_files(target_buffer: Any, sigungu: str) -> list[dict[st
     tier1_src = str(tier1_path.relative_to(ROOT))
 
     api_dir = ROOT / "data/건축물대장/api"
-    link_by_pnu: dict[str, dict[str, str]] = {}
+    link_rows_by_pnu: dict[str, list[dict[str, str]]] = defaultdict(list)
     link_path = api_dir / f"건물링크_{sigungu}.csv"
     if link_path.is_file():
         for row in read_csv(link_path):
             pnu = row.get("PNU")
             if pnu and row.get("mgmBldrgstPk"):
-                link_by_pnu[pnu] = row  # 정제된 링크(다중후보 상업우선 정리 완료본) — 1지번 1행
+                link_rows_by_pnu[pnu].append(row)
+    # PR #14 리뷰(ziholee) P2: `다중후보_미해결=False`라도 한 PNU에 mgmBldrgstPk가 여럿이면
+    # (아파트+관리동처럼 상업 후보가 실제로 2개 이상인 경우, 예: 중랑구 PNU
+    # 1126010200101360027 = 중랑천로 76 에이동 + 중랑천로12길 10 비동) 서로 다른 실재
+    # 건물일 수 있어 임의로 하나를 골라 도로명주소·확인여부를 승격하면 안 된다.
+    # PNU당 distinct mgmBldrgstPk가 정확히 1개일 때만 enrichment를 채택한다.
+    link_by_pnu: dict[str, dict[str, str]] = {
+        pnu: rows[0] for pnu, rows in link_rows_by_pnu.items()
+        if len({r["mgmBldrgstPk"] for r in rows}) == 1
+    }
 
     name_by_pk: dict[str, str] = {}
     title_path = api_dir / f"표제부_{sigungu}.csv"
@@ -1979,8 +1998,16 @@ class DbSource:
 
         Tier1은 서울 전체 테이블이라 자치구 WHERE 필터 없이 전량 조회 후
         target_buffer.covers(point)로 거른다(아파트·역 seed와 동일 관례 — 300m
-        경계 스필오버를 놓치지 않기 위함). LATERAL로 지번(pnu)당 링크 후보 1개만
-        선택(정제 이미 완료 — multi_candidate_unresolved=false 우선).
+        경계 스필오버를 놓치지 않기 위함).
+
+        PR #14 리뷰(ziholee) P2: `multi_candidate_unresolved=false`라도 한 PNU에
+        distinct mgm_bldrgst_pk가 여럿이면(아파트+관리동처럼 상업 후보가 실제로
+        2개 이상, 예: 중랑구 PNU 1126010200101360027 = 에이동/비동 별개 건물)
+        서로 다른 실재 건물일 수 있다. LIMIT 1로 임의 선택하면 Tier1 footprint에
+        엉뚱한 건물의 도로명주소·확인여부를 승격할 위험이 있어, PNU당 distinct
+        mgm_bldrgst_pk가 **정확히 1개**일 때만 enrichment를 채택한다(NOT EXISTS
+        다른 pk). 모호하면 lk가 NULL → road_address·building_name·상업층 확인
+        전부 결측 처리(임의 승격보다 안전).
         """
         rows = self._db.query(
             "SELECT b.building_pk, b.pnu, b.use_group, b.gross_floor_area_m2, b.building_age_years, "
@@ -1991,7 +2018,10 @@ class DbSource:
             "FROM context.commercial_building b "
             "LEFT JOIN LATERAL ("
             "  SELECT * FROM context.commercial_building_link l WHERE l.pnu = b.pnu "
-            "  ORDER BY l.multi_candidate_unresolved ASC, l.match_kind ASC LIMIT 1"
+            "  AND NOT EXISTS ("
+            "    SELECT 1 FROM context.commercial_building_link l2 "
+            "    WHERE l2.pnu = l.pnu AND l2.mgm_bldrgst_pk <> l.mgm_bldrgst_pk"
+            "  ) LIMIT 1"
             ") lk ON true "
             "LEFT JOIN context.building_register r ON r.mgm_bldrgst_pk = lk.mgm_bldrgst_pk "
             "WHERE b.point IS NOT NULL "
@@ -2015,7 +2045,7 @@ class DbSource:
                 building_name=row.get("building_name"),
                 road_address=row.get("road_address"),
                 lot_address=row.get("lot_address"),
-                has_confirmed_commercial_floor=bool(row.get("has_confirmed_commercial_floor")),
+                has_confirmed_commercial_floor=pg_bool(row.get("has_confirmed_commercial_floor")),
             ))
         return out
 

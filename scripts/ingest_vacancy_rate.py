@@ -56,11 +56,42 @@ def q_code(wrttime_idtfr_id: str) -> str | None:
     return f"{year}{q}"
 
 
+class VacancyFetchError(RuntimeError):
+    """R-ONE API가 오류/무자료 envelope를 반환함 — 빈 응답/페이지 종료와 구분해야 한다(PR #14 리뷰 P2)."""
+
+
+def _result_code(payload: dict) -> str | None:
+    """R-ONE 응답의 RESULT.CODE를 찾는다.
+
+    정상 응답은 ``SttsApiTblData[0].head[*].RESULT``에 있지만, 오류·무자료
+    응답은 그 래퍼 자체가 없이 최상위에 바로 ``{"RESULT": {...}}``로 온다
+    (실호출로 확인: 잘못된 STATBL_ID → ``{"RESULT": {"CODE": "INFO-200", ...}}``).
+    두 위치 모두 확인해야 오류를 빈 페이지로 오인하지 않는다.
+    """
+    top = payload.get("RESULT")
+    if isinstance(top, dict):
+        return top.get("CODE")
+    blocks = payload.get("SttsApiTblData")
+    if isinstance(blocks, list) and blocks and isinstance(blocks[0], dict):
+        for h in blocks[0].get("head", []):
+            if isinstance(h, dict) and isinstance(h.get("RESULT"), dict):
+                return h["RESULT"].get("CODE")
+    return None
+
+
 def fetch_all_rows(statbl_id: str) -> list[dict]:
     rows: list[dict] = []
     page = 1
     while True:
         payload = get_table_data(statbl_id, "QY", page=page, size=PAGE_SIZE)
+        # 오류/무자료 envelope(RESULT.CODE != INFO-000)를 빈 페이지·정상 종료로
+        # 취급하면(이전 버그) 일부 상가유형만 실패해도 나머지로 기존 스냅샷을
+        # 덮어써서 그 유형의 공실률이 통째로 사라진다.
+        result_code = _result_code(payload)
+        if result_code is not None and result_code != "INFO-000":
+            raise VacancyFetchError(
+                f"R-ONE API 오류 응답(STATBL_ID={statbl_id}, page={page}): {result_code}"
+            )
         page_rows = _data_rows(payload)
         rows.extend(page_rows)
         total = None
@@ -101,25 +132,40 @@ def parse_rows(styp: str, api_rows: list[dict]) -> list[list]:
 
 
 def main() -> int:
+    # PR #14 리뷰(ziholee) P2: 상가유형 중 하나라도 API가 실패하면 절대 기존 스냅샷을
+    # 덮어쓰지 않는다 — 성공한 유형만으로 파일을 만들면 실패한 유형의 공실률이
+    # 조용히 사라진다(추천 파이프라인은 이 CSV가 3개 유형 다 있다고 가정). 전부
+    # 성공했을 때만 임시 파일에 쓰고 os.replace()로 원자적 교체한다.
     all_rows: list[list] = []
     call_log = []
+    failures: list[str] = []
     for styp, statbl_id in STATBL_IDS.items():
-        api_rows = fetch_all_rows(statbl_id)
+        try:
+            api_rows = fetch_all_rows(statbl_id)
+        except VacancyFetchError as exc:
+            print(f"  {styp:8s} STATBL_ID={statbl_id}  FAIL: {exc}")
+            failures.append(styp)
+            continue
         seoul_rows = parse_rows(styp, api_rows)
         all_rows += seoul_rows
         call_log.append({"상가유형": styp, "statbl_id": statbl_id,
                           "전국_응답행수": len(api_rows), "서울_행수": len(seoul_rows)})
         print(f"  {styp:8s} STATBL_ID={statbl_id}  전국 {len(api_rows):,}행 → 서울 {len(seoul_rows):,}행")
 
+    if failures:
+        print(f"FAIL: {', '.join(failures)} API 호출 실패 — 기존 스냅샷 유지, 파일 갱신 안 함")
+        return 1
     if not all_rows:
         print("FAIL: 서울 공실률 행을 하나도 받지 못함")
         return 1
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    with open(OUT, "w", encoding="utf-8-sig", newline="") as f:
+    tmp_out = f"{OUT}.tmp"
+    with open(tmp_out, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
         w.writerow(["상가유형", "지표", "grain", "권역", "R_ONE_상권", "기준_년분기_코드", "값"])
         w.writerows(sorted(all_rows))
+    os.replace(tmp_out, OUT)
 
     n_sang = len({r[4] for r in all_rows if r[2] == "상권"})
     n_gwon = len({r[3] for r in all_rows if r[2] == "권역"})
