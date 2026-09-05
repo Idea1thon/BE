@@ -192,7 +192,9 @@ def run_gu(gu: str, ops: list[str], with_units: bool, limit: int | None = None) 
                 "용도코드": s(r.get("mainPurpsCd")), "용도": s(r.get("mainPurpsCdNm")),
                 "상세용도": s(r.get("etcPurps")), "용도군": grp, "구조": s(r.get("strctCdNm")),
             })
-            if pk and pnu_of(r):
+            # titles에 없는 pk(표제부에서 부속건축물로 제외됐거나 페이지 누락)는 링크에 안 넣는다 —
+            # 건물링크가 building_register를 FK 참조하므로 존재하지 않는 pk를 참조하면 안 됨.
+            if pk and pk in titles and pnu_of(r):
                 pnu_to_pk[pnu_of(r)].add(pk)
 
         for r in got["getBrExposInfo"]:
@@ -216,9 +218,22 @@ def run_gu(gu: str, ops: list[str], with_units: bool, limit: int | None = None) 
         "승용승강기", "비상용승강기", "호수", "세대수", "가구수",
         "옥내기계식_대수", "옥외기계식_대수", "옥내자주식_대수", "옥외자주식_대수",
         "허가일", "착공일", "사용승인일", "생성일"])
-    n_flr = write(f"층별용도_{gu}.csv", floors, [
-        "mgmBldrgstPk", "PNU", "지번주소", "도로명주소", "층구분", "층번호", "층번호명", "층면적_㎡",
-        "용도코드", "용도", "상세용도", "용도군", "구조"])
+    flr_path = OUT_DIR / f"층별용도_{gu}.csv"
+    if "getBrFlrOulnInfo" in ops:
+        n_flr = write(f"층별용도_{gu}.csv", floors, [
+            "mgmBldrgstPk", "PNU", "지번주소", "도로명주소", "층구분", "층번호", "층번호명", "층면적_㎡",
+            "용도코드", "용도", "상세용도", "용도군", "구조"])
+    else:
+        # --skip-floors 등으로 이번 실행에 층별개요를 안 가져왔으면 이전에 수집해둔
+        # 파일을 빈 파일로 덮어쓰지 않는다.
+        if flr_path.is_file():
+            with flr_path.open(encoding="utf-8-sig") as f:
+                n_flr = sum(1 for _ in f) - 1
+            print(f"  (층별용도_{gu}.csv 기존 파일 유지, {n_flr}행 — 이번 실행은 층별개요 미수집)", flush=True)
+        else:
+            n_flr = write(f"층별용도_{gu}.csv", floors, [
+                "mgmBldrgstPk", "PNU", "지번주소", "도로명주소", "층구분", "층번호", "층번호명", "층면적_㎡",
+                "용도코드", "용도", "상세용도", "용도군", "구조"])
     n_exp = write(f"전유부_{gu}.csv", expos, [
         "mgmBldrgstPk", "지번주소", "도로명주소", "건물명", "동명칭", "호명칭",
         "층구분", "층번호", "대장종류"]) if with_units else 0

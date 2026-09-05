@@ -13,8 +13,11 @@
   .venv/bin/python3 scripts/migrate_postgres_context.py --phase evidence
   .venv/bin/python3 scripts/migrate_postgres_context.py --phase all
 
-building 단계는 db/002_commercial_building.sql 적용과
-scripts/ingest_building_ledger.py 실행(→ data/건축물대장/상가건물_서울.csv)을 선행한다.
+building 단계는 db/002_commercial_building.sql 적용(v2: commercial_building·building_register·
+commercial_building_link·building_floor_use 4테이블 + 요약 matview)과 아래 이식을 선행한다.
+  scripts/ingest_building_ledger.py                      → data/건축물대장/상가건물_서울.csv (Tier1)
+  scripts/ingest_building_register.py --all --skip-floors → data/건축물대장/api/{표제부,건물링크}_*.csv (Tier2)
+  scripts/ingest_building_register.py --sigungu <구>      → 위 + 층별용도_<구>.csv (선택, 무거움)
 """
 from __future__ import annotations
 
@@ -905,6 +908,157 @@ FROM (SELECT DISTINCT ON (building_pk, snapshot) * FROM _stage_cb
 ON CONFLICT (building_pk, snapshot) DO NOTHING;
 """
     print("commercial_building:", copy_into(sql, commercial_building_rows()))
+
+
+def _gu_of(addr: str) -> str:
+    if "서울특별시 " in addr:
+        parts = addr.split("서울특별시 ", 1)[1].split()
+        if parts and parts[0].endswith("구"):
+            return parts[0]
+    return ""
+
+
+def building_register_rows() -> Iterator[list[Any]]:
+    paths = sorted((DATA / "건축물대장" / "api").glob("표제부_*.csv"))
+    if not paths:
+        raise RuntimeError(
+            f"{DATA / '건축물대장' / 'api'}/표제부_*.csv 없음 — "
+            "scripts/ingest_building_register.py --all --skip-floors 를 먼저 실행하세요"
+        )
+    for path in paths:
+        source_id = file_id(path.relative_to(ROOT).as_posix())
+        for row in csv_rows(path)[2]:
+            yield [
+                scalar(row.get("mgmBldrgstPk")), scalar(row.get("PNU")),
+                _gu_of(row.get("지번주소", "")), scalar(row.get("지번주소")), scalar(row.get("도로명주소")),
+                scalar(row.get("건물명")), scalar(row.get("동명칭")), scalar(row.get("대장종류")),
+                scalar(row.get("주용도코드")), scalar(row.get("주용도")), scalar(row.get("상세용도")),
+                scalar(row.get("용도군")), scalar(row.get("구조")), scalar(row.get("지붕")),
+                number(row.get("대지면적_㎡")), number(row.get("건축면적_㎡")), number(row.get("연면적_㎡")),
+                number(row.get("건폐율_pct")), number(row.get("용적률_pct")), number(row.get("높이_m")),
+                integer(row.get("지상층수")), integer(row.get("지하층수")),
+                integer(row.get("승용승강기")), integer(row.get("비상용승강기")),
+                integer(row.get("호수")), integer(row.get("세대수")), integer(row.get("가구수")),
+                integer(row.get("옥내기계식_대수")), integer(row.get("옥외기계식_대수")),
+                integer(row.get("옥내자주식_대수")), integer(row.get("옥외자주식_대수")),
+                date_value(row.get("허가일")), date_value(row.get("착공일")),
+                date_value(row.get("사용승인일")), date_value(row.get("생성일")), source_id,
+            ]
+
+
+def load_building_register() -> None:
+    sql = """
+CREATE TEMP TABLE _stage_br (
+    mgm_bldrgst_pk text, pnu text, sigungu_name text, lot_address text, road_address text,
+    building_name text, dong_name text, register_kind text, use_code text, use_name text,
+    use_detail text, use_group text, structure text, roof text, site_area_m2 numeric,
+    building_area_m2 numeric, gross_floor_area_m2 numeric, coverage_pct numeric,
+    floor_area_ratio_pct numeric, height_m numeric, floors_above integer, floors_below integer,
+    elevators_passenger integer, elevators_emergency integer, unit_count integer,
+    household_count integer, family_count integer, parking_indoor_mech integer,
+    parking_outdoor_mech integer, parking_indoor_self integer, parking_outdoor_self integer,
+    permit_date date, construction_start_date date, approval_date date,
+    register_snapshot_date date, source_file_id bigint
+);
+COPY _stage_br FROM STDIN WITH (FORMAT csv, NULL '\\N');
+INSERT INTO context.building_register
+    (mgm_bldrgst_pk, pnu, sigungu_name, lot_address, road_address, building_name, dong_name,
+     register_kind, use_code, use_name, use_detail, use_group, structure, roof, site_area_m2,
+     building_area_m2, gross_floor_area_m2, coverage_pct, floor_area_ratio_pct, height_m,
+     floors_above, floors_below, elevators_passenger, elevators_emergency, unit_count,
+     household_count, family_count, parking_indoor_mech, parking_outdoor_mech,
+     parking_indoor_self, parking_outdoor_self, permit_date, construction_start_date,
+     approval_date, register_snapshot_date, source_file_id)
+SELECT * FROM (
+    SELECT DISTINCT ON (mgm_bldrgst_pk) * FROM _stage_br ORDER BY mgm_bldrgst_pk
+) d
+ON CONFLICT (mgm_bldrgst_pk) DO UPDATE SET
+    pnu = EXCLUDED.pnu, road_address = EXCLUDED.road_address, use_group = EXCLUDED.use_group,
+    gross_floor_area_m2 = EXCLUDED.gross_floor_area_m2, register_snapshot_date = EXCLUDED.register_snapshot_date;
+"""
+    print("building_register:", copy_into(sql, building_register_rows()))
+
+
+def commercial_building_link_rows() -> Iterator[list[Any]]:
+    paths = sorted((DATA / "건축물대장" / "api").glob("건물링크_*.csv"))
+    for path in paths:
+        source_id = file_id(path.relative_to(ROOT).as_posix())
+        for row in csv_rows(path)[2]:
+            pk = scalar(row.get("mgmBldrgstPk"))
+            if not pk:
+                continue
+            yield [
+                scalar(row.get("PNU")), pk, scalar(row.get("지번주소")), scalar(row.get("도로명주소")),
+                scalar(row.get("용도군_tier1")), scalar(row.get("대장_주용도")), scalar(row.get("매칭")),
+                integer(row.get("원후보수")),
+                (row.get("다중후보_미해결") or "").strip().lower() in ("true", "1", "y"),
+                source_id,
+            ]
+
+
+def load_commercial_building_link() -> None:
+    sql = """
+CREATE TEMP TABLE _stage_cbl (
+    pnu text, mgm_bldrgst_pk text, lot_address text, road_address text, use_group_tier1 text,
+    use_name_register text, match_kind text, candidate_count integer,
+    multi_candidate_unresolved boolean, source_file_id bigint
+);
+COPY _stage_cbl FROM STDIN WITH (FORMAT csv, NULL '\\N');
+INSERT INTO context.commercial_building_link
+    (pnu, mgm_bldrgst_pk, lot_address, road_address, use_group_tier1, use_name_register,
+     match_kind, candidate_count, multi_candidate_unresolved, source_file_id)
+SELECT d.* FROM (
+    SELECT DISTINCT ON (pnu, mgm_bldrgst_pk) * FROM _stage_cbl ORDER BY pnu, mgm_bldrgst_pk
+) d
+WHERE EXISTS (SELECT 1 FROM context.building_register r WHERE r.mgm_bldrgst_pk = d.mgm_bldrgst_pk)
+ON CONFLICT (pnu, mgm_bldrgst_pk) DO UPDATE SET
+    match_kind = EXCLUDED.match_kind, candidate_count = EXCLUDED.candidate_count,
+    multi_candidate_unresolved = EXCLUDED.multi_candidate_unresolved;
+"""
+    print("commercial_building_link:", copy_into(sql, commercial_building_link_rows()))
+
+
+def building_floor_use_rows() -> Iterator[list[Any]]:
+    paths = sorted((DATA / "건축물대장" / "api").glob("층별용도_*.csv"))
+    for path in paths:
+        source_id = file_id(path.relative_to(ROOT).as_posix())
+        for row in csv_rows(path)[2]:
+            pk = scalar(row.get("mgmBldrgstPk"))
+            grp = scalar(row.get("용도군"))
+            if not pk or not grp:
+                continue
+            yield [
+                pk, scalar(row.get("PNU")), scalar(row.get("지번주소")), scalar(row.get("도로명주소")),
+                scalar(row.get("층구분")), integer(row.get("층번호")), scalar(row.get("층번호명")),
+                number(row.get("층면적_㎡")), scalar(row.get("용도코드")), scalar(row.get("용도")),
+                scalar(row.get("상세용도")), grp, scalar(row.get("구조")), source_id,
+            ]
+
+
+def load_building_floor_use() -> None:
+    sql = """
+CREATE TEMP TABLE _stage_bfu (
+    mgm_bldrgst_pk text, pnu text, lot_address text, road_address text, floor_division text,
+    floor_no integer, floor_no_label text, floor_area_m2 numeric, use_code text, use_name text,
+    use_detail text, use_group text, structure text, source_file_id bigint
+);
+COPY _stage_bfu FROM STDIN WITH (FORMAT csv, NULL '\\N');
+DELETE FROM context.building_floor_use f
+USING (SELECT DISTINCT mgm_bldrgst_pk FROM _stage_bfu) s
+WHERE f.mgm_bldrgst_pk = s.mgm_bldrgst_pk;
+INSERT INTO context.building_floor_use
+    (mgm_bldrgst_pk, pnu, lot_address, road_address, floor_division, floor_no, floor_no_label,
+     floor_area_m2, use_code, use_name, use_detail, use_group, structure, source_file_id)
+SELECT s.mgm_bldrgst_pk, s.pnu, s.lot_address, s.road_address, s.floor_division, s.floor_no,
+       s.floor_no_label, s.floor_area_m2, s.use_code, s.use_name, s.use_detail, s.use_group,
+       s.structure, s.source_file_id
+FROM _stage_bfu s
+WHERE EXISTS (SELECT 1 FROM context.building_register r WHERE r.mgm_bldrgst_pk = s.mgm_bldrgst_pk);
+"""
+    print("building_floor_use:", copy_into(sql, building_floor_use_rows()))
+
+
+def refresh_commercial_building_views() -> None:
     run_sql("REFRESH MATERIALIZED VIEW context.commercial_building_area_summary;")
     print("commercial_building_area_summary refreshed")
 
@@ -925,7 +1079,11 @@ def main() -> int:
         if args.phase in {"context", "plans", "all"}:
             load_plans()
         if args.phase in {"building", "all"}:
-            load_commercial_building()
+            load_building_register()          # Tier2 먼저 (link·floor_use가 FK 참조)
+            load_commercial_building()         # Tier1 (좌표 유일 출처)
+            load_commercial_building_link()
+            load_building_floor_use()
+            refresh_commercial_building_views()
         if args.phase in {"context", "all"}:
             load_news()
             load_news_manifest()

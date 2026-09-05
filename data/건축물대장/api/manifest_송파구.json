@@ -2,7 +2,8 @@
   "source": {
     "name": "국토교통부 건축HUB 건축물대장정보 서비스 (1613000/BldRgstHubService)",
     "endpoints": [
-      "getBrTitleInfo"
+      "getBrTitleInfo",
+      "getBrFlrOulnInfo"
     ],
     "note": "현행 등록 상태 — 건축인허가보다 커버리지 높음"
   },
@@ -17,8 +18,8 @@
   "counts": {
     "title": 23360,
     "commercial_titles": 5196,
-    "commercial_floors": 0,
-    "buildings_with_commercial_floor": 0,
+    "commercial_floors": 46290,
+    "buildings_with_commercial_floor": 8727,
     "expos_units": null
   },
   "tier1_link": {
@@ -36,7 +37,7 @@
     "07": "판매시설",
     "14": "업무시설"
   },
-  "budget": "bldrgst:getBrTitleInfo 일 2026-09-05: 5954/9000 (남은 3046) | 월 2026-09: 6143/279000 (남은 272857)",
+  "budget": "bldrgst:getBrTitleInfo 일 2026-09-05: 5954/9000 (남은 3046) | 월 2026-09: 6143/279000 (남은 272857) | bldrgst:getBrFlrOulnInfo 일 2026-09-05: 830/9000 (남은 8170) | 월 2026-09: 2079/279000 (남은 276921)",
   "limitations": [
     "표제부 주용도 기준 상업 필터 + 층별개요로 주상복합 저층상가 일부 포착",
     "대형 필지(아파트단지 등)는 bun-본번 집계라 PNU 정확매칭 안 될 수 있음",
