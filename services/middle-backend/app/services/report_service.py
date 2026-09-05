@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import decimal
 import uuid
+from collections import Counter
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -18,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.errors import conflict, forbidden, validation_error
 from app.models import Branch, OperationReport, ReportInputField, ReportInputItem, UserAccount
 from app.models.enums import ReportStatus
-from app.schemas import ReportCreateRequest
+from app.schemas import AMOUNT_MAX, ReportCreateRequest
 
 # net_sales 산식 (DB_SCHEMA 4-7 D1 확정).
 #   net_sales = 매출 3그룹 합계 − 매출 차감 항목 합계
@@ -54,7 +55,8 @@ def _validate_items(
             "정의되지 않은 입력 항목입니다", {"unknown_field_codes": unknown}
         )
 
-    duplicated = sorted({c for c in codes if codes.count(c) > 1})
+    # codes.count() 를 코드마다 부르면 O(n^2) 이다. 한 번만 순회한다.
+    duplicated = sorted({code for code, n in Counter(codes).items() if n > 1})
     if duplicated:
         raise validation_error(
             "같은 항목이 여러 번 들어왔습니다", {"duplicated_field_codes": duplicated}
@@ -79,6 +81,14 @@ def _net_sales(
             total += item.amount
         elif group == DEDUCTION_GROUP:
             total -= item.amount
+
+    # 개별 금액이 모두 범위 안이어도 합계는 넘칠 수 있다. net_sales 는 부호가 있어
+    # 차감이 매출보다 크면 음수가 된다. DB 에 닿기 전에 400 으로 돌려준다.
+    if not -AMOUNT_MAX <= total <= AMOUNT_MAX:
+        raise validation_error(
+            "매출 합계가 저장 가능한 범위를 벗어났습니다",
+            {"net_sales": str(total), "allowed_abs_max": str(AMOUNT_MAX)},
+        )
     return total
 
 

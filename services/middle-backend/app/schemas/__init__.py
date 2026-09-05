@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models.enums import (
     InputSource,
@@ -147,11 +147,21 @@ class InputFieldItem(BaseModel):
     display_order: int
 
 
+# report_input_item.amount 와 operation_report.net_sales 가 모두 NUMERIC(14,0) 이다.
+# DTO 에서 막지 않으면 DB 가 numeric overflow 를 내는데, 그건 중복월 IntegrityError 와
+# 달리 500 으로 샌다.
+AMOUNT_MAX = 10**14 - 1
+
+# 정의된 입력 항목이 35개다. 그보다 많은 배열은 반드시 중복이거나 미정의 코드라
+# 검증에 들어가기 전에 자른다. 상한이 없으면 대량 반복 요청이 검증 비용을 다 쓴다.
+MAX_REPORT_ITEMS = 50
+
+
 class ReportItemInput(BaseModel):
     """보고서 입력 항목 1건. 미입력 선택 항목은 배열에 넣지 않는다."""
 
     field_code: str = Field(min_length=1, max_length=40)
-    amount: int = Field(ge=0)
+    amount: int = Field(ge=0, le=AMOUNT_MAX)
 
 
 class ReportCreateRequest(BaseModel):
@@ -159,7 +169,22 @@ class ReportCreateRequest(BaseModel):
 
     report_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     input_source: InputSource = InputSource.MANUAL
-    items: list[ReportItemInput] = Field(min_length=1)
+    items: list[ReportItemInput] = Field(min_length=1, max_length=MAX_REPORT_ITEMS)
+
+    @field_validator("report_month")
+    @classmethod
+    def _representable_month(cls, value: str) -> str:
+        """정규식은 0000-01 도 통과시키지만 date(0, 1, 1) 은 ValueError 다.
+
+        형식(YYYY-MM)은 그대로 두고, 실제 날짜로 만들 수 있는지만 여기서 본다.
+        서비스 계층까지 흘러가면 500 이 된다.
+        """
+        year, month = value.split("-")
+        try:
+            date(int(year), int(month), 1)
+        except ValueError as exc:
+            raise ValueError("표현할 수 없는 연월입니다") from exc
+        return value
 
 
 class ReportCreateResponse(BaseModel):
