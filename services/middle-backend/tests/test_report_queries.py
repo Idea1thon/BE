@@ -407,3 +407,78 @@ async def test_mark_notification_read_unknown_is_404(client):
     headers = await _auth(client, HQ)
     res = await client.patch("/api/v1/notifications/999999/read", headers=headers)
     assert res.status_code == 404
+
+
+# ------------------------------------------------------------------ 입력 경계 (리뷰 P2)
+#
+# 경로 ID 와 offset 에 상한이 없으면 BIGINT 를 넘는 값이 asyncpg 파라미터 바인딩까지
+# 내려가 터지고, 공통 예외 처리가 그것을 404 가 아니라 500 으로 반환한다. 인증만 되면
+# 누구나 500 을 만들 수 있다는 뜻이라 DB 를 부르기 전에 400 으로 막는다.
+
+OVER_BIGINT = 2**63  # BIGINT 최댓값 + 1
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/api/v1/reports/{OVER_BIGINT}",
+        f"/api/v1/reports/{OVER_BIGINT}/status",
+        f"/api/v1/branches/{OVER_BIGINT}",
+        f"/api/v1/branches/{OVER_BIGINT}/reports",
+    ],
+)
+async def test_path_id_over_bigint_is_400_not_500(client, path):
+    headers = await _auth(client, HQ)
+    res = await client.get(path, headers=headers)
+    assert res.status_code == 400, res.text
+    assert res.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+async def test_notification_path_id_over_bigint_is_400(client):
+    headers = await _auth(client, HQ)
+    res = await client.patch(f"/api/v1/notifications/{OVER_BIGINT}/read", headers=headers)
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize("path", ["/api/v1/reports/0", "/api/v1/branches/0"])
+async def test_path_id_zero_is_400(client, path):
+    """PK 는 1부터다. 0 이나 음수는 조회할 필요가 없으므로 경계에서 거른다."""
+    headers = await _auth(client, HQ)
+    res = await client.get(path, headers=headers)
+    assert res.status_code == 400
+
+
+async def test_offset_over_limit_is_400(client):
+    headers = await _auth(client, HQ)
+    res = await client.get(f"/api/v1/branches?offset={OVER_BIGINT}", headers=headers)
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+async def test_branch_reports_offset_over_limit_is_400(client, fixture_branch):
+    headers = await _auth(client, HQ)
+    res = await client.get(
+        f"/api/v1/branches/{fixture_branch['branch_id']}/reports?offset={OVER_BIGINT}",
+        headers=headers,
+    )
+    assert res.status_code == 400
+
+
+async def test_valid_path_id_still_404s(client):
+    """상한을 걸었다고 정상 범위의 없는 ID 까지 400 이 되면 안 된다."""
+    headers = await _auth(client, HQ)
+    res = await client.get("/api/v1/reports/999999", headers=headers)
+    assert res.status_code == 404
+
+
+async def test_forged_cursor_with_huge_id_is_400(client):
+    """커서는 클라이언트가 손댈 수 있다. 경로 ID 와 같은 경계가 필요하다."""
+    import base64
+
+    headers = await _auth(client, HQ)
+    raw = f"2026-09-01T00:00:00+00:00|{OVER_BIGINT}".encode("utf-8")
+    forged = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    res = await client.get(f"/api/v1/notifications?cursor={forged}", headers=headers)
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "VALIDATION_ERROR"

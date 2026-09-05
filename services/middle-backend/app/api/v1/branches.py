@@ -20,7 +20,14 @@ from fastapi import APIRouter, Query
 from sqlalchemy import Select, case, or_, select, true
 from sqlalchemy.orm import joinedload
 
-from app.api.deps import CurrentUser, HqUser, SessionDep, authorize_branch
+from app.api.deps import (
+    CurrentUser,
+    HqUser,
+    OffsetQuery,
+    PathId,
+    SessionDep,
+    authorize_branch,
+)
 from app.errors import (
     FORBIDDEN_403,
     NOT_FOUND_404,
@@ -118,7 +125,7 @@ async def list_branches(
     q: str | None = Query(default=None, max_length=100, description="점포명·지역명 검색"),
     sort: BranchSort = Query(default=BranchSort.NET_SALES_DESC),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
-    offset: int = Query(default=0, ge=0),
+    offset: OffsetQuery = 0,
 ) -> BranchListResponse:
     """REQ-HQ-01~06. 본사 전용이며 자사 소속만 본다 (REQ-AUTH-06)."""
     latest = _latest_report_lateral()
@@ -186,7 +193,7 @@ async def list_branches(
     responses={**UNAUTHORIZED_401, **FORBIDDEN_403, **NOT_FOUND_404},
 )
 async def get_branch(
-    branch_id: int, current_user: CurrentUser, session: SessionDep
+    branch_id: PathId, current_user: CurrentUser, session: SessionDep
 ) -> BranchDetailResponse:
     row = (
         await session.execute(
@@ -224,12 +231,12 @@ async def get_branch(
     responses={**VALIDATION_400, **UNAUTHORIZED_401, **FORBIDDEN_403, **NOT_FOUND_404},
 )
 async def list_branch_reports(
-    branch_id: int,
+    branch_id: PathId,
     current_user: CurrentUser,
     session: SessionDep,
     sort: ReportSort = Query(default=ReportSort.MONTH_DESC),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
-    offset: int = Query(default=0, ge=0),
+    offset: OffsetQuery = 0,
 ) -> ReportListResponse:
     """API_SPEC 4-4. REQ-HQ-11~13 / REQ-OW-01, 02.
 
