@@ -1,0 +1,46 @@
+{
+  "source": {
+    "name": "국토교통부 건축HUB 건축물대장정보 서비스 (1613000/BldRgstHubService)",
+    "endpoints": [
+      "getBrTitleInfo"
+    ],
+    "note": "현행 등록 상태 — 건축인허가보다 커버리지 높음"
+  },
+  "generated_at": "2026-09-05",
+  "scope": {
+    "sigungu": "서초구",
+    "bjdong_count": 10,
+    "failed_dongs": [],
+    "budget_exhausted": false,
+    "complete": true
+  },
+  "counts": {
+    "title": 16641,
+    "commercial_titles": 5869,
+    "commercial_floors": 0,
+    "buildings_with_commercial_floor": 0,
+    "expos_units": null
+  },
+  "tier1_link": {
+    "tier1_commercial_pnu": 5051,
+    "matched_pnu": 4724,
+    "by_jibun": 4717,
+    "by_bonbun": 7,
+    "multi_candidate_disambiguated": 64,
+    "multi_candidate_unresolved": 11,
+    "match_rate": 0.935
+  },
+  "commercial_filter": {
+    "03": "근린생활1",
+    "04": "근린생활2",
+    "07": "판매시설",
+    "14": "업무시설"
+  },
+  "budget": "bldrgst:getBrTitleInfo 일 2026-09-05: 5954/9000 (남은 3046) | 월 2026-09: 6143/279000 (남은 272857)",
+  "limitations": [
+    "표제부 주용도 기준 상업 필터 + 층별개요로 주상복합 저층상가 일부 포착",
+    "대형 필지(아파트단지 등)는 bun-본번 집계라 PNU 정확매칭 안 될 수 있음",
+    "한 지번에 건축물대장 여러 개인 경우(75건) 상업 주용도를 우선 채택(정제 64건). 상업 후보가 전혀 없는 11건은 다중후보_미해결=True로 표시 — 그 지번의 상업 속성은 대장으로 확인 불가",
+    "임대료·보증금·권리금·공실·매물 여부는 없음 — 이 데이터로 생성 불가"
+  ]
+}

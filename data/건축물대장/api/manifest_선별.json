@@ -1,0 +1,11 @@
+{
+  "method": "targeted (필지 단위, sigunguCd+bjdongCd+bun+ji)",
+  "generated_at": "2026-09-05",
+  "candidates_total": 7778,
+  "candidates_processed": 7566,
+  "candidates_failed": 0,
+  "budget_exhausted": true,
+  "commercial_floor_rows_found": 4509,
+  "buildings_confirmed_commercial": 1660,
+  "budget": "bldrgst:getBrFlrOulnInfo 일 2026-09-05: 9000/9000 (남은 0) | 월 2026-09: 10249/279000 (남은 268751)"
+}

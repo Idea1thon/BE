@@ -1,0 +1,39 @@
+{
+  "rone_area_count": 72,
+  "mapping_row_count": 84,
+  "mapped_area_count": 71,
+  "unresolved_area_count": 1,
+  "matched_high_confidence_area_count": 53,
+  "join_eligible_area_count": 52,
+  "review_area_count": 18,
+  "unique_trdar_target_count": 82,
+  "target_reuse_count": 1,
+  "unresolved_areas": [
+    "테헤란로"
+  ],
+  "review_areas": [
+    "강남대로",
+    "낙성대",
+    "도산대로",
+    "독산/시흥",
+    "동교/연남",
+    "동대문",
+    "목동",
+    "숙명여대",
+    "쌍문역",
+    "압구정",
+    "양재말죽거리",
+    "용산역",
+    "을지로",
+    "이태원",
+    "잠실/송파",
+    "장안동",
+    "종로",
+    "학동/강남구청역"
+  ],
+  "reused_trdar_codes": [
+    "3120179"
+  ],
+  "join_rule": "matched + primary + target_reuse_count=1만 자동 조인 후보. review·component·재사용·unresolved는 사람 검토/보류.",
+  "grain_warning": "R-ONE 조사권역의 값은 서울시 상권분석 상권 실측값이 아니며, crosswalk는 proxy 귀속을 위한 연결 근거다."
+}

@@ -1,0 +1,45 @@
+{
+  "generated_by": "scripts/build_commercial_cost_layer.py",
+  "sources": {
+    "임대료·지수": "data/임대료/R-ONE_임대동향_분기.csv",
+    "공실률": "data/임대료/R-ONE_공실률_분기.csv",
+    "crosswalk": "output/crosswalks/crosswalk_rone_trdar.csv"
+  },
+  "join_rule": "crosswalk join_eligible=yes만 사용 (52개 R-ONE 상권 → TRDAR_CD)",
+  "row_count": 1711,
+  "matched_trdar_count": 52,
+  "매칭상권_실측임대료_보유행": 352,
+  "매칭상권_공실률_보유행": 968,
+  "상가유형": [
+    "소규모상가",
+    "중대형상가",
+    "집합상가",
+    "통합상가"
+  ],
+  "quarter_range": [
+    "20241",
+    "20262"
+  ],
+  "unmatched_r_one_상권_count": 20,
+  "unmatched_r_one_상권_examples": [
+    "강남대로",
+    "낙성대",
+    "도산대로",
+    "독산/시흥",
+    "동교/연남",
+    "동대문",
+    "목동",
+    "숙명여대",
+    "쌍문역",
+    "압구정"
+  ],
+  "scoring_use": "금지 — 비용 부담 근거 차원(표시용)에만 사용. entry_health_v1·후보 정렬 입력 아님",
+  "limitations": [
+    "분위는 매칭된 상권 집단(52개, 서울 전체 1,650개 상권의 일부)만의 내부 분위 — 서울 전체 대표 분위 아님. 표본 밖 상권은 비용 근거 자체가 없음(missing_features 표시).",
+    "(상가유형×분기) 그룹 표본이 10개 미만이면 분위를 계산하지 않고 임대료_표본부족·공실률_표본부족=true로 표시한다(metric-contract.md 근거 부족 원칙).",
+    "R-ONE 상권 ≠ 서울시 상권분석 상권. crosswalk는 1차 명칭 proxy(grain_is_proxy=true).",
+    "임대료_천원㎡(실측값)는 소규모상가만 존재. 중대형·집합상가는 임대가격지수(상대지수)뿐.",
+    "공실률은 소규모·중대형·집합상가 3종. 오피스·통합상가는 없음.",
+    "분기 갱신 주기: R-ONE 분기 공표. 최신 분기는 실행 시점에 따라 서울시 상권분석 분기(예: 20261)보다 늦게 갱신될 수 있음."
+  ]
+}
