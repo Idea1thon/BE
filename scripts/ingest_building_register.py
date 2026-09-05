@@ -21,6 +21,13 @@
       법정동당 최대 22만+건이라 일일 무료 한도(기능당 10,000회)로 서울 전체가
       하루에 안 끝난다 — 같은 명령을 재실행하면 완료된 (자치구,법정동)은 캐시로
       건너뛰고 이어간다. --skip-floors 로 표제부(주소·주차·승강기)만 먼저 전체 수집 가능.
+  .venv/bin/python3 scripts/ingest_building_register.py --targeted [--limit N]
+      전량 대신 **필지 단위 선별 호출**. 서울 전체 표제부 수집(--all --skip-floors) 이후,
+      Tier1(GIS) 상업건물 중 건축물대장 표제부가 상업임을 확인해주지 못한 지번만
+      getBrFlrOulnInfo를 sigunguCd+bjdongCd+bun+ji로 필지 단위로 좁혀 호출한다
+      (법정동 전체 호출보다 수십 배 적은 콜 수). 층별용도가 이미 전량 수집된 법정동
+      (예: 송파구)은 자동으로 제외한다. 산출: 층별용도_선별.csv (기존 층별용도_*.csv와
+      같은 스키마라 DB 로더가 그대로 인식).
 """
 from __future__ import annotations
 import csv
@@ -329,7 +336,125 @@ def run_gu(gu: str, ops: list[str], with_units: bool, limit: int | None = None) 
     return 1 if failed_dongs else 0
 
 
+def _use_group_by_pk() -> dict[str, str]:
+    """표제부_*.csv 전체에서 mgmBldrgstPk -> 용도군('' 이면 비상업)."""
+    m: dict[str, str] = {}
+    for f in sorted(OUT_DIR.glob("표제부_*.csv")):
+        with f.open(encoding="utf-8-sig") as fh:
+            for row in csv.DictReader(fh):
+                m[row["mgmBldrgstPk"]] = row["용도군"]
+    return m
+
+
+def _fully_covered_dong_codes() -> set[str]:
+    """이미 층별개요를 법정동 전체 수집한 자치구의 법정동코드 — 선별 대상에서 제외."""
+    covered = set()
+    for f in sorted(OUT_DIR.glob("층별용도_*.csv")):
+        gu = f.stem.replace("층별용도_", "")
+        if gu == "선별":
+            continue
+        with f.open(encoding="utf-8-sig") as fh:
+            if sum(1 for _ in fh) > 1:  # 헤더 외 데이터 있음 = 그 구는 전량 수집됨
+                covered.update(c for c, _, _, _ in dong_codes_for(gu))
+    return covered
+
+
+def targeted_candidates() -> list[tuple[str, str, str, str, str]]:
+    """(PNU, sigunguCd, bjdongCd, bun, ji) — Tier1 상업건물 중 건축물대장으로 상업 확인 안 된 지번.
+    이미 층별개요를 전량 수집한 자치구(예: 송파구)는 제외한다."""
+    use_group = _use_group_by_pk()
+    confirmed_pnu: set[str] = set()
+    for f in sorted(OUT_DIR.glob("건물링크_*.csv")):
+        with f.open(encoding="utf-8-sig") as fh:
+            for row in csv.DictReader(fh):
+                if use_group.get(row["mgmBldrgstPk"]):
+                    confirmed_pnu.add(row["PNU"])
+
+    covered_dongs = _fully_covered_dong_codes()
+    seen: dict[str, tuple[str, str, str, str, str]] = {}
+    with TIER1_CSV.open(encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            pnu = row["PNU"]
+            if not pnu or pnu in confirmed_pnu or pnu in seen:
+                continue
+            if row["법정동코드"] in covered_dongs:
+                continue
+            if len(pnu) != 19:
+                continue
+            sg, bj, bun, ji = pnu[0:5], pnu[5:10], pnu[11:15], pnu[15:19]
+            seen[pnu] = (pnu, sg, bj, bun, ji)
+    return list(seen.values())
+
+
+def run_targeted(limit: int | None = None) -> int:
+    targets = targeted_candidates()
+    if limit:
+        targets = targets[:limit]
+    print(f"선별 대상 지번: {len(targets)}개  ({budget_status(SERVICE, ['getBrFlrOulnInfo'])})", flush=True)
+
+    floors: list[dict] = []
+    failed_pnus: list[str] = []
+    budget_exhausted = False
+    for idx, (pnu, sg, bj, bun, ji) in enumerate(targets, 1):
+        try:
+            rows = fetch_all(SERVICE, "getBrFlrOulnInfo", sigungu_cd=sg, bjdong_cd=bj,
+                             extra={"bun": bun, "ji": ji})
+        except SystemExit as exc:
+            print(f"  ⏸ 일일 예산 도달 ({idx-1}/{len(targets)} 처리) — {exc}", flush=True)
+            budget_exhausted = True
+            break
+        except RuntimeError as exc:
+            failed_pnus.append(pnu)
+            continue
+        for r in rows:
+            grp = cgroup(r.get("mainPurpsCd"))
+            if not grp:
+                continue
+            floors.append({
+                "mgmBldrgstPk": s(r.get("mgmBldrgstPk")), "PNU": pnu_of(r) or pnu,
+                "지번주소": s(r.get("platPlc")), "도로명주소": s(r.get("newPlatPlc")),
+                "층구분": s(r.get("flrGbCdNm")), "층번호": i(r.get("flrNo")),
+                "층번호명": s(r.get("flrNoNm")), "층면적_㎡": n(r.get("area")),
+                "용도코드": s(r.get("mainPurpsCd")), "용도": s(r.get("mainPurpsCdNm")),
+                "상세용도": s(r.get("etcPurps")), "용도군": grp, "구조": s(r.get("strctCdNm")),
+            })
+        if idx % 500 == 0:
+            print(f"  {idx}/{len(targets)} 처리, 상업층 발견 {len(floors)}건, 실패 {len(failed_pnus)}건", flush=True)
+
+    n_flr = write("층별용도_선별.csv", floors, [
+        "mgmBldrgstPk", "PNU", "지번주소", "도로명주소", "층구분", "층번호", "층번호명", "층면적_㎡",
+        "용도코드", "용도", "상세용도", "용도군", "구조"])
+
+    manifest = {
+        "method": "targeted (필지 단위, sigunguCd+bjdongCd+bun+ji)",
+        "generated_at": datetime.date.today().isoformat(),
+        "candidates_total": len(targets), "candidates_processed": idx if targets else 0,
+        "candidates_failed": len(failed_pnus), "budget_exhausted": budget_exhausted,
+        "commercial_floor_rows_found": n_flr,
+        "buildings_confirmed_commercial": len({r["mgmBldrgstPk"] for r in floors}),
+        "budget": budget_status(SERVICE, ["getBrFlrOulnInfo"]),
+    }
+    (OUT_DIR / "manifest_선별.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print(f"\n=== 선별 방식 층별개요 ===")
+    print(f"대상 {len(targets)} · 처리 {manifest['candidates_processed']} · 실패 {len(failed_pnus)} "
+          f"· 상업층 발견 {n_flr}행 ({manifest['buildings_confirmed_commercial']}개 건물 상업 확인)")
+    print(f"예산: {budget_status(SERVICE, ['getBrFlrOulnInfo'])}")
+    if budget_exhausted:
+        print("⏸ 일일 예산 도달 — 같은 명령 재실행하면 캐시로 이어감(단, 결과 파일은 이번 실행분만 반영되므로 "
+              "재실행 후 다시 합쳐야 함 — manifest_선별.json.candidates_processed 확인)")
+        return 2
+    if failed_pnus:
+        print(f"⚠ 실패 {len(failed_pnus)}건(재시도 소진) — 재실행 시 캐시 없는 것만 재시도됨")
+        return 1
+    return 0
+
+
 def main() -> int:
+    if "--targeted" in sys.argv:
+        limit = i(arg("--limit")) if "--limit" in sys.argv else None
+        return run_targeted(limit)
+
     with_units = "--with-units" in sys.argv
     skip_floors = "--skip-floors" in sys.argv
     limit = i(arg("--limit-dong")) if "--limit-dong" in sys.argv else None

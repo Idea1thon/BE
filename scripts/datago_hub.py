@@ -89,9 +89,15 @@ def _items(payload: dict) -> tuple[list[dict], int]:
 
 def fetch_all(service: str, op: str, *, sigungu_cd: str, bjdong_cd: str,
               extra: dict | None = None, use_cache: bool = True) -> list[dict]:
-    """한 법정동의 op 전체 레코드를 페이지 순회로 수집. 결과를 _cache/ 에 저장·재사용."""
+    """법정동(+extra로 필지까지 좁힌) 전체 레코드를 페이지 순회로 수집. 결과를 _cache/ 에 저장·재사용.
+
+    extra(예: bun/ji)가 있으면 캐시 파일명에도 반영해 같은 법정동 내 다른 필지 호출이
+    서로 캐시를 덮어쓰지 않게 한다."""
     cache_dir, _ = _ns(service)
-    cache = cache_dir / op / f"{sigungu_cd}_{bjdong_cd}.json"
+    key = f"{sigungu_cd}_{bjdong_cd}"
+    if extra:
+        key += "_" + "_".join(f"{k}-{v}" for k, v in sorted(extra.items()))
+    cache = cache_dir / op / f"{key}.json"
     if use_cache and cache.is_file():
         return json.loads(cache.read_text(encoding="utf-8"))["items"]
 
