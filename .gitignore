@@ -62,6 +62,11 @@ data/건축물대장/상가건물_서울.csv
 data/건축인허가/_cache/
 data/건축물대장/_cache/
 
+# 건축HUB Tier2 자치구별 원시 CSV 213MB (표제부·건물링크·층별용도) — DB(context.building_register 등)에
+# 전량 적재 완료·검증됨(2026-09-05), 저장소엔 불필요. manifest_*.json(가벼운 커버리지 요약)만 커밋 유지.
+# 재생성: .venv/bin/python3 scripts/ingest_building_register.py --all
+data/건축물대장/api/*.csv
+
 
 # macOS
 .DS_Store
