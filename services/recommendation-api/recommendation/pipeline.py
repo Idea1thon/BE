@@ -1744,7 +1744,7 @@ def build_candidate(
         "overlapping_units": {"commercial_area": [host.code] if host else [], "hinterland": [rec.code for rec in hinterland], "admin_dong": [admin_code] if admin_code else [], "sigungu": target_sigungu},
         "nearby_anchors": nearby_anchors, "address_point": None, "building_address": building_address,
     }
-    confidence = "low" if sales_per_store is None or host is None or is_building else "medium" if proxy_scope or not rent_specific else "high"
+    confidence = "low" if sales_per_store is None or host is None else "medium" if proxy_scope or not rent_specific else "high"
     confidence_reasons = ["지점 반경 지표는 직접 계산"]
     if is_building:
         confidence_reasons.append("건물 centroid는 실제 임대 가능 호실·점포 위치가 아니며 주용도 기반 seed")

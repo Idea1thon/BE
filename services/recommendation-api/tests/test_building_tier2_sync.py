@@ -15,8 +15,8 @@ if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
 from recommendation.pipeline import (  # noqa: E402
-    BUILDING_SEED_CAP, _building_seed, _cap_building_seeds,
-    _enrich_tier1_rows_with_tier2, pg_bool,
+    BUILDING_SEED_CAP, DbSource, _building_seed, _cap_building_seeds,
+    _enrich_tier1_rows_with_tier2, load_building_seeds, pg_bool,
 )
 
 
@@ -51,6 +51,49 @@ class CapBuildingSeedsTests(unittest.TestCase):
 
     def test_default_cap_constant_unchanged(self):
         self.assertEqual(BUILDING_SEED_CAP, 40)
+
+
+class DbSourceBuildingRowsBooleanTests(unittest.TestCase):
+    """DbSource._building_rows() — 실제 --source db(기본) 경로의 postgres boolean 파싱.
+
+    이전 회귀 테스트는 pg_bool()과 파일 경로(_enrich_tier1_rows_with_tier2)만
+    커버했고, 이 P1 수정의 실제 배포 경로인 DbSource._building_rows()는
+    검증하지 않았다(2026-09-05 코드 검수 지적) — 여기서 채운다.
+    """
+
+    def _make_source(self, rows: list[dict[str, str]]) -> DbSource:
+        src = object.__new__(DbSource)  # __init__(DB ping)을 건너뛴다
+        src._query = lambda sql: rows  # noqa: ARG005
+        return src
+
+    def _row(self, pk: str, x: str, y: str, confirmed_flag: str) -> dict[str, str]:
+        return {
+            "건물관리번호": pk, "PNU": f"PNU-{pk}", "시군구코드": "11710", "시군구명": "송파구",
+            "법정동코드": "1171000000", "대지위치": "서울특별시 송파구 잠실동", "지번": "1",
+            "지번구분": "일반", "용도코드": "03000", "용도명": "제1종근린생활시설",
+            "용도군": "근린생활1", "지상층수": "3", "지하층수": "0",
+            "건축면적_㎡": "100", "연면적_㎡": "300", "건물연식_년": "10",
+            "상권_결합": "내부", "상권_코드": "3120225",
+            "행정동_코드": "11710650", "행정동_명": "잠실본동",
+            "x_5181": x, "y_5181": y,
+            "도로명주소": "", "건물명": "",
+            "has_confirmed_commercial_floor": confirmed_flag,  # postgres CSV 't'/'f'
+        }
+
+    def test_unconfirmed_postgres_f_is_not_treated_as_confirmed(self):
+        src = self._make_source([self._row("PK1", "10", "10", "f")])
+        rows = src._building_rows()
+        self.assertEqual(rows[0]["_has_confirmed_commercial_floor"], False)
+
+        from shapely.geometry import box
+        seeds = load_building_seeds(box(0, 0, 20, 20), rows, "test")
+        self.assertFalse(seeds[0]["has_confirmed_commercial_floor"],
+                          "postgres 'f' 문자열이 파이썬 bool()로 새서 True가 되면 안 된다")
+
+    def test_confirmed_postgres_t_is_treated_as_confirmed(self):
+        src = self._make_source([self._row("PK2", "10", "10", "t")])
+        rows = src._building_rows()
+        self.assertTrue(rows[0]["_has_confirmed_commercial_floor"])
 
 
 class AmbiguousPnuEnrichmentTests(unittest.TestCase):
