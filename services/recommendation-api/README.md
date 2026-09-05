@@ -53,3 +53,19 @@ cd services/recommendation-api
 `추천` 등급으로 승격되지 않는다. `RECOMMENDATION_SEED_MODE=anchors`는 기존
 역·아파트·POI·생성점 seed로 되돌리고, `hybrid`는 두 모집단을 함께 사용한다.
 이 설정은 배포 정책이므로 중간 백엔드의 HTTP 요청/응답 계약에는 노출하지 않는다.
+
+## API 회귀 테스트
+
+`services/recommendation-api` 디렉터리에서 개발 의존성을 설치한 뒤 실행한다.
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m unittest discover -s tests -v
+```
+
+전체 테스트 중 공간 카탈로그 검증에는 외부 공간 데이터가 필요하다.
+인증·타임아웃·결과 조회 회귀 테스트는 DB나 LLM 없이 실행할 수 있다.
+
+```bash
+python -m unittest discover -s tests -p test_run_polling.py -v
+```

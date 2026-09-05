@@ -127,9 +127,9 @@ RECOMMENDATION_MAX_CONCURRENT=4
 RECOMMENDATION_CAPACITY_RETRY_AFTER_SECONDS=10
 ```
 
-`/internal/recommendations`와 호환 alias, `/api/industries`, `/api/regions`는
+`/internal/recommendations`와 호환 alias, 실행 결과 조회, `/api/industries`, `/api/regions`는
 내부 백엔드 전용이다. 실제 HTTP 호출에서는 `INTERNAL_API_TOKEN`을 서버에
-설정하고 같은 값을 `X-Internal-Token` 헤더로 전달해야 한다. 네 엔드포인트는
+설정하고 같은 값을 `X-Internal-Token` 헤더로 전달해야 한다. 다섯 엔드포인트는
 공통 FastAPI dependency에서 토큰을 검증하므로, 호출 컨텍스트가 바뀌거나
 라우트 함수가 직접 호출되어도 실제 HTTP 경로의 인증이 생략되지 않는다.
 토큰이 없거나 일치하지 않으면 파이프라인을 실행하지 않는다. `healthz`와
@@ -150,10 +150,30 @@ RECOMMENDATION_CAPACITY_RETRY_AFTER_SECONDS=10
 
 - 완료 전: HTTP 202와 `status=running`
 - 완료 후: HTTP 200과 원래 추천 응답과 동일한 `RecommendationApiResponse`
+- 실행 실패: HTTP 422/503/500과 저장된 `detail` 오류. 해당 실행은 종료됐으므로 폴링을 중단한다.
 - 실행을 찾을 수 없음: HTTP 404
+
+조회에도 `X-Internal-Token`이 필요하다. 504의 `detail.status_url`을 **10초 간격**으로
+GET 조회하고, 202이면 같은 URL을 다시 조회한다. 504에는 `Retry-After`를 보내지
+않으며 동일 요청을 POST로 다시 실행하지 않는다. 429의 `Retry-After`는 접수되지
+않은 POST의 재시도 간격으로, 진행 중 실행의 조회 간격과는 별개다.
 
 완료 응답은 `api-response.json`에서 읽고 동일한 응답 모델로 다시 검증한다.
 실행 상태와 API 응답 파일은 원자적으로 기록해 폴링 중 부분 파일을 읽지 않도록 한다.
+완료 결과가 저장돼 있으면 상태 기록이 `running`으로 남아도 완료 결과를 반환한다.
+스레드풀에서 실행을 기다리는 작업도 HTTP 타임아웃 이후 유지하며, 작업이 끝날 때
+동시성 슬롯을 반환한다.
+
+180초는 HTTP 응답 대기 제한의 기본 설정이며 실측 실행 시간이나 워커 종료 기한이
+아니다. auto/offline별 실제 실행 시간은 DB·LLM 환경에서 별도 측정해야 한다.
+중간 백엔드는 사용자 대기 상한을 별도로 정해야 하며, 이 API는 실행 취소를 지원하지
+않는다. 최초 POST는 완료 또는 504까지 기다리므로 즉시 run_id를 반환하는 작업
+접수 API는 아니다.
+
+실행 파일은 `RECOMMENDATION_API_OUT_ROOT`에 저장된다. 여러 인스턴스로 분산하면
+같은 저장소를 공유하거나 같은 인스턴스로 조회를 라우팅해야 한다. 완료 결과는 파일이
+보존되는 동안 재시작 후에도 조회할 수 있지만, 재시작으로 중단된 작업은 자동 재개되거나
+실패로 전환되지 않아 `running`으로 남을 수 있다.
 
 `GET /healthz`는 프로세스 생존만 확인하고, `GET /readyz` 성공 응답은
 `{"ok": true}`만 반환한다. DB readiness probe는 동기 `psql` 호출을 threadpool에서
