@@ -17,6 +17,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Numeric,
     SmallInteger,
     String,
@@ -86,6 +87,12 @@ class Franchise(Base):
 
 class UserAccount(Base):
     __tablename__ = "user_account"
+    __table_args__ = (
+        # branch(owner_user_id, franchise_id) composite FK 의 참조 대상.
+        # 0003 리비전이 DB 에 같은 제약을 만든다. 여기서 빼면 autogenerate 가
+        # 다음 revision 에서 이 제약과 FK 를 삭제 대상으로 제안한다.
+        UniqueConstraint("id", "franchise_id", name="uq_user_id_franchise"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     franchise_id: Mapped[int] = mapped_column(
@@ -101,12 +108,25 @@ class UserAccount(Base):
 
     franchise: Mapped[Franchise] = relationship(lazy="joined")
     branch: Mapped["Branch | None"] = relationship(
-        back_populates="owner", lazy="joined", uselist=False
+        back_populates="owner",
+        lazy="joined",
+        uselist=False,
+        foreign_keys="Branch.owner_user_id",
     )
 
 
 class Branch(Base):
     __tablename__ = "branch"
+    __table_args__ = (
+        # 점주와 점포가 같은 프랜차이즈에 속함을 DB 가 보장한다 (이슈 #7).
+        # owner_user_id 단독 FK 와 함께 두 경로가 생기므로 아래 relationship 에
+        # foreign_keys 를 명시한다.
+        ForeignKeyConstraint(
+            ["owner_user_id", "franchise_id"],
+            ["user_account.id", "user_account.franchise_id"],
+            name="fk_branch_owner_same_franchise",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     franchise_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("franchise.id"))
@@ -122,7 +142,9 @@ class Branch(Base):
     )
     created_at: Mapped[dt.datetime] = mapped_column(_TS, server_default=func.now())
 
-    owner: Mapped[UserAccount] = relationship(back_populates="branch")
+    owner: Mapped[UserAccount] = relationship(
+        back_populates="branch", foreign_keys=[owner_user_id]
+    )
 
 
 # ---------------------------------------------------------------- 보고서
@@ -140,6 +162,11 @@ class OperationReport(Base):
     __tablename__ = "operation_report"
     __table_args__ = (
         UniqueConstraint("branch_id", "report_month", name="uq_report_branch_month"),
+        # unique 만으로는 같은 점포에 2026-08-01 과 2026-08-15 를 모두 넣을 수 있어
+        # "월 1건"이 보장되지 않는다. 0003 리비전이 DB에 같은 제약을 만든다.
+        CheckConstraint(
+            "EXTRACT(DAY FROM report_month) = 1", name="ck_report_month_first_day"
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
