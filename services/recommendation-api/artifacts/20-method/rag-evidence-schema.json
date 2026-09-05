@@ -72,7 +72,8 @@
             "floors_above": {"type": ["integer", "null"]},
             "floors_below": {"type": ["integer", "null"]},
             "building_age_years": {"type": ["integer", "null"]},
-            "area_join_type": {"enum": ["내부", "근접", "미결합", null]}
+            "area_join_type": {"enum": ["내부", "근접", "미결합", null]},
+            "has_confirmed_commercial_floor": {"type": ["boolean", "null"], "description": "Tier2 층별용도(getBrFlrOulnInfo)로 상업 공간이 실제 확인됐는지. false/null이면 표제부 주용도·연면적만으로 선정됨"}
           },
           "additionalProperties": false
         },
@@ -135,6 +136,18 @@
             "lat": {"type": "number"},
             "lon": {"type": "number"},
             "source_type": {"enum": ["listing", "reverse_geocode"]}
+          },
+          "additionalProperties": false
+        },
+        "building_address": {
+          "type": ["object", "null"],
+          "description": "type=상가건물일 때만. 건물 전체의 도로명/지번주소이지 임대 가능 특정 호실 주소가 아니다 — address_point(매물주소 전용)와 절대 혼동하지 말 것. precision은 이 필드가 있어도 '지점' 그대로다.",
+          "required": ["value", "source"],
+          "properties": {
+            "value": {"type": "string"},
+            "source": {"enum": ["도로명주소(Tier2)", "지번주소(Tier1)"]},
+            "building_name": {"type": ["string", "null"]},
+            "limitation": {"type": "string"}
           },
           "additionalProperties": false
         }
