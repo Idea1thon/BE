@@ -1,21 +1,45 @@
-"""운영보고서. API_SPEC 4-1(입력 항목) · 4-2(제출).
+"""운영보고서. API_SPEC 4-1(입력 항목) · 4-2(제출) · 4-5(상세) · 4-6(분석 상태).
 
-목록(4-4)·상세(4-5)는 이후 Phase다.
+점포별 목록(4-4)은 경로가 `/branches/{id}/reports` 라 branches.py 에 있다.
+
+4-5 의 `inputs[]`(35개 금액 원본)를 HQ 에게도 그대로 반환한다. REQ-HQ-15 는 본사가
+입력 데이터를 본다고 하고 REQ-DATA-10 은 재무 정보를 민감 데이터로 규정해 충돌하는데,
+API_SPEC 4-5 가 REQ-HQ-15 를 따르기로 한 상태다. 뒤집히면 이 주석과 함께 고친다.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, status
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import OwnerUser, SessionDep
-from app.errors import CONFLICT_409, FORBIDDEN_403, UNAUTHORIZED_401, VALIDATION_400
-from app.models import ReportInputField
+from app.api.deps import CurrentUser, OwnerUser, SessionDep, authorize_branch
+from app.errors import (
+    CONFLICT_409,
+    FORBIDDEN_403,
+    NOT_FOUND_404,
+    UNAUTHORIZED_401,
+    VALIDATION_400,
+    not_found,
+)
+from app.models import (
+    Branch,
+    OperationReport,
+    ReportAnalysis,
+    ReportInputField,
+    ReportInputItem,
+    UserAccount,
+)
 from app.schemas import (
+    AnalysisDetail,
     InputFieldItem,
     InputFieldListResponse,
+    ReportBranchBrief,
     ReportCreateRequest,
     ReportCreateResponse,
+    ReportDetailResponse,
+    ReportInputItemOut,
+    ReportStatusResponse,
 )
 from app.services import report_service
 
@@ -60,4 +84,108 @@ async def create_report(
         report_id=report.id,
         status=report.status,
         analysis_request_id=report.analysis_request_id,
+    )
+
+
+async def _load_report_for_read(
+    report_id: int, current_user: UserAccount, session: AsyncSession
+) -> tuple[OperationReport, Branch]:
+    """보고서와 소속 점포를 함께 읽고 권한을 확인한다.
+
+    보고서 자체에는 프랜차이즈가 없다. 권한은 언제나 점포를 거쳐 판정한다.
+    """
+    row = (
+        await session.execute(
+            select(OperationReport, Branch)
+            .join(Branch, Branch.id == OperationReport.branch_id)
+            .where(OperationReport.id == report_id)
+        )
+    ).unique().first()
+    if row is None:
+        raise not_found("보고서를 찾을 수 없습니다")
+    report, branch = row
+    authorize_branch(current_user, branch.franchise_id, branch.owner_user_id)
+    return report, branch
+
+
+@router.get(
+    "/{report_id}",
+    response_model=ReportDetailResponse,
+    responses={**UNAUTHORIZED_401, **FORBIDDEN_403, **NOT_FOUND_404},
+)
+async def get_report(
+    report_id: int, current_user: CurrentUser, session: SessionDep
+) -> ReportDetailResponse:
+    """API_SPEC 4-5. REQ-HQ-14, 15 / REQ-OW-05 / REQ-RPT-01~06."""
+    report, branch = await _load_report_for_read(report_id, current_user, session)
+
+    input_rows = (
+        await session.execute(
+            select(ReportInputItem, ReportInputField)
+            .join(ReportInputField, ReportInputField.code == ReportInputItem.field_code)
+            .where(ReportInputItem.report_id == report_id)
+            .order_by(ReportInputField.display_order)
+        )
+    ).all()
+
+    analysis = (
+        await session.execute(
+            select(ReportAnalysis).where(ReportAnalysis.report_id == report_id)
+        )
+    ).scalar_one_or_none()
+
+    return ReportDetailResponse(
+        report_id=report.id,
+        report_month=report.report_month.strftime("%Y-%m"),
+        created_at=report.created_at,
+        status=report.status,
+        input_source=report.input_source,
+        net_sales=int(report.net_sales) if report.net_sales is not None else None,
+        branch=ReportBranchBrief(branch_id=branch.id, name=branch.name),
+        inputs=[
+            ReportInputItemOut(
+                field_code=item.field_code,
+                name=field.name,
+                group_name=field.group_name,
+                amount=int(item.amount),
+            )
+            for item, field in input_rows
+        ],
+        analysis=(
+            None
+            if analysis is None
+            else AnalysisDetail(
+                risk_score=analysis.risk_score,
+                risk_level=analysis.risk_level,
+                # JSONB 를 그대로 싣는다. Backend 는 분석 서비스 DTO 를 변환하지
+                # 않는다 (INTERFACE_SPEC 4-2).
+                factors=analysis.factors,
+                risk_periods=analysis.risk_periods,
+                recommendations=analysis.recommendations,
+                rule_version=analysis.rule_version,
+                calculated_at=analysis.calculated_at,
+            )
+        ),
+        analysis_error=report.analysis_error,
+    )
+
+
+@router.get(
+    "/{report_id}/status",
+    response_model=ReportStatusResponse,
+    responses={**UNAUTHORIZED_401, **FORBIDDEN_403, **NOT_FOUND_404},
+)
+async def get_report_status(
+    report_id: int, current_user: CurrentUser, session: SessionDep
+) -> ReportStatusResponse:
+    """API_SPEC 4-6. FE 가 COMPLETED 까지 폴링한다 (REQ-OW-16, 17).
+
+    상세(4-5)와 같은 정보의 부분집합이지만 따로 둔다. 폴링은 주기적으로 반복되는
+    호출이라 35개 입력 항목과 분석 JSONB 를 매번 실어 보낼 이유가 없다.
+    """
+    report, _ = await _load_report_for_read(report_id, current_user, session)
+    return ReportStatusResponse(
+        report_id=report.id,
+        status=report.status,
+        analysis_error=report.analysis_error,
     )

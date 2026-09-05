@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -233,3 +234,128 @@ class FinancialProductItem(BaseModel):
 class FinancialProductListResponse(BaseModel):
     risk_level: RiskLevel | None = None
     items: list[FinancialProductItem]
+
+
+# ------------------------------------------------------------------ 목록 조회 (Phase 4)
+class BranchSort(str, Enum):
+    """API_SPEC 3-1 `sort`. REQ-HQ-04(매출 랭킹) · REQ-HQ-05."""
+
+    NET_SALES_DESC = "net_sales_desc"
+    NET_SALES_ASC = "net_sales_asc"
+    RISK_DESC = "risk_desc"
+
+
+class ReportSort(str, Enum):
+    """API_SPEC 4-4 `sort`. 기본은 최신순 (REQ-HQ-13, REQ-OW-01)."""
+
+    MONTH_DESC = "month_desc"
+    MONTH_ASC = "month_asc"
+
+
+class LatestReportBrief(BaseModel):
+    """API_SPEC 3-1 `items[].latest_report`.
+
+    보고서가 없으면 객체 자체가 `null`, 분석 전이면 `risk_*` 만 `null` 이다
+    (3-1 주석의 표현 방식 결정).
+    """
+
+    report_id: int
+    report_month: str
+    created_at: datetime
+    status: ReportStatus
+    risk_level: RiskLevel | None = None
+    risk_score: int | None = None
+    net_sales: int | None = None
+
+
+class BranchListItem(BaseModel):
+    """API_SPEC 3-1."""
+
+    branch_id: int
+    name: str
+    address: str
+    region_code: str
+    latest_report: LatestReportBrief | None = None
+
+
+class BranchListResponse(BaseModel):
+    items: list[BranchListItem]
+
+
+class ReportListItem(BaseModel):
+    """API_SPEC 4-4."""
+
+    report_id: int
+    report_month: str
+    created_at: datetime
+    status: ReportStatus
+    risk_level: RiskLevel | None = None
+    risk_score: int | None = None
+    net_sales: int | None = None
+
+
+class ReportListResponse(BaseModel):
+    items: list[ReportListItem]
+
+
+class ReportBranchBrief(BaseModel):
+    """API_SPEC 4-5 `branch`. 키 이름이 `branch_id` 라 BranchBrief(id) 와 다르다."""
+
+    branch_id: int
+    name: str
+
+
+class ReportInputItemOut(BaseModel):
+    """API_SPEC 4-5 `inputs[]`. 표시용 이름·그룹은 report_input_field 조인 결과다."""
+
+    field_code: str
+    name: str
+    group_name: str
+    amount: int
+
+
+class AnalysisDetail(BaseModel):
+    """API_SPEC 4-5 `analysis`.
+
+    factors · risk_periods · recommendations 는 분석 서비스 응답 DTO 그대로다.
+    Backend 는 변환하지 않는다 (INTERFACE_SPEC 4-2).
+    """
+
+    risk_score: int
+    risk_level: RiskLevel
+    factors: list
+    risk_periods: list
+    recommendations: list
+    rule_version: str
+    calculated_at: datetime
+
+
+class ReportDetailResponse(BaseModel):
+    """API_SPEC 4-5."""
+
+    report_id: int
+    report_month: str
+    created_at: datetime
+    status: ReportStatus
+    input_source: InputSource
+    net_sales: int | None = None
+    branch: ReportBranchBrief
+    inputs: list[ReportInputItemOut]
+    analysis: AnalysisDetail | None = None
+    analysis_error: str | None = None
+
+
+class ReportStatusResponse(BaseModel):
+    """API_SPEC 4-6. FE 가 COMPLETED 가 될 때까지 폴링한다 (REQ-OW-16/17)."""
+
+    report_id: int
+    status: ReportStatus
+    analysis_error: str | None = None
+
+
+class NotificationReadResponse(BaseModel):
+    """API_SPEC 5-2."""
+
+    notification_id: int
+    is_read: bool
+    read_at: datetime | None = None
