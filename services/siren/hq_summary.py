@@ -21,17 +21,8 @@ def summarize(request: HqSummaryRequest | dict[str, Any]) -> dict[str, Any]:
     watchlist: list[dict[str, Any]] = []
     contains_synthetic = False
 
-    seen: set[str] = set()
-    for res in request.branch_results:
-        branch = res.get("branch")
-        if not isinstance(branch, dict) or branch.get("franchise_id") != request.franchise_id:
-            raise ValueError("every branch result must belong to the requested franchise")
-        branch_id = branch.get("branch_id")
-        if not isinstance(branch_id, str) or not branch_id.strip():
-            raise ValueError("every branch result requires a branch_id")
-        if branch_id in seen:
-            raise ValueError("branch_results must not contain duplicate branches")
-        seen.add(branch_id)
+    for result in request.branch_results:
+        res = result.model_dump()
         risk = res.get("risk", {})
         prov = res.get("data_provenance", {})
         contains_synthetic = contains_synthetic or bool(prov.get("contains_synthetic"))
@@ -45,6 +36,8 @@ def summarize(request: HqSummaryRequest | dict[str, Any]) -> dict[str, Any]:
         reasons: list[str] = []
         if grade == "위험":
             reasons.append("grade:위험")
+        elif res["alert"]["should_fire"]:
+            reasons.append("confirmed_branch_warning")
         prof = res.get("components", {}).get("profitability", {})
         if isinstance(prof.get("consecutive_negative_months"), int) and prof["consecutive_negative_months"] >= 2:
             reasons.append("SR-05")

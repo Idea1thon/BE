@@ -70,7 +70,7 @@
       "market_risk": 45.2628,
       "branch_risk": 65.5363,
       "review_sub_score": null,
-      "should_fire": false
+      "should_fire": true
     },
     {
       "as_of": "2025-04-30",
@@ -80,7 +80,7 @@
       "market_risk": 45.2628,
       "branch_risk": 57.1899,
       "review_sub_score": null,
-      "should_fire": false
+      "should_fire": true
     },
     {
       "as_of": "2025-05-31",
@@ -110,7 +110,7 @@
       "market_risk": 35.2747,
       "branch_risk": 48.7553,
       "review_sub_score": null,
-      "should_fire": false
+      "should_fire": true
     },
     {
       "as_of": "2025-08-31",
@@ -120,7 +120,7 @@
       "market_risk": 37.8997,
       "branch_risk": 55.0384,
       "review_sub_score": null,
-      "should_fire": false
+      "should_fire": true
     },
     {
       "as_of": "2025-09-30",
@@ -130,7 +130,7 @@
       "market_risk": 20.8751,
       "branch_risk": 59.8657,
       "review_sub_score": null,
-      "should_fire": false
+      "should_fire": true
     },
     {
       "as_of": "2025-10-31",

@@ -333,11 +333,80 @@ class RiskSirenResponse(ContractModel):
 # --------------------------------------------------------------------------- #
 # hq-summary
 # --------------------------------------------------------------------------- #
+class HqSection(BaseModel):
+    # 집계에서 소비하는 필드만 검증하고 분석 응답의 나머지 필드는 무시한다.
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+
+class HqBranch(HqSection):
+    franchise_id: str = Field(min_length=1)
+    branch_id: str = Field(min_length=1)
+    as_of: date
+
+
+class HqRisk(HqSection):
+    score: float | None = Field(ge=0, le=100, strict=True, allow_inf_nan=False)
+    grade: Literal["정상", "주의", "위험"] | None
+    calculation_status: Literal["calculated", "partial"]
+
+    @model_validator(mode="after")
+    def _consistent_result(self) -> "HqRisk":
+        if self.calculation_status == "calculated":
+            if self.score is None or self.grade is None:
+                raise ValueError("calculated risk requires score and grade")
+        elif self.score is not None or self.grade is not None:
+            raise ValueError("partial risk must not claim a composite score or grade")
+        return self
+
+
+class HqProfitability(HqSection):
+    consecutive_negative_months: int = Field(default=0, ge=0, strict=True)
+
+
+class HqComponents(HqSection):
+    profitability: HqProfitability = Field(default_factory=HqProfitability)
+
+
+class HqReview(HqSection):
+    watchlist_flag: bool = Field(default=False, strict=True)
+
+
+class HqProvenance(HqSection):
+    contains_synthetic: bool = Field(strict=True)
+
+
+class HqAlert(HqSection):
+    should_fire: bool = Field(default=False, strict=True)
+
+
+class HqBranchResult(HqSection):
+    branch: HqBranch
+    risk: HqRisk
+    components: HqComponents
+    review_signal: HqReview
+    data_provenance: HqProvenance
+    alert: HqAlert = Field(default_factory=HqAlert)
+
+
 class HqSummaryRequest(ContractModel):
     request_id: str = Field(min_length=1)
     franchise_id: str = Field(min_length=1)
     as_of: date
-    branch_results: list[dict] = Field(default_factory=list)
+    branch_results: list[HqBranchResult] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _matching_snapshots(self) -> "HqSummaryRequest":
+        seen: set[str] = set()
+        for result in self.branch_results:
+            branch = result.branch
+            if branch.franchise_id != self.franchise_id:
+                raise ValueError("every branch result must belong to the requested franchise")
+            if branch.as_of != self.as_of:
+                raise ValueError("every branch result must have the same as_of as the summary")
+            if branch.branch_id in seen:
+                raise ValueError("branch_results must not contain duplicate branches")
+            seen.add(branch.branch_id)
+        return self
 
 
 class HqSummaryResponse(ContractModel):

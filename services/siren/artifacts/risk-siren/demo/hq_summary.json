@@ -17,6 +17,7 @@
           "branch_id": "demo-br-07",
           "grade": "주의",
           "reasons": [
+            "confirmed_branch_warning",
             "SR-05",
             "SR-04"
           ]
@@ -60,6 +61,7 @@
           "branch_id": "demo-br-08",
           "grade": "주의",
           "reasons": [
+            "confirmed_branch_warning",
             "SR-05",
             "SR-04"
           ]
@@ -104,6 +106,7 @@
           "branch_id": "demo-br-15",
           "grade": "주의",
           "reasons": [
+            "confirmed_branch_warning",
             "SR-05"
           ]
         }

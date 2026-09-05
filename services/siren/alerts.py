@@ -20,8 +20,9 @@ def build_alert(
     grade: str | None,
     score_version: str,
     evidence_ids: list[str],
+    trigger: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    should_fire = grade == "위험" and score is not None
+    should_fire = (grade == "위험" and score is not None) or trigger is not None
     return {
         # 상태 스냅샷 이벤트. 등급 전이(이전→현재) 감지는 중간 백엔드가 previous_grade
         # 를 보관·비교해야 하며, 이 서비스는 매 평가의 현재 상태만 만든다.
@@ -39,6 +40,8 @@ def build_alert(
         ],
         "report_link": None,
         "should_fire": should_fire,
+        "trigger": trigger,
+        "alert_policy_version": "confirmed-branch-v1",
         "dispatch_status": "disabled",
         "evidence_ids": evidence_ids,
     }

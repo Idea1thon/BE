@@ -23,7 +23,7 @@ from .reports import MonthlyMetrics, mean_ratio, sum_field, window_ending
 class RiskPolicy:
     """Provisional policy values — require approval before operational use."""
 
-    version: str = "risk-siren-v1-provisional"
+    version: str = "risk-siren-v1.1-provisional"
 
     # composite weights (sum per layer = 1.0)
     market_closure_weight: float = 0.45
@@ -355,15 +355,17 @@ def calculate_branch_sales(
 # --------------------------------------------------------------------------- #
 def _consecutive_negative_profit(metrics: list[MonthlyMetrics], as_of: date) -> int:
     """Trailing run of months (up to as_of) with operating_profit < 0."""
-    cutoff = f"{as_of.year:04d}-{as_of.month:02d}"
+    expected = as_of.year * 12 + as_of.month - 1
     run = 0
     for mm in sorted(metrics, key=lambda m: m.month, reverse=True):
-        if mm.month > cutoff:
+        year, month = map(int, mm.month.split("-"))
+        index = year * 12 + month - 1
+        if index > expected:
             continue
-        if mm.operating_profit < 0:
-            run += 1
-        else:
+        if index != expected or mm.operating_profit >= 0:
             break
+        run += 1
+        expected -= 1
     return run
 
 

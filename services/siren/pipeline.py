@@ -339,6 +339,29 @@ def analyze(
         ],
     }
 
+    # 종합 등급 미확정과 확인된 점포 위험 경고를 분리한다.
+    # 기준은 기존 위험 등급 하한을 사용하며 점수/가중치는 변경하지 않는다.
+    trigger = None
+    if risk["grade"] == "위험":
+        trigger = {
+            "basis": "composite", "score": risk["score"],
+            "threshold": policy.caution_upper_bound,
+            "evidence_ids": [e["evidence_id"] for e in evidence],
+        }
+    else:
+        candidates = [
+            ("branch_risk", branch_layer_score, branch_layer_status),
+            ("profitability", profitability.get("score"), profitability.get("status")),
+        ]
+        for basis, value, status in candidates:
+            if status == "calculated" and value is not None and value >= policy.caution_upper_bound:
+                matching = [e["evidence_id"] for e in evidence
+                            if e["layer"] == "branch" and (basis != "profitability" or e["signal_id"] == "SR-05")]
+                if matching:
+                    trigger = {"basis": basis, "score": value,
+                               "threshold": policy.caution_upper_bound, "evidence_ids": matching}
+                    break
+
     alert = build_alert(
         branch_id=request.branch_id,
         as_of=as_of,
@@ -346,6 +369,7 @@ def analyze(
         grade=grade,
         score_version=policy.version,
         evidence_ids=[item["evidence_id"] for item in evidence],
+        trigger=trigger,
     )
 
     result: dict[str, Any] = {
@@ -389,6 +413,7 @@ def _build_projections(result: dict[str, Any]) -> dict[str, Any]:
     review = result["review_signal"]
     branch_owner = {
         "branch_id": result["branch"]["branch_id"],
+        "alert": result["alert"],
         "score": risk["score"],
         "grade": risk["grade"],
         "calculation_status": risk["calculation_status"],
@@ -405,6 +430,7 @@ def _build_projections(result: dict[str, Any]) -> dict[str, Any]:
     }
     franchise_hq = {
         "branch_id": result["branch"]["branch_id"],
+        "alert": result["alert"],
         "franchise_id": result["branch"]["franchise_id"],
         "score": risk["score"],
         "grade": risk["grade"],

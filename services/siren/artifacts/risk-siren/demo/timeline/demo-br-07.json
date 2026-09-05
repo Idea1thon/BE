@@ -190,7 +190,7 @@
       "market_risk": 15.1759,
       "branch_risk": 65.813,
       "review_sub_score": 83.325,
-      "should_fire": false
+      "should_fire": true
     }
   ]
 }

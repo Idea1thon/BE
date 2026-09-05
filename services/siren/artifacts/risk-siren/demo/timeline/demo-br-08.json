@@ -170,7 +170,7 @@
       "market_risk": 36.1714,
       "branch_risk": 49.0573,
       "review_sub_score": 62.5,
-      "should_fire": false
+      "should_fire": true
     },
     {
       "as_of": "2026-02-28",
@@ -180,7 +180,7 @@
       "market_risk": 36.1714,
       "branch_risk": 53.1312,
       "review_sub_score": 62.5,
-      "should_fire": false
+      "should_fire": true
     },
     {
       "as_of": "2026-03-31",
@@ -190,7 +190,7 @@
       "market_risk": 56.5063,
       "branch_risk": 56.6577,
       "review_sub_score": 68.175,
-      "should_fire": false
+      "should_fire": true
     }
   ]
 }

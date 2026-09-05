@@ -40,3 +40,13 @@ Backend가 인증된 사용자 범위로 점포·보고서를 조회하고 사�
 
 저장소 루트에서 `python -m unittest discover -s services/siren/tests -v`.
 데모 재생성: `python -m services.siren.demo.build --reuse` (저장된 공개 지표 기준선과 합성 점포 데이터 사용).
+
+## 확인된 점포 위험 경고와 정적 리뷰 보완
+
+- 시장 자료가 없거나 일부 지표가 미완성일 때 종합 점수·등급은 계속 null이다. 다만 `calculated`인 점포 층 또는 수익성 지표가 기존 위험 하한(`caution_upper_bound`) 이상이고 해당 지표의 evidence가 있으면 `alert.should_fire=true`로 반환한다.
+- `alert.trigger`는 basis(`composite`, `branch_risk`, `profitability`), 해당 점수, 기준값, 근거 ID를 제공한다. 점포 경고를 종합 위험 등급으로 표시하지 않는다. 종합 등급이 주의여도 확정된 수익성 위험 경고는 유지하며, 시장 자료 유무로 같은 점포 경고가 사라지지 않는다. 낮거나 미확정인 점포 신호, 데이터 누락 자체만으로 경고하지 않는다.
+- 점주·본사 projection에도 alert를 전달하고, 본사 watchlist에 부분 분석의 점포 경고를 표시한다. 실제 발송은 여전히 disabled다.
+- 연속 적자는 as_of 월부터 한 달씩 역순으로 확인한다. 중간 월 누락 또는 흑자/손익0에서 중단하며, 기준 월 자료가 없으면 현재 연속 적자는 0이다. 이는 누락 기간이 안전하다는 의미가 아니다. 기존 missing/partial 표시는 유지한다.
+- 본사 요약은 집계에 사용하는 중첩 객체를 검증한다. null 객체, 점수 범위 밖 값·불리언, 잘못된 등급 및 상태/점수 모순은 422다. 비집계 필드는 무시한다.
+- 각 branch.as_of는 요청 as_of와 정확히 같아야 한다. 미래·과거 결과를 섞지 않으며, 누락·잘못된 날짜도422다. Backend는 동일 기준일의 결과 묶음을 전달해야 한다.
+- 적자 계산 동작 변경을 구분하기 위해 score_version은 risk-siren-v1.1-provisional로 갱신했다. 이벤트 중복 방지 키에도 이 버전이 반영된다. alert_policy_version은 confirmed-branch-v1이다.

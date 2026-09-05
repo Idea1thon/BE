@@ -132,7 +132,7 @@ class RiskSirenV1Tests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["risk"]["calculation_status"], "calculated")
         self.assertEqual(first["risk"]["grade"], "정상")
-        self.assertEqual(first["risk"]["score_version"], "risk-siren-v1-provisional")
+        self.assertEqual(first["risk"]["score_version"], "risk-siren-v1.1-provisional")
         self.assertFalse(first["alert"]["should_fire"])
         self.assertEqual(first["alert"]["dispatch_status"], "disabled")
 

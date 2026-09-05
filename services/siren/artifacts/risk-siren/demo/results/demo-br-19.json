@@ -12,7 +12,7 @@
   "risk": {
     "score": null,
     "grade": null,
-    "score_version": "risk-siren-v1-provisional",
+    "score_version": "risk-siren-v1.1-provisional",
     "calculation_status": "partial",
     "policy_status": "provisional",
     "composite_basis": [
@@ -233,8 +233,8 @@
   },
   "alert": {
     "event_type": "branch_risk_evaluated",
-    "event_id": "evt-98ea4c9996097d761029c706",
-    "idempotency_key": "98ea4c9996097d761029c706",
+    "event_id": "evt-7a7fd4b34161e789fee3dade",
+    "idempotency_key": "7a7fd4b34161e789fee3dade",
     "branch_id": "demo-br-19",
     "grade": null,
     "previous_grade": null,
@@ -258,6 +258,8 @@
     ],
     "report_link": null,
     "should_fire": false,
+    "trigger": null,
+    "alert_policy_version": "confirmed-branch-v1",
     "dispatch_status": "disabled",
     "evidence_ids": [
       "ev-closure-rolling-2q",
@@ -285,6 +287,44 @@
   "projections": {
     "branch_owner": {
       "branch_id": "demo-br-19",
+      "alert": {
+        "event_type": "branch_risk_evaluated",
+        "event_id": "evt-7a7fd4b34161e789fee3dade",
+        "idempotency_key": "7a7fd4b34161e789fee3dade",
+        "branch_id": "demo-br-19",
+        "grade": null,
+        "previous_grade": null,
+        "score": null,
+        "as_of": "2026-03-31",
+        "recipients": [
+          {
+            "role": "branch_owner",
+            "channels": [
+              "in_app",
+              "email"
+            ]
+          },
+          {
+            "role": "franchise_hq",
+            "channels": [
+              "in_app",
+              "email"
+            ]
+          }
+        ],
+        "report_link": null,
+        "should_fire": false,
+        "trigger": null,
+        "alert_policy_version": "confirmed-branch-v1",
+        "dispatch_status": "disabled",
+        "evidence_ids": [
+          "ev-closure-rolling-2q",
+          "ev-closure-quarter",
+          "ev-market-sales-qoq",
+          "ev-competition-new-3m",
+          "ev-review-neg-ratio"
+        ]
+      },
       "score": null,
       "grade": null,
       "calculation_status": "partial",
@@ -500,6 +540,44 @@
     },
     "franchise_hq": {
       "branch_id": "demo-br-19",
+      "alert": {
+        "event_type": "branch_risk_evaluated",
+        "event_id": "evt-7a7fd4b34161e789fee3dade",
+        "idempotency_key": "7a7fd4b34161e789fee3dade",
+        "branch_id": "demo-br-19",
+        "grade": null,
+        "previous_grade": null,
+        "score": null,
+        "as_of": "2026-03-31",
+        "recipients": [
+          {
+            "role": "branch_owner",
+            "channels": [
+              "in_app",
+              "email"
+            ]
+          },
+          {
+            "role": "franchise_hq",
+            "channels": [
+              "in_app",
+              "email"
+            ]
+          }
+        ],
+        "report_link": null,
+        "should_fire": false,
+        "trigger": null,
+        "alert_policy_version": "confirmed-branch-v1",
+        "dispatch_status": "disabled",
+        "evidence_ids": [
+          "ev-closure-rolling-2q",
+          "ev-closure-quarter",
+          "ev-market-sales-qoq",
+          "ev-competition-new-3m",
+          "ev-review-neg-ratio"
+        ]
+      },
       "franchise_id": "demo-fr-01",
       "score": null,
       "grade": null,

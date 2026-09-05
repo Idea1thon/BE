@@ -12,7 +12,7 @@
   "risk": {
     "score": 30.1046,
     "grade": "정상",
-    "score_version": "risk-siren-v1-provisional",
+    "score_version": "risk-siren-v1.1-provisional",
     "calculation_status": "calculated",
     "policy_status": "provisional",
     "composite_basis": [
@@ -252,8 +252,8 @@
   },
   "alert": {
     "event_type": "branch_risk_evaluated",
-    "event_id": "evt-fdef1418143543a1126997fc",
-    "idempotency_key": "fdef1418143543a1126997fc",
+    "event_id": "evt-b3a8d6270009091361fd6170",
+    "idempotency_key": "b3a8d6270009091361fd6170",
     "branch_id": "demo-br-04",
     "grade": "정상",
     "previous_grade": null,
@@ -277,6 +277,8 @@
     ],
     "report_link": null,
     "should_fire": false,
+    "trigger": null,
+    "alert_policy_version": "confirmed-branch-v1",
     "dispatch_status": "disabled",
     "evidence_ids": [
       "ev-closure-rolling-2q",
@@ -308,6 +310,46 @@
   "projections": {
     "branch_owner": {
       "branch_id": "demo-br-04",
+      "alert": {
+        "event_type": "branch_risk_evaluated",
+        "event_id": "evt-b3a8d6270009091361fd6170",
+        "idempotency_key": "b3a8d6270009091361fd6170",
+        "branch_id": "demo-br-04",
+        "grade": "정상",
+        "previous_grade": null,
+        "score": 30.1046,
+        "as_of": "2026-03-31",
+        "recipients": [
+          {
+            "role": "branch_owner",
+            "channels": [
+              "in_app",
+              "email"
+            ]
+          },
+          {
+            "role": "franchise_hq",
+            "channels": [
+              "in_app",
+              "email"
+            ]
+          }
+        ],
+        "report_link": null,
+        "should_fire": false,
+        "trigger": null,
+        "alert_policy_version": "confirmed-branch-v1",
+        "dispatch_status": "disabled",
+        "evidence_ids": [
+          "ev-closure-rolling-2q",
+          "ev-closure-quarter",
+          "ev-market-sales-qoq",
+          "ev-competition-new-3m",
+          "ev-branch-sales-3m",
+          "ev-profit-margin-3m",
+          "ev-review-neg-ratio"
+        ]
+      },
       "score": 30.1046,
       "grade": "정상",
       "calculation_status": "calculated",
@@ -542,6 +584,46 @@
     },
     "franchise_hq": {
       "branch_id": "demo-br-04",
+      "alert": {
+        "event_type": "branch_risk_evaluated",
+        "event_id": "evt-b3a8d6270009091361fd6170",
+        "idempotency_key": "b3a8d6270009091361fd6170",
+        "branch_id": "demo-br-04",
+        "grade": "정상",
+        "previous_grade": null,
+        "score": 30.1046,
+        "as_of": "2026-03-31",
+        "recipients": [
+          {
+            "role": "branch_owner",
+            "channels": [
+              "in_app",
+              "email"
+            ]
+          },
+          {
+            "role": "franchise_hq",
+            "channels": [
+              "in_app",
+              "email"
+            ]
+          }
+        ],
+        "report_link": null,
+        "should_fire": false,
+        "trigger": null,
+        "alert_policy_version": "confirmed-branch-v1",
+        "dispatch_status": "disabled",
+        "evidence_ids": [
+          "ev-closure-rolling-2q",
+          "ev-closure-quarter",
+          "ev-market-sales-qoq",
+          "ev-competition-new-3m",
+          "ev-branch-sales-3m",
+          "ev-profit-margin-3m",
+          "ev-review-neg-ratio"
+        ]
+      },
       "franchise_id": "demo-fr-04",
       "score": 30.1046,
       "grade": "정상",
