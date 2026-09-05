@@ -24,8 +24,8 @@
 | `data/상주인구/` | conditional | 배후 생활인구 수준과 고객 구성 | 분기 증감·모멘텀 피처 금지 |
 | `data/직장인구/` | conditional | 오피스 수요 수준과 주중 고객 구성 | 분기 증감·모멘텀 피처 금지 |
 | `data/아파트/` | removed | 과거 가족·주거형 보조 데이터 | 2026-08-31 삭제; 필요하면 Git 이력에서 복구 후 정적 수준으로만 사용 |
-| 임대료·공실률 CSV (`매장용빌딩...csv`) | conditional | **권역** 수준 임대료·공실률·수익률 (2021Q1~2025Q4). FC-21 공실률의 유일 소스 | 개별 매물 월세·현재 공실로 표현 금지 |
-| `data/임대료/R-ONE_임대동향_분기.csv` + `output/crosswalks/crosswalk_rone_trdar.csv` | conditional | 한국부동산원 R-ONE **상권별**(72) 임대료(천원/㎡)·임대가격지수, 4 상가유형, 2024Q1~2026Q2. FC-20 세분 | **R-ONE 상권 ≠ 서울시 상권분석 1,650 상권**. 1차 명칭·별칭 proxy crosswalk 생성(자동 결합 후보 52/72, review 18, 미해결 1, 대상 재사용 1). `join_eligible=yes`만 사용하고 `grain_is_proxy=true` 유지. 현재 CSV에는 공실률 없음(API 표는 확인·이식 미완료) |
+| `data/임대료/R-ONE_임대동향_분기.csv` + `output/crosswalks/crosswalk_rone_trdar.csv` | conditional | 한국부동산원 R-ONE **상권별**(72) 임대료(천원/㎡)·임대가격지수, 4 상가유형, 2024Q1~2026Q2(웹 다운로드 CSV 파싱). FC-20 세분 | **R-ONE 상권 ≠ 서울시 상권분석 1,650 상권**. 1차 명칭·별칭 proxy crosswalk 생성(자동 결합 후보 52/72, review 18, 미해결 1, 대상 재사용 1). `join_eligible=yes`만 사용하고 `grain_is_proxy=true` 유지 |
+| `data/임대료/R-ONE_공실률_분기.csv` | conditional | 한국부동산원 R-ONE **상권별**(72) 공실률(%), 3 상가유형(소규모·중대형·집합), 2024Q3~2026Q2. `scripts/ingest_vacancy_rate.py`로 R-ONE Open API 실호출(웹 다운로드 CSV 아님). FC-21 유일 소스 — 2026-09-05 이식(구 `매장용빌딩...csv`는 2026-08-31 운영 제외 데이터 삭제로 소실, API로 대체) | 개별 매물의 현재 공실로 표현 금지. 위 crosswalk와 같은 R-ONE 상권 grain·`join_eligible=yes` 규칙 적용. `context.rent_index`(store_type·indicator='공실률')로 적재, `recommendation_pipeline.py`가 FC-21 evidence로 연결(더 이상 상시 `missing_features` 아님) |
 | 로컬 브랜드 상권 현황 | removed | 과거 정책 지정 상권 비교 | 2026-08-31 원자료·파생물 삭제 |
 | 기존 Top-K 스코어와 가중치 | removed | 보고서에 감사 결론만 보존 | 2026-08-31 결과 CSV·그래프 삭제; 운영 순위로 복원 금지 |
 | `.DS_Store` | exclude | 없음 | 분석 입력 금지 |

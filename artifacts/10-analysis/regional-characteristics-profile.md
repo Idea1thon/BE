@@ -120,8 +120,8 @@
 
 | feature_id | 항목 | 데이터 / grain | status | 계산식 | 금지·주의 |
 | --- | --- | --- | --- | --- | --- |
-| FC-20 | 임대료 분위 | `매장용빌딩...csv`(권역) + `data/임대료/R-ONE_임대동향_분기.csv`(R-ONE 상권 72, 2024Q1~2026Q2) / **권역·R-ONE상권** | partial | R-ONE 상권값 우선, 없으면 권역. 4 상가유형(소규모·중대형·집합·통합) 중 업종 규모에 맞게 | 개별 매물 월세로 표현 금지. **R-ONE 상권 ≠ 서울 상권분석 상권** — `output/crosswalks/`의 명칭 proxy 중 `join_eligible=yes`만 후보에 연결하고 grain 표시 |
-| FC-21 | 공실률 권역 분위 | `매장용빌딩...csv` / **권역** | partial | 권역 분위, 2025Q4까지. R-ONE API 2024Q3~ 공실률 표는 확인됐지만 현재 이식·연결 전 | 특정 주소 공실로 표현 금지 |
+| FC-20 | 임대료 분위 | `data/임대료/R-ONE_임대동향_분기.csv`(R-ONE 상권 72, 웹 다운로드 CSV, 2024Q1~2026Q2) / **권역·R-ONE상권** | partial | R-ONE 상권값 우선, 없으면 권역·서울전체. 소규모상가 임대가격지수 사용(실측 임대료_천원㎡은 소규모상가만 존재) | 개별 매물 월세로 표현 금지. **R-ONE 상권 ≠ 서울 상권분석 상권** — `output/crosswalks/`의 명칭 proxy 중 `join_eligible=yes`만 후보에 연결하고 grain 표시. 원천 `매장용빌딩...csv`(권역 grain)는 2026-08-31 운영 제외 데이터 삭제로 더 이상 없음 — 2026-09-05부터 R-ONE만 사용 |
+| FC-21 | 공실률 권역 분위 | `data/임대료/R-ONE_공실률_분기.csv`(R-ONE Open API 실호출, `scripts/ingest_vacancy_rate.py`, 상권 72, 2024Q3~2026Q2) / **권역·R-ONE상권** | partial | R-ONE 상권값 우선, 없으면 권역·서울전체. 소규모상가 기준(중대형·집합상가도 이식됨) | 특정 주소 공실로 표현 금지. 2026-09-05: R-ONE API 표를 실제 이식·`context.rent_index`(store_type='소규모상가', indicator='공실률') 연결 완료 — `recommendation_pipeline.py`가 항상 `missing_features`로 표시하던 상태 해소. 원천 `매장용빌딩...csv`도 더 이상 없음 |
 
 ### G4. 경쟁·시장수용  → metric-contract "경쟁·시장수용" 차원 (업종별 계산, 특성으로 분류)
 

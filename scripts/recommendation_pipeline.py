@@ -582,6 +582,32 @@ def parse_rone_rent() -> tuple[dict[str, dict[str, str]], dict[str, str], Path |
     return area_rows, seoul_rows, path
 
 
+def parse_rone_vacancy() -> tuple[dict[str, dict[str, str]], dict[str, str], Path | None]:
+    """FC-21 공실률. scripts/ingest_vacancy_rate.py 산출(R-ONE Open API 실시간 이식).
+
+    parse_rone_rent()과 같은 store_type(소규모상가)·grain 규칙을 쓴다 — 임대료·공실률을
+    같은 상가유형으로 맞춰야 같은 후보에 대해 서로 다른 상가유형 값을 섞지 않는다.
+    """
+    path = ROOT / "data/임대료/R-ONE_공실률_분기.csv"
+    if not path.exists():
+        return {}, {}, None
+    rows = read_csv(path)
+    area_rows: dict[str, dict[str, str]] = {}
+    seoul_rows: dict[str, str] = {}
+    for row in rows:
+        if row.get("상가유형") != "소규모상가" or row.get("지표") != "공실률":
+            continue
+        quarter = row.get("기준_년분기_코드", "")
+        if row.get("grain") == "상권" and row.get("R_ONE_상권"):
+            old = area_rows.get(row["R_ONE_상권"])
+            if old is None or quarter > old.get("기준_년분기_코드", ""):
+                area_rows[row["R_ONE_상권"]] = row
+        elif row.get("grain") == "서울전체":
+            if quarter > seoul_rows.get("quarter", ""):
+                seoul_rows = {"quarter": quarter, "value": row.get("값", "")}
+    return area_rows, seoul_rows, path
+
+
 def load_naver_industry_attention(industry_code: str) -> tuple[dict[str, Any] | None, dict[str, Path]]:
     """FC-42 업종의 현재 검색 관심도만 읽는다.
 
@@ -950,6 +976,7 @@ def build_candidate(
     news_catalogs: list[NewsCatalog],
     source_paths: dict[str, Path], seoul_flow_density: list[float], seoul_sales_pp: list[float],
     crosswalk: dict[str, dict[str, str]], rone_areas: dict[str, dict[str, str]], rone_seoul: dict[str, str], rone_path: Path | None,
+    rone_vac_areas: dict[str, dict[str, str]], rone_vac_seoul: dict[str, str], rone_vac_path: Path | None,
 ) -> dict[str, Any]:
     point = seed["pt"]
     synthetic = seed["kind"] == "생성지점"
@@ -1130,6 +1157,10 @@ def build_candidate(
     elif sales_p is not None and sales_p < 15:
         counter.append(f"{u_scope} 배경 업종 점포당매출 서울 하위 {sales_p}% — 시장 매출 규모 매우 작음")
 
+    # rent_specific·vacancy_specific은 같은 mapping(host 상권 → R-ONE 상권)을 쓰므로 항상 같이
+    # True/False다 — 우연이 아니라 R-ONE이 임대가격지수·공실률을 같은 상권 목록으로 조사하기
+    # 때문이다(59/59 상권 완전 일치, 2026-09-05 확인). 두 evidence가 서로 독립적으로 매칭을
+    # 검증한 것으로 오해하지 말 것.
     mapping = crosswalk.get(host.code) if host else None
     rone_row = rone_areas.get(mapping.get("R_ONE_상권")) if mapping else None
     city_rent = num({"값": rone_seoul.get("value")} if rone_seoul else None, "값")
@@ -1143,6 +1174,20 @@ def build_candidate(
         rent_reason = "R-ONE 상권별 자동 매핑 불가 → 서울전체 임대가격지수 proxy 사용"
         counter.append("비용(임대료): R-ONE 상권별 매핑 미허용 — 서울전체 지수 proxy 사용")
 
+    rone_vac_row = rone_vac_areas.get(mapping.get("R_ONE_상권")) if mapping else None
+    city_vacancy = num({"값": rone_vac_seoul.get("value")} if rone_vac_seoul else None, "값")
+    area_vacancy = num(rone_vac_row, "값") if rone_vac_row else None
+    vacancy_value = area_vacancy if area_vacancy is not None else city_vacancy
+    vacancy_period = (rone_vac_row.get("기준_년분기_코드") if rone_vac_row
+                      else (rone_vac_seoul.get("quarter") if rone_vac_seoul else None))
+    vacancy_specific = area_vacancy is not None and mapping is not None
+    if vacancy_value is None:
+        vacancy_reason = "R-ONE 공실률 자료 없음"
+    elif vacancy_specific:
+        vacancy_reason = f"R-ONE {mapping['R_ONE_상권']} 공실률 사용(상권분석 target proxy)"
+    else:
+        vacancy_reason = "R-ONE 상권별 자동 매핑 불가 → 서울전체 공실률 proxy 사용"
+
     missing: list[dict[str, str]] = []
     if sales_per_store is None:
         if sales_unreliable:
@@ -1155,7 +1200,10 @@ def build_candidate(
         missing.append({"feature": "FC-31", "reason": reason})
     if not rent_specific:
         missing.append({"feature": "FC-20", "reason": "host 상권이 R-ONE crosswalk join_eligible 대상이 아니어서 상권별 임대료 자동 결합 불가"})
-    missing.append({"feature": "FC-21", "reason": "R-ONE 공실률 CSV 미이식; 주소 단위 공실이 아닌 권역 공실률만 별도 존재"})
+    if vacancy_value is None:
+        missing.append({"feature": "FC-21", "reason": "R-ONE 공실률 자료 없음"})
+    elif not vacancy_specific:
+        missing.append({"feature": "FC-21", "reason": "host 상권이 R-ONE crosswalk join_eligible 대상이 아니어서 상권별 공실률 자동 결합 불가 — 서울전체 proxy 사용"})
     if include_poi_context and poi_context is None:
         missing.append({"feature": "observed_poi_context", "reason": "요청 영역과 일치하는 complete_requested_queries Kakao rect snapshot 없음"})
     missing.extend({"feature": f"unsupported.{i + 1}", "reason": reason} for i, reason in enumerate(conditions["unsupported_conditions"]))
@@ -1196,6 +1244,8 @@ def build_candidate(
     source_list = sorted({relative_path(p) for p in source_paths.values()} | seed["source_paths"])
     if rone_path:
         source_list.append(relative_path(rone_path))
+    if rone_vac_path:
+        source_list.append(relative_path(rone_vac_path))
     if poi_context:
         source_list.extend([relative_path(poi_context.csv_path), relative_path(poi_context.manifest_path)])
     if synthetic and gen_ev:
@@ -1257,6 +1307,15 @@ def build_candidate(
                        ["rent_unpivot"], rent_reason, "R-ONE 조사권역·서울 지수 proxy이며 개별 매물 월세·공실이 아님",
                        missing_reason="R-ONE 임대료 자료 없음" if rent_value is None else None,
                        proxy_note="R-ONE 상권↔서울 상권분석 명칭 proxy" if rent_specific else "서울전체 지수 proxy"))
+    ev.append(evidence("R-ONE_공실률", round(vacancy_value, 2) if vacancy_value is not None else None, "%",
+                       "observed" if vacancy_value is not None else "derived", "none", vacancy_period,
+                       "권역" if vacancy_specific else "서울시", True,
+                       relative_path(rone_vac_path) if rone_vac_path else "data/임대료/",
+                       relative_path(rone_vac_path) if rone_vac_path else "미검증",
+                       ["rone_vacancy_api_ingest"], vacancy_reason,
+                       "R-ONE 조사권역·서울 공실률 proxy이며 특정 주소의 현재 공실이 아님(비용/공급위험 배경 신호, 스코어링·정렬 미반영)",
+                       missing_reason="R-ONE 공실률 자료 없음" if vacancy_value is None else None,
+                       proxy_note="R-ONE 상권↔서울 상권분석 명칭 proxy" if vacancy_specific else "서울전체 proxy"))
     if naver_industry_attention:
         attention = naver_industry_attention
         ev.append(evidence(
@@ -1575,6 +1634,9 @@ class FileSource:
     def rent(self):
         return parse_rone_rent()
 
+    def vacancy(self):
+        return parse_rone_vacancy()
+
     def crosswalk(self):
         return parse_trdar_crosswalk()
 
@@ -1827,6 +1889,25 @@ class DbSource:
         prov = self._provenance("data/임대료", "R-ONE_임대동향_분기")
         return area_rows, seoul_rows, (prov if isinstance(prov, Path) else None)
 
+    def vacancy(self):
+        rows = self._db.query(
+            "SELECT grain, rone_area, period AS \"기준_년분기_코드\", value_numeric AS \"값\" "
+            "FROM context.rent_index "
+            "WHERE store_type = '소규모상가' AND indicator = '공실률' AND grain IN ('상권', '서울전체')"
+        )
+        area_rows: dict[str, dict[str, str]] = {}
+        seoul_rows: dict[str, str] = {}
+        for r in rows:
+            quarter = r.get("기준_년분기_코드", "")
+            if r["grain"] == "상권" and r["rone_area"]:
+                old = area_rows.get(r["rone_area"])
+                if old is None or quarter > old.get("기준_년분기_코드", ""):
+                    area_rows[r["rone_area"]] = r
+            elif r["grain"] == "서울전체" and quarter > seoul_rows.get("quarter", ""):
+                seoul_rows = {"quarter": quarter, "value": r.get("값", "")}
+        prov = self._provenance("data/임대료", "R-ONE_공실률_분기")
+        return area_rows, seoul_rows, (prov if isinstance(prov, Path) else None)
+
     def crosswalk(self):
         rows = self._db.query(
             "SELECT split_part(source_area_id, ':', 2) AS rone, split_part(target_area_id, ':', 2) AS trdar "
@@ -1996,6 +2077,7 @@ def run_pipeline(
     }
     crosswalk = src.crosswalk()
     rone_areas, rone_seoul, rone_path = src.rent()
+    rone_vac_areas, rone_vac_seoul, rone_vac_path = src.vacancy()
     candidates = [build_candidate(
         request, conditions, seed, trdar_layer, hinterland_layer, dong_layer, sigungu_by_prefix, target_sigungu,
         store_trdar, sales_trdar, flow_trdar, change_trdar, store_dong, sales_dong, flow_dong, change_dong,
@@ -2003,6 +2085,7 @@ def run_pipeline(
         poi_context, include_poi_context, naver_industry_attention,
         news_catalogs,
         source_paths, all_flow_density, sorted(all_sales_pp), crosswalk, rone_areas, rone_seoul, rone_path,
+        rone_vac_areas, rone_vac_seoul, rone_vac_path,
     ) for seed in seeds]
     # 검증된 품질 신호가 없으므로 근거 수로 등수를 매기지 않는다(-len(reasons) 제거).
     # tier → (같은 tier 안에서 candidate_type 라운드로빈으로 인터리브) → 반대근거 적은 순 → 신뢰도 → id.

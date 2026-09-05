@@ -69,8 +69,8 @@ PYTHONPATH=scripts .venv/bin/python3 scripts/rone_api.py data \
 
 ## 후속 작업과 설계 경계
 
-1. API 응답을 `data/임대료/`의 기존 long 스키마로 변환하는 갱신 스크립트를 별도로 만든다. 기존 CSV를 바로 덮어쓰지 말고 원본 응답·조회시각·표 ID를 manifest에 남긴다.
-2. 공실률 API 표를 FC-21에 연결할 때는 현재 `매장용빌딩...csv` 권역 데이터와 기간·정의·상가유형을 비교한다. API 실호출 성공만으로 기존 소스를 교체하지 않는다.
+1. ~~API 응답을 `data/임대료/`의 기존 long 스키마로 변환하는 갱신 스크립트를 별도로 만든다.~~ **완료(2026-09-05)**: `scripts/ingest_vacancy_rate.py` → `data/임대료/R-ONE_공실률_분기.csv` + `manifest_공실률.json`(호출 로그·표 ID 보존).
+2. ~~공실률 API 표를 FC-21에 연결할 때는 현재 `매장용빌딩...csv` 권역 데이터와 기간·정의·상가유형을 비교한다.~~ **완료(2026-09-05)**: `매장용빌딩...csv`는 2026-08-31 운영 제외 데이터 삭제로 이미 소실되어 비교 대상 자체가 없음 — API 실호출 값을 FC-21 유일 소스로 채택. `context.rent_index`(store_type='소규모상가', indicator='공실률')에 적재, `recommendation_pipeline.py`가 crosswalk `join_eligible=yes` 경유로 evidence 연결(상세: [[vacancy_rate_fc21_ingest]] 메모리, `output/cost_dimension/`).
 3. R-ONE 상권명/권역은 서울시 상권분석서비스의 상권·상권배후지·행정동과 동일 grain이 아니다. GPT(Codex)가 2026-09-02 1차 명칭 proxy crosswalk를 `output/crosswalks/crosswalk_rone_trdar.csv`에 생성했지만, `join_eligible=yes`만 후보 연결에 사용하고 review·복합권역·미해결은 보류한다. 상세 규칙은 `artifacts/handoff_rone_trdar_crosswalk.md`를 먼저 읽는다.
 4. R-ONE 임대료·공실률은 비용/시장 배경 근거다. 매출 성공 여부, 성공확률, 임대 매물 존재를 뜻하지 않는다.
 

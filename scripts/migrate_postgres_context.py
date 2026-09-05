@@ -475,23 +475,26 @@ ON CONFLICT (source) DO UPDATE SET
 
 
 def rent_index_rows() -> Iterator[list[Any]]:
-    path = DATA / "임대료" / "R-ONE_임대동향_분기.csv"
-    if not path.is_file():
-        return
-    source_id = file_id(path.relative_to(ROOT).as_posix())
-    _, _, records = csv_rows(path)
-    for row in records:
-        grain = scalar(row.get("grain"))
-        period = scalar(row.get("기준_년분기_코드"))
-        store_type = scalar(row.get("상가유형"))
-        indicator = scalar(row.get("지표"))
-        if not (grain and period and store_type and indicator) or grain not in ("상권", "권역", "서울전체"):
+    # 임대료·임대가격지수(웹 다운로드 CSV 파싱) + 공실률(R-ONE API 실호출,
+    # scripts/ingest_vacancy_rate.py) — 둘 다 같은 long 스키마라 같은 테이블에 적재.
+    for filename in ("R-ONE_임대동향_분기.csv", "R-ONE_공실률_분기.csv"):
+        path = DATA / "임대료" / filename
+        if not path.is_file():
             continue
-        yield [
-            period, store_type, indicator, grain,
-            scalar(row.get("R_ONE_상권")) or "", scalar(row.get("권역")),
-            number(row.get("값")), source_id,
-        ]
+        source_id = file_id(path.relative_to(ROOT).as_posix())
+        _, _, records = csv_rows(path)
+        for row in records:
+            grain = scalar(row.get("grain"))
+            period = scalar(row.get("기준_년분기_코드"))
+            store_type = scalar(row.get("상가유형"))
+            indicator = scalar(row.get("지표"))
+            if not (grain and period and store_type and indicator) or grain not in ("상권", "권역", "서울전체"):
+                continue
+            yield [
+                period, store_type, indicator, grain,
+                scalar(row.get("R_ONE_상권")) or "", scalar(row.get("권역")),
+                number(row.get("값")), source_id,
+            ]
 
 
 def _file_id_or_none(rel_path: str) -> int | None:
@@ -629,9 +632,10 @@ def metric_rows() -> Iterator[list[Any]]:
                    number(row.get("고용률")), None, "%", True, "자치구값을 상권·동에 대리하지 않음",
                    "official_file", source_id, scalar(row.get("기준_반기")), None]
 
-    # R-ONE 임대동향
-    path = DATA / "임대료" / "R-ONE_임대동향_분기.csv"
-    if path.is_file():
+    # R-ONE 임대동향·공실률 (임대료·지수는 웹 다운로드 CSV, 공실률은 API 실호출)
+    for path in (DATA / "임대료" / "R-ONE_임대동향_분기.csv", DATA / "임대료" / "R-ONE_공실률_분기.csv"):
+        if not path.is_file():
+            continue
         _, _, records = csv_rows(path)
         source_id = file_id(path.relative_to(ROOT).as_posix())
         for row in records:

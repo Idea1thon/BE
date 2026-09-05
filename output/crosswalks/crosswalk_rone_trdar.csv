@@ -1,0 +1,85 @@
+﻿R_ONE_상권,R_ONE_권역,mapping_status,mapping_method,mapping_confidence,mapping_role,TRDAR_CD,TRDAR_CD_N,TRDAR_SE_NM,SIGNGU_CD,SIGNGU_NM,ADSTRD_CD,ADSTRD_NM,RELM_AR,target_reuse_count,join_eligible,mapping_note
+가락시장,기타,matched,exact_name,high,primary,3120231,가락시장,발달상권,11710,송파구,11710631,가락1동,615953.0,1,yes,동일 명칭
+강남대로,강남,review,road_proxy,medium,primary,3120189,강남역,발달상권,11650,서초구,11650520,서초2동,617547.0,1,review,강남대로 도로권역의 대표 발달상권 proxy
+건대입구,기타,matched,explicit_alias,high,primary,3120053,건대입구역(건대),발달상권,11215,광진구,11215710,화양동,275082.0,1,yes,R-ONE 권역명과 상권분석 발달상권 명칭의 역명 alias
+경희대,기타,matched,explicit_alias,high,primary,3120064,경희대학교(경희대),발달상권,11230,동대문구,11230710,회기동,48567.0,1,yes,대학명 alias
+공덕역,영등포신촌,matched,explicit_alias,high,primary,3120107,공덕역(공덕오거리),발달상권,11440,마포구,11440585,도화동,192218.0,1,yes,역명·오거리 표기 차이
+광화문,도심,matched,explicit_alias,high,primary,3120003,광화문역,발달상권,11110,종로구,11110530,사직동,394522.0,1,yes,광화문 대표 역세권
+교대역,강남,matched,explicit_alias,high,primary,3120173,교대역(법원.검찰청),발달상권,11650,서초구,11650510,서초1동,396531.0,1,yes,역명·시설 표기 차이
+구로디지털단지역,기타,matched,exact_name,high,primary,3120130,구로디지털단지역,발달상권,11530,구로구,11530540,구로3동,168688.0,1,yes,동일 명칭
+구의역,기타,matched,exact_name,high,primary,3120056,구의역,발달상권,11215,광진구,11215850,구의1동,158734.0,1,yes,동일 명칭
+군자,기타,matched,explicit_alias,high,primary,3120055,군자역,발달상권,11215,광진구,11215730,군자동,288693.0,1,yes,R-ONE의 역세권 축약명
+까치산역,기타,matched,exact_name,high,primary,3120121,까치산역,발달상권,11500,강서구,11500540,화곡1동,104596.0,1,yes,동일 명칭
+낙성대,기타,review,station_components,medium,primary,3110900,낙성대역 1번(관악구민 종합체육센터),골목상권,11620,관악구,11620625,인헌동,111817.0,1,review,낙성대 발달상권 명칭 부재로 역 출구 상권 2개를 후보로 보존
+낙성대,기타,review,station_components,medium,component,3110899,낙성대역 5번(관악중학교),골목상권,11620,관악구,11620575,행운동,73363.0,1,review,낙성대 발달상권 명칭 부재로 역 출구 상권 2개를 후보로 보존
+남대문,도심,matched,explicit_alias,high,primary,3130024,남대문시장(자유상가),전통시장,11140,중구,11140540,회현동,78068.0,1,yes,남대문 대표 전통시장
+남부터미널,강남,matched,explicit_alias,high,primary,3120175,남부터미널역,발달상권,11650,서초구,11650510,서초1동,259951.0,1,yes,역명 alias
+노량진,기타,matched,explicit_alias,high,primary,3120153,노량진역(노량진),발달상권,11590,동작구,11590510,노량진1동,443826.0,1,yes,노량진 대표 발달상권
+노원역,기타,matched,exact_name,high,primary,3120081,노원역,발달상권,11350,노원구,11350640,상계2동,267693.0,1,yes,동일 명칭
+논현역,강남,matched,exact_name,high,primary,3120185,논현역,발달상권,11680,강남구,11680521,논현1동,321182.0,1,yes,동일 명칭
+당산역,영등포신촌,matched,exact_name,high,primary,3120143,당산역,발달상권,11560,영등포구,11560560,당산2동,155541.0,1,yes,동일 명칭
+도산대로,강남,review,road_proxy,medium,primary,3120193,도산공원교차로,발달상권,11680,강남구,11680545,압구정동,185023.0,1,review,도산대로 도로권역의 대표 발달상권 proxy
+독산/시흥,기타,review,composite_components,medium,primary,3120132,독산동,발달상권,11545,금천구,11545610,독산1동,530021.0,1,review,복합 지명은 독산·시흥 구성요소를 분리해 보존
+독산/시흥,기타,review,composite_components,medium,component,3110753,시흥동 은행나무사거리,골목상권,11545,금천구,11545710,시흥5동,177282.0,1,review,복합 지명은 독산·시흥 구성요소를 분리해 보존
+동교/연남,영등포신촌,review,composite_components,medium,primary,3120104,연남동(홍대),발달상권,11440,마포구,11440710,연남동,437447.0,1,review,복합 지명은 연남·동교 구성요소를 분리해 보존
+동교/연남,영등포신촌,review,composite_components,medium,component,3110541,동교초등학교,골목상권,11440,마포구,11440700,망원2동,101027.0,1,review,복합 지명은 연남·동교 구성요소를 분리해 보존
+동대문,도심,review,explicit_alias,medium,primary,3001493,동대문패션타운 관광특구,관광특구,11140,중구,11140590,광희동,606058.0,1,review,동대문 광역권의 대표 관광특구 proxy
+뚝섬,기타,matched,explicit_alias,high,primary,3120051,뚝섬역,발달상권,11200,성동구,11200660,성수1가2동,218163.0,1,yes,역명 alias
+망원역,영등포신촌,matched,exact_name,high,primary,3120100,망원역,발달상권,11440,마포구,11440690,망원1동,67876.0,1,yes,동일 명칭
+명동,도심,matched,explicit_alias,high,primary,3120028,명동(명동거리),발달상권,11140,중구,11140550,명동,221515.0,1,yes,명동 대표 발달상권
+명일역,기타,matched,exact_name,high,primary,3120248,명일역,발달상권,11740,강동구,11740530,명일1동,143099.0,1,yes,동일 명칭
+목동,기타,review,explicit_alias,medium,primary,3120114,목동신시가지,발달상권,11470,양천구,11470510,목1동,421429.0,1,review,목동 대표 발달상권 proxy
+미아사거리,기타,matched,exact_name,high,primary,3120073,미아사거리,발달상권,11290,성북구,11290685,길음2동,90503.0,1,yes,동일 명칭
+방배역/내방역,강남,matched,composite_components,high,primary,3120166,방배역,발달상권,11650,서초구,11650600,방배1동,193617.0,1,yes,두 역명을 각각 보존
+방배역/내방역,강남,matched,composite_components,high,component,3120164,내방역,발달상권,11650,서초구,11650621,방배4동,212543.0,1,review,두 역명을 각각 보존
+방산시장,도심,matched,explicit_alias,high,primary,3130035,방산종합시장(방산시장),전통시장,11140,중구,11140605,을지로동,99727.0,1,yes,시장명 alias
+북촌,도심,matched,explicit_alias,high,primary,3120007,북촌(안국역),발달상권,11110,종로구,11110600,가회동,197675.0,1,yes,북촌 대표 발달상권
+불광역,기타,matched,exact_name,high,primary,3120092,불광역,발달상권,11380,은평구,11380570,대조동,61492.0,1,yes,동일 명칭
+사당,기타,matched,explicit_alias,high,primary,3120160,사당역(사당),발달상권,11650,서초구,11650610,방배2동,254257.0,1,yes,사당 대표 발달상권
+상계역,기타,matched,exact_name,high,primary,3110431,상계역,골목상권,11350,노원구,11350624,중계4동,55707.0,1,yes,동일 명칭(골목상권)
+상봉역,기타,matched,exact_name,high,primary,3120069,상봉역,발달상권,11260,중랑구,11260590,상봉2동,205828.0,1,yes,동일 명칭
+서래마을,강남,matched,explicit_alias,high,primary,3120165,서래마을카페거리(서래마을),발달상권,11650,서초구,11650581,반포4동,108614.0,1,yes,상권분석 명칭의 카페거리 suffix
+서울대입구역,기타,matched,exact_name,high,primary,3120159,서울대입구역,발달상권,11620,관악구,11620595,청룡동,235418.0,1,yes,동일 명칭
+서촌,도심,matched,explicit_alias,high,primary,3120002,서촌(경복궁역),발달상권,11110,종로구,11110530,사직동,176637.0,1,yes,서촌 대표 발달상권
+성신여대,기타,matched,exact_name,high,primary,3120072,성신여대,발달상권,11290,성북구,11290575,동선동,197286.0,1,yes,동일 명칭
+수유,기타,matched,explicit_alias,high,primary,3120076,수유역,발달상권,11305,강북구,11305635,수유3동,297339.0,1,yes,R-ONE의 역세권 축약명
+숙명여대,기타,review,explicit_alias,medium,primary,3120042,"숙대입구역(남영역, 남영동)",발달상권,11170,용산구,11170530,남영동,87154.0,1,review,숙명여대 주변의 상권분석 명칭은 숙대입구·남영역으로 표기
+시청,도심,matched,explicit_alias,high,primary,3120023,서울시청,발달상권,11140,중구,11140550,명동,88816.0,1,yes,시청 대표 발달상권
+신림역,기타,matched,explicit_alias,high,primary,3120157,신림역(신림),발달상권,11620,관악구,11620695,신림동,237915.0,1,yes,신림 대표 발달상권
+신사역,강남,matched,exact_name,high,primary,3120178,신사역,발달상권,11650,서초구,11650540,잠원동,353066.0,1,yes,동일 명칭
+신촌/이대,영등포신촌,matched,composite_components,high,primary,3120094,"신촌역(신촌역, 신촌로터리)",발달상권,11410,서대문구,11410585,신촌동,343829.0,1,yes,신촌·이대 발달상권을 각각 보존
+신촌/이대,영등포신촌,matched,composite_components,high,component,3120096,"이화여대(이대역, 이대)",발달상권,11410,서대문구,11410585,신촌동,151417.0,1,review,신촌·이대 발달상권을 각각 보존
+쌍문역,기타,review,explicit_alias,medium,primary,3130147,쌍문역동측상점가,전통시장,11320,도봉구,11320511,창1동,33857.0,1,review,상권분석 명칭 중 역명을 직접 포함하는 대표 전통시장 proxy
+압구정,강남,review,composite_components,medium,primary,3120188,압구정역,발달상권,11680,강남구,11680510,신사동,251746.0,1,review,압구정역·압구정로데오를 분리해 보존
+압구정,강남,review,composite_components,medium,component,3120202,압구정로데오역(압구정로데오),발달상권,11680,강남구,11680545,압구정동,265702.0,1,review,압구정역·압구정로데오를 분리해 보존
+약수역,기타,matched,exact_name,high,primary,3120038,약수역,발달상권,11140,중구,11140625,다산동,136837.0,1,yes,동일 명칭
+양재말죽거리,강남,review,road_proxy,medium,primary,3120179,양재역,발달상권,11650,서초구,11680655,도곡1동,348405.0,2,review,말죽거리의 대표 양재역 proxy; 양재역 R-ONE 권역과 target 재사용 검토 필요
+양재역,강남,matched,exact_name,high,primary,3120179,양재역,발달상권,11650,서초구,11680655,도곡1동,348405.0,2,review,동일 명칭
+여의도,영등포신촌,matched,explicit_alias,high,primary,3120149,여의도역(여의도),발달상권,11560,영등포구,11560540,여의동,598658.0,1,yes,여의도 대표 발달상권
+연신내,기타,matched,explicit_alias,high,primary,3120090,연신내역,발달상권,11380,은평구,11380520,불광1동,134415.0,1,yes,연신내 대표 발달상권
+영등포역,영등포신촌,matched,explicit_alias,high,primary,3120145,영등포역(영등포),발달상권,11560,영등포구,11560535,영등포동,404780.0,1,yes,영등포 대표 발달상권
+오류동역,기타,matched,exact_name,high,primary,3120123,오류동역,발달상권,11530,구로구,11530770,오류1동,209639.0,1,yes,동일 명칭
+왕십리,기타,matched,explicit_alias,high,primary,3120049,왕십리역(왕십리),발달상권,11200,성동구,11200560,행당1동,193725.0,1,yes,왕십리 대표 발달상권
+용산역,기타,review,explicit_alias,medium,primary,3120041,신용산역(용산역),발달상권,11170,용산구,11170625,한강로동,1031423.0,1,review,상권분석 명칭은 신용산역(용산역)으로 표기
+을지로,도심,review,composite_components,medium,primary,3120031,을지로3가역,발달상권,11140,중구,11140605,을지로동,254774.0,1,review,을지로 광역권의 두 대표 역세권을 보존
+을지로,도심,review,composite_components,medium,component,3120026,을지로입구역,발달상권,11140,중구,11140550,명동,200306.0,1,review,을지로 광역권의 두 대표 역세권을 보존
+이태원,기타,review,composite_components,medium,primary,3120046,이태원(이태원역),발달상권,11170,용산구,11170650,이태원1동,283429.0,1,review,역세권·관광특구를 분리해 보존
+이태원,기타,review,composite_components,medium,component,3001491,이태원 관광특구,관광특구,11170,용산구,11170650,이태원1동,372565.0,1,review,역세권·관광특구를 분리해 보존
+잠실/송파,기타,review,composite_components,medium,primary,3001495,잠실 관광특구,관광특구,11710,송파구,11710562,방이2동,2462734.0,1,review,잠실·송파 복합권역의 대표 상권 후보를 보존
+잠실/송파,기타,review,composite_components,medium,component,3120232,송파나루역,발달상권,11710,송파구,11710580,송파1동,60912.0,1,review,잠실·송파 복합권역의 대표 상권 후보를 보존
+잠실새내역,기타,matched,explicit_alias,high,primary,3120225,잠실새내역(신천),발달상권,11710,송파구,11710650,잠실본동,238047.0,1,yes,신천 표기 alias
+장안동,기타,review,explicit_alias,medium,primary,3120067,장안동사거리,발달상권,11230,동대문구,11230660,장안2동,219588.0,1,review,장안동 대표 발달상권 proxy
+종로,도심,review,composite_components,medium,primary,3120009,종로3가역,발달상권,11110,종로구,11110615,종로1·2·3·4가동,401520.0,1,review,종로 광역권의 역세권·관광특구를 보존
+종로,도심,review,composite_components,medium,component,3001494,종로·청계 관광특구,관광특구,11110,종로구,11110615,종로1·2·3·4가동,653127.0,1,review,종로 광역권의 역세권·관광특구를 보존
+천호,기타,matched,explicit_alias,high,primary,3120243,천호역,발달상권,11740,강동구,11740610,천호2동,215270.0,1,yes,천호 대표 발달상권
+청담,강남,matched,explicit_alias,high,primary,3120208,청담사거리(청담동명품거리),발달상권,11680,강남구,11680565,청담동,331337.0,1,yes,청담 대표 발달상권
+청량리,기타,matched,explicit_alias,high,primary,3120063,청량리역(청량리),발달상권,11230,동대문구,11230560,전농1동,316933.0,1,yes,청량리 대표 발달상권
+충무로,도심,matched,explicit_alias,high,primary,3120032,충무로역,발달상권,11140,중구,11140570,필동,236516.0,1,yes,역명 alias
+테헤란로,강남,unresolved,unresolved,none,none,,,,,,,,,0,no,"도로 corridor 경계와 1,650 상권의 직접 대응표가 없어 강남역 등으로 강제하지 않음"
+학동/강남구청역,강남,review,composite_components,medium,primary,3120200,학동사거리,발달상권,11680,강남구,11680565,청담동,266597.0,1,review,학동·강남구청역 복합권역 후보를 보존
+학동/강남구청역,강남,review,composite_components,medium,component,3120203,강남구청역,발달상권,11680,강남구,11680531,논현2동,173252.0,1,review,학동·강남구청역 복합권역 후보를 보존
+한티역,강남,matched,exact_name,high,primary,3120212,한티역,발달상권,11680,강남구,11680630,대치4동,112734.0,1,yes,동일 명칭
+혜화동,기타,matched,explicit_alias,high,primary,3120012,대학로(혜화역),발달상권,11110,종로구,11110650,혜화동,256888.0,1,yes,혜화동 대표 발달상권
+홍대/합정,영등포신촌,matched,composite_components,high,primary,3120103,홍대입구역(홍대),발달상권,11440,마포구,11440660,서교동,461923.0,1,yes,홍대·합정 대표 발달상권을 각각 보존
+홍대/합정,영등포신촌,matched,composite_components,high,component,3120101,합정역,발달상권,11440,마포구,11440660,서교동,251511.0,1,review,홍대·합정 대표 발달상권을 각각 보존
+화곡,기타,matched,explicit_alias,high,primary,3120120,화곡역,발달상권,11500,강서구,11500540,화곡1동,136057.0,1,yes,화곡 대표 발달상권
