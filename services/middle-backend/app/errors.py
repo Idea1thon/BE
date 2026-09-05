@@ -43,6 +43,10 @@ def not_found(message: str = "리소스를 찾을 수 없습니다") -> ApiError
     return ApiError(status.HTTP_404_NOT_FOUND, "NOT_FOUND", message)
 
 
+def conflict(message: str = "이미 존재하는 리소스입니다") -> ApiError:
+    return ApiError(status.HTTP_409_CONFLICT, "CONFLICT", message)
+
+
 def validation_error(message: str, extra: dict[str, Any] | None = None) -> ApiError:
     return ApiError(
         status.HTTP_400_BAD_REQUEST, "VALIDATION_ERROR", message, extra
@@ -88,6 +92,7 @@ VALIDATION_400 = {400: error_response("VALIDATION_ERROR — 필수 필드 누락
 UNAUTHORIZED_401 = {401: error_response("UNAUTHORIZED — 토큰 없음·만료·무효")}
 FORBIDDEN_403 = {403: error_response("FORBIDDEN — 권한 범위 밖")}
 NOT_FOUND_404 = {404: error_response("NOT_FOUND — 리소스 없음")}
+CONFLICT_409 = {409: error_response("CONFLICT — 유니크 제약 위반")}
 
 
 _STATUS_TO_CODE = {

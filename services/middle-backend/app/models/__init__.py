@@ -140,6 +140,11 @@ class OperationReport(Base):
     __tablename__ = "operation_report"
     __table_args__ = (
         UniqueConstraint("branch_id", "report_month", name="uq_report_branch_month"),
+        # unique 만으로는 같은 점포에 2026-08-01 과 2026-08-15 를 모두 넣을 수 있어
+        # "월 1건"이 보장되지 않는다. 0003 리비전이 DB에 같은 제약을 만든다.
+        CheckConstraint(
+            "EXTRACT(DAY FROM report_month) = 1", name="ck_report_month_first_day"
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

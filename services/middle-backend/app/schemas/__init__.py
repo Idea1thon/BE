@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.models.enums import RegionLevel, RiskLevel, UserType
+from app.models.enums import (
+    InputSource,
+    RegionLevel,
+    ReportStatus,
+    RiskLevel,
+    UserType,
+)
 
 
 # ------------------------------------------------------------------ 공통
@@ -138,6 +145,27 @@ class InputFieldItem(BaseModel):
     group_name: str
     is_required: bool
     display_order: int
+
+
+class ReportItemInput(BaseModel):
+    """보고서 입력 항목 1건. 미입력 선택 항목은 배열에 넣지 않는다."""
+
+    field_code: str = Field(min_length=1, max_length=40)
+    amount: int = Field(ge=0)
+
+
+class ReportCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    input_source: InputSource = InputSource.MANUAL
+    items: list[ReportItemInput] = Field(min_length=1)
+
+
+class ReportCreateResponse(BaseModel):
+    report_id: int
+    status: ReportStatus
+    analysis_request_id: uuid.UUID
 
 
 class InputFieldListResponse(BaseModel):
