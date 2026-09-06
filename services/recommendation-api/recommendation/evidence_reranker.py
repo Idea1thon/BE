@@ -57,10 +57,14 @@ def select_sources(query: dict[str, Any], sources: dict[str, dict[str, Any]], cl
         except LLMRuntimeError as exc:
             error = str(exc)
     selected_ids = ranked[:TOP_SOURCES]
-    # Limit relevant context without hiding known counter-evidence or uncertainty.
-    selected_ids.extend(key for key in ranked if key not in selected_ids and sources[key]['bucket'] in {
-        'summary', 'counter_evidence', 'missing_features',
-    })
+    # Limit relevant context without hiding known counter-evidence or
+    # uncertainty, and without dropping any structured fact the card must be
+    # able to cite: the candidate's own evidence records and the region
+    # retrieval facts stay regardless of lexical rank.
+    selected_ids.extend(key for key in ranked if key not in selected_ids and (
+        sources[key]['bucket'] in {'summary', 'counter_evidence', 'missing_features', 'evidence'}
+        or key.startswith('retrieval-')
+    ))
     return {key: sources[key] for key in selected_ids}, {
         'mode': mode, 'source_count': len(sources), 'selected_count': len(selected_ids),
         'selected_ids': selected_ids, 'shortlist_count': len(shortlist), 'error': error,
