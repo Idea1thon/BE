@@ -270,6 +270,17 @@ async def run_analysis(session: AsyncSession, report: OperationReport) -> SirenA
         report.analysis_error = str(getattr(exc, "message", None) or exc)[:500]
         await session.commit()
         return None
+    except Exception:  # noqa: BLE001
+        # 보고서는 이 함수에 오기 전에 이미 커밋됐다. 여기서 예외가 그대로 올라가면
+        # 제출 API 가 500 을 내고 행은 ANALYZING 에 남는다 — 재시도 대상으로도
+        # 잡히지 않고 점주 화면에서 영원히 "분석 중" 이다. 원인이 무엇이든 상태는
+        # 확정한다.
+        logger.exception("위험도 분석 중 예상 밖 오류 report_id=%s", report.id)
+        report.status = ReportStatus.FAILED
+        # 예외 문자열에 상대 본문이나 스택이 섞일 수 있어 그대로 노출하지 않는다.
+        report.analysis_error = "위험도 분석 중 오류가 발생했습니다"
+        await session.commit()
+        return None
 
     await session.merge(row)
     report.status = ReportStatus.COMPLETED

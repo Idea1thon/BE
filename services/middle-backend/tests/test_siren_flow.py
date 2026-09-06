@@ -188,3 +188,89 @@ async def test_status_endpoint_reflects_the_outcome(client, seeded):
     res = await client.get(f"/api/v1/reports/{report_id}/status", headers=headers)
     assert res.status_code == 200, res.text
     assert res.json()["status"] == "COMPLETED"
+
+
+# ------------------------------------------------------------------ 상세 응답
+# 저장 형식을 바꿨으면 응답 스키마도 같이 바뀌어야 한다. 아래 두 건이 없으면
+# DB 행만 보는 테스트는 전부 통과하면서 API 는 500 을 내는 상태가 유지된다.
+async def test_report_detail_carries_calculated_analysis(client, seeded):
+    """`factors` 는 사이렌 `components` 라 dict 다.
+
+    `AnalysisDetail.factors` 가 list 로 선언돼 있으면 성공 분석이 붙은 보고서마다
+    이 조회가 500 이 된다. test_report_queries 의 픽스처는 factors 를 리스트로
+    직접 INSERT 하므로 그쪽 테스트로는 잡히지 않는다.
+    """
+    headers = await _auth(client, OWNER1)
+    report_id = (await _submit(client, headers, "2025-10")).json()["report_id"]
+
+    res = await client.get(f"/api/v1/reports/{report_id}", headers=headers)
+    assert res.status_code == 200, res.text
+    analysis = res.json()["analysis"]
+    assert analysis["factors"] == SIREN_CALCULATED["components"]
+    assert analysis["risk_score"] == 74
+    assert analysis["risk_level"] == "DANGER"
+
+
+async def test_report_detail_survives_partial_analysis(client, seeded, monkeypatch):
+    """부분 결과는 점수·등급이 null 이다. 상세 조회가 그걸 실어 나를 수 있어야 한다."""
+    partial = {
+        **SIREN_CALCULATED,
+        "risk": {**SIREN_CALCULATED["risk"], "score": None, "grade": None,
+                 "calculation_status": "partial"},
+        "alert": {"should_fire": False},
+    }
+
+    async def _analyze(payload):
+        return partial
+
+    monkeypatch.setattr(siren_client, "analyze", _analyze)
+    headers = await _auth(client, OWNER1)
+    report_id = (await _submit(client, headers, "2025-11")).json()["report_id"]
+
+    res = await client.get(f"/api/v1/reports/{report_id}", headers=headers)
+    assert res.status_code == 200, res.text
+    analysis = res.json()["analysis"]
+    assert analysis["risk_score"] is None
+    assert analysis["risk_level"] is None
+
+
+# ------------------------------------------------------------------ 예상 밖 응답
+async def test_unexpected_error_does_not_strand_the_report(client, seeded, monkeypatch):
+    """보고서는 분석 전에 이미 커밋된다. 매핑 중 어떤 예외가 나든 ANALYZING 으로
+    남으면 안 된다 — 재시도 대상으로도 안 잡히고 화면에는 영원히 '분석 중' 이다."""
+
+    async def _boom(payload):
+        raise TypeError("사이렌이 예상 밖 구조를 줬다고 치자")
+
+    monkeypatch.setattr(siren_client, "analyze", _boom)
+    headers = await _auth(client, OWNER1)
+    res = await _submit(client, headers, "2025-12")
+    report_id = res.json()["report_id"]
+
+    async with await _session() as session:
+        report = await session.get(OperationReport, report_id)
+        assert report.status is ReportStatus.FAILED
+        assert report.analysis_error                       # 이유가 남는다
+        assert "TypeError" not in report.analysis_error    # 내부 예외는 노출하지 않는다
+        assert await session.get(ReportAnalysis, report_id) is None
+
+
+async def test_non_json_siren_body_becomes_a_failed_report(client, seeded, monkeypatch):
+    """200 이어도 본문이 계약을 지킨다는 보장은 없다. 클라이언트 층에서 걸러야
+    매핑 층이 AttributeError 로 터지지 않는다."""
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html>gateway</html>")
+
+    fake = httpx.AsyncClient(
+        transport=httpx.MockTransport(_handler), base_url="http://siren.test"
+    )
+    monkeypatch.setattr(siren_client, "get_client", lambda: fake)
+
+    headers = await _auth(client, OWNER1)
+    res = await _submit(client, headers, "2025-02")
+    report_id = res.json()["report_id"]
+
+    async with await _session() as session:
+        report = await session.get(OperationReport, report_id)
+        assert report.status is ReportStatus.FAILED
+        assert "해석할 수 없습니다" in report.analysis_error
