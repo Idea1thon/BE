@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import Mock, patch
 from recommendation.llm_explanation import (
     explanation_sources, template_card, validate_card, verify_grounded_claims,
-    explain_candidates,
+    explain_candidates, prune_unverified_claims,
 )
 from recommendation.llm_runtime import LLMConfig, LLMRuntimeError
 
@@ -79,6 +79,76 @@ class GroundedExplanationTests(unittest.TestCase):
         self.assertEqual(result['cards'][0]['reasons'], self.card['reasons'])
         self.assertEqual(result['sources_by_candidate']['test']['reasons:0']['text'], self.candidate['reasons'][0])
         self.assertEqual(client_type.return_value.generate_json.call_count, 2)
+
+    def test_candidate_evidence_is_citable_from_any_observed_bucket(self):
+        cand = {
+            'candidate_id': 'j', 'fit_tier': '조건부 검토', 'reasons': ['직장인구 관측치 있음'],
+            'counter_evidence': [], 'context_notes': [], 'missing_features': [],
+            'evidence': [{'metric_name': 'jobs', 'value': 4206, 'seoul_percentile': 88.6}],
+        }
+        sources = explanation_sources(cand, [])
+        self.assertEqual(sources['candidate-evidence:0']['bucket'], 'evidence')
+        card = template_card(cand)
+        card['reasons'] = ['상권 배경 직장인구가 4,206명으로 서울 88.6백분위입니다.']
+        card['citations'] = {'reasons:0': ['candidate-evidence:0']}
+        self.client.generate_json.return_value = {'verdicts': [{'claim_id': 'reasons:0', 'supported': True}]}
+        verified = verify_grounded_claims(cand, card, sources, self.client)
+        self.assertEqual(verified, {'reasons:0'})
+        self.assertTrue(validate_card(cand, card, verified_claims=verified, source_catalog=sources)[0])
+
+    def test_summary_may_cite_other_observed_buckets_but_reasons_may_not(self):
+        cand = {
+            'candidate_id': 's', 'fit_tier': '주의', 'reasons': [],
+            'counter_evidence': ['임대료 확인 불가'], 'context_notes': [], 'missing_features': [],
+            'evidence': [{'metric_name': 'jobs', 'value': 4206}],
+        }
+        sources = explanation_sources(cand, [])
+        card = template_card(cand)
+        card['summary'] = '주의 후보입니다. 직장인구 4,206명 배경은 있으나 임대료 확인 불가 등은 별도 검토가 필요합니다.'
+        card['citations'] = {'summary': ['candidate-evidence:0', 'counter_evidence:0']}
+        self.client.generate_json.return_value = {'verdicts': [{'claim_id': 'summary', 'supported': True}]}
+        self.assertEqual(verify_grounded_claims(cand, card, sources, self.client), {'summary'})
+        # a reasons claim cannot launder a counter_evidence source
+        card['reasons'] = ['임대료 확인 불가']
+        card['citations'] = {'reasons:0': ['counter_evidence:0']}
+        self.assertFalse(validate_card(cand, card, source_catalog=sources)[0])
+
+    def test_prune_keeps_verified_and_reverts_or_drops_the_rest(self):
+        cand = {
+            'candidate_id': 'p', 'fit_tier': '조건부 검토',
+            'reasons': ['버스정류장 3개', '지하철역 2개'], 'counter_evidence': [],
+            'context_notes': [], 'missing_features': [], 'evidence': [],
+        }
+        card = template_card(cand)
+        card['summary'] = '아주 좋은 입지입니다.'
+        card['reasons'] = ['버스정류장이 3개 있습니다.', '지하철역이 2개 있습니다.']
+        card['citations'] = {'summary': ['summary'], 'reasons:0': ['reasons:0'], 'reasons:1': ['reasons:1']}
+        pruned, verified = prune_unverified_claims(cand, card, {'reasons:0'})
+        self.assertEqual(pruned['summary'], template_card(cand)['summary'])
+        self.assertEqual(pruned['reasons'], ['버스정류장이 3개 있습니다.'])
+        self.assertEqual(verified, {'reasons:0'})
+        self.assertEqual(pruned['citations'], {'reasons:0': ['reasons:0']})
+        self.assertTrue(validate_card(cand, pruned, verified_claims=verified)[0])
+
+    @patch('recommendation.llm_explanation.LLMConfig.from_env')
+    @patch('recommendation.llm_explanation.OpenAICompatibleJsonClient')
+    def test_partial_verification_yields_llm_card_without_the_bad_claim(self, client_type, config):
+        config.return_value = LLMConfig(endpoint='https://example.invalid', api_key='test', model='test')
+        cand = {
+            'candidate_id': 'test', 'fit_tier': '조건부 검토',
+            'reasons': ['반경 내 버스정류장 3개', '반경 내 지하철역 2개'],
+            'counter_evidence': [], 'context_notes': [], 'missing_features': [], 'evidence': [],
+        }
+        card = template_card(cand)
+        card['reasons'] = ['버스정류장이 반경 내에 3개 있습니다.', '지하철역까지 5분 거리입니다.']
+        card['citations'] = {'reasons:0': ['reasons:0'], 'reasons:1': ['reasons:1']}
+        client_type.return_value.generate_json.side_effect = [
+            card, {'verdicts': [{'claim_id': 'reasons:0', 'supported': True},
+                                {'claim_id': 'reasons:1', 'supported': False}]},
+        ]
+        result = explain_candidates([cand], llm_mode='required')
+        self.assertEqual(result['explanation_mode'], 'llm')
+        self.assertEqual(result['cards'][0]['reasons'], ['버스정류장이 반경 내에 3개 있습니다.'])
 
     @patch('recommendation.llm_explanation.LLMConfig.from_env')
     @patch('recommendation.llm_explanation.OpenAICompatibleJsonClient')

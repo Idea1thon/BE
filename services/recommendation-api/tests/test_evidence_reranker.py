@@ -43,6 +43,15 @@ class EvidenceRerankerTests(unittest.TestCase):
         self.assertIn('missing_features:0', selected)
         self.assertLess(len(selected), len(sources))
 
+    def test_evidence_and_retrieval_sources_survive_context_limit(self):
+        sources = {str(i): {'bucket': 'context_notes', 'text': '무관한 배경'} for i in range(60)}
+        sources['candidate-evidence:0'] = {'bucket': 'evidence', 'text': '{"metric": "jobs"}'}
+        sources['retrieval-abc'] = {'bucket': 'context_notes', 'text': '{"dimension": "sales"}'}
+        selected, _ = select_sources(self.query, sources)
+        self.assertIn('candidate-evidence:0', selected)
+        self.assertIn('retrieval-abc', selected)
+        self.assertLess(len(selected), len(sources))
+
     def test_reordering_preserves_citation_target(self):
         selected, _ = select_sources(self.query, self.sources)
         card = {'context_notes': ['지역 매출 정보', '직장인 점심 시간대 수요 정보'],
