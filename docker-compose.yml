@@ -20,7 +20,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpass}
       POSTGRES_DB: postgres
     ports:
-      - "55432:5432"
+      # loopback 에만 게시한다. 이 compose 는 저장소에 공개된 기본값(DB 비밀번호,
+      # 시드 비밀번호, JWT secret, 내부 토큰)을 쓰므로 0.0.0.0 에 열면 같은
+      # 네트워크의 누구나 그 자격 증명으로 붙을 수 있다.
+      - "127.0.0.1:55432:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
       # 초기화는 볼륨이 비어 있을 때 한 번만 돈다. DDL 을 다시 적용하려면
@@ -29,9 +32,19 @@ services:
       # 스키마 정본을 복사하지 않고 그대로 마운트한다. 사본은 갈라진다.
       - ./services/recommendation-api/db:/schema:ro
     healthcheck:
-      # ideaton 까지 확인해야 02 초기화 스크립트가 끝난 시점을 잡는다.
-      # postgres 기본 DB 만 보면 초기화 도중에도 healthy 로 뜬다.
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ideaton"]
+      # 초기화가 끝난 시점을 잡아야 한다. 두 가지를 조심한다.
+      #
+      # 1) postgres 이미지는 초기화 중 **Unix 소켓 전용 임시 서버**를 띄운다.
+      #    -h 를 주지 않으면 pg_isready 가 그 임시 서버에 붙어 성공하므로,
+      #    ideaton 이 아직 없는데도 healthy 가 된다. TCP 로만 본다.
+      # 2) pg_isready 는 DB 존재 여부를 검사하지 않는다. 이름을 줘도 서버가
+      #    살아 있으면 성공한다. 그래서 실제 질의로 스키마까지 확인한다.
+      #
+      # 여기서 잘못 판정하면 depends_on 이 일찍 풀려 백엔드의 alembic 단계가
+      # 실패하고, 로컬에는 restart 정책이 없어 종료 상태로 남는다.
+      test:
+        - CMD-SHELL
+        - 'pg_isready -h 127.0.0.1 -U postgres -d ideaton && PGPASSWORD=$$POSTGRES_PASSWORD psql -h 127.0.0.1 -U postgres -d ideaton -tAc "SELECT to_regclass(''location.area'') IS NOT NULL" | grep -q t'
       interval: 3s
       timeout: 3s
       retries: 30
@@ -54,7 +67,7 @@ services:
       RECOMMENDATION_API_URL: http://recommendation-api:8000
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-development-internal-token}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
   recommendation-api:
     build: ./services/recommendation-api
@@ -85,7 +98,7 @@ services:
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:5173}
     ports:
       # 8000 은 중간 백엔드가 쓰므로 호스트에서는 8001 로 노출한다.
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       # 실행 결과(run 아티팩트)를 컨테이너 재시작 후에도 볼 수 있게 한다.
       - recommendation-output:/app/output

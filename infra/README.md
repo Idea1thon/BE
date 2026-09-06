@@ -24,7 +24,14 @@ docker compose up --build
 docker compose down -v && docker compose up --build
 ```
 
-**추천 파이프라인 실행에는 원천 데이터가 필요하다.** 저장소에 없다. 서버는 데이터 없이도 뜨지만 실제 추천 요청은 실패한다. 데이터를 가진 사람은 `.env` 에 `RECOMMENDATION_DATA_ROOT` 를 채우고 볼륨을 연결한다.
+**로컬 compose 로는 실제 추천을 실행할 수 없다.** 초기화 스크립트는 DDL 만 적용하므로 `location.area` 를 비롯한 테이블이 전부 0건이고, `RECOMMENDATION_SOURCE` 가 `db` 로 고정돼 있어 `DbSource.layers()` 가 DB 만 본다. **`RECOMMENDATION_DATA_ROOT` 에 원천 CSV 를 마운트해도 파일로 fallback 하지 않는다.** 서버는 뜨지만 추천 요청은 빈 결과나 오류가 된다.
+
+로컬에서 추천을 돌려보려면 둘 중 하나가 필요하다.
+
+- **적재된 DB 를 가리킨다** — `docker-compose.prod.yml` 처럼 `IDEATON_DATABASE_URL` 을 Azure `ideaton` 으로 두고 추천 API 만 띄운다. 지금은 이 방법만 실제로 동작한다.
+- **로컬 DB 에 데이터를 적재한다** — 적재 절차는 추천 서비스 쪽 담당이며 아직 문서화돼 있지 않다. `services/recommendation-api/scripts/` 의 적재 스크립트가 필요로 하는 원천 데이터가 저장소에 없다.
+
+DDL 만으로 충분한 작업(스키마 확인, 마이그레이션, 중간 백엔드 개발)에는 로컬 compose 로 충분하다.
 
 **추천 API 컨테이너에는 `postgresql-client` 가 들어 있다.** `recommendation/serving_db.py` 가 Python 드라이버가 아니라 `psql` 서브프로세스로 `COPY (SELECT ...) TO STDOUT` 을 실행하기 때문이다. 이걸 빼면 기동은 되지만 파이프라인이 실행 시점에 죽는다.
 
@@ -40,7 +47,7 @@ docker compose down -v && docker compose up --build
 docker compose up db
 ```
 
-`postgresql://postgres:devpass@localhost:55432/fmp` 로 붙는다.
+`postgresql://postgres:devpass@localhost:55432/fmp` 로 붙는다. 포트는 loopback 에만 게시되므로 같은 기기에서만 접근된다 — 이 구성은 저장소에 공개된 기본 비밀번호를 쓰기 때문이다.
 
 ## Azure 와의 관계
 
