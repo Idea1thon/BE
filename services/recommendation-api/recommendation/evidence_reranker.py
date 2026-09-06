@@ -9,7 +9,8 @@ from typing import Any
 from .llm_runtime import LLMRuntimeError
 
 MAX_RERANK_SOURCES = 48
-TOP_SOURCES = 16
+TOP_SOURCES = 32
+MAX_EXPLORATION_SOURCES = 8
 
 
 def _terms(text: str) -> Counter:
@@ -72,12 +73,69 @@ def source_topic_ids(source: dict[str, Any]) -> set[str]:
     return {topic for topic, words in _TOPIC_KEYWORDS.items() if any(word in text for word in words)}
 
 
+_STOP_WORDS = {'비교', '비교해줘', '알고', '싶어요', '추천', '추천해줘', '해주세요', '곳', '정보', '대한', '그리고', '보고', '해줘', '확인', '조건', '관련', '있는', '좋은', '어떤', '어디'}
+
+
+def _lexical_text(source: dict) -> str:
+    text = str(source.get('text') or '')
+    record = source if 'metric_name' in source or 'dimension' in source else None
+    if record is None:
+        try:
+            decoded = json.loads(text)
+            record = decoded if isinstance(decoded, dict) else None
+        except (TypeError, ValueError):
+            pass
+    if record is None:
+        return text
+    # Incidental notes/region names must not make an unrelated metric dominate.
+    return ' '.join(str(record.get(key) or '') for key in
+                    ('metric_name', 'dimension', 'interpretation', 'label', 'description'))
+
+
+def _coverage_terms(text: str) -> list[str]:
+    words = re.findall(r'[가-힣]+|[a-zA-Z]+', text.lower())
+    result = []
+    for word in words:
+        word = re.sub(r'(?:에서|으로|와|과|은|는|이|가|을|를|도|만|에)$', '', word)
+        if len(word) >= 2 and word not in _STOP_WORDS and word not in result:
+            result.append(word)
+    return result[:TOP_SOURCES]
+
+
+def _with_coverage(ranked: list[str], texts: dict[str, str], terms: list[str], limit: int,
+                   topics: set[str], topic_by_source: dict[str, set[str]]) -> tuple[list[str], list[str]]:
+    selected = ranked[:limit]
+    representatives = []
+    # Reserve requested topic identities as well as literal question terms.
+    # "직장인" need not occur literally in metric "총_직장_인구_수".
+    groups = [[key for key in ranked if topic in topic_by_source.get(key, set())]
+              for topic in sorted(topics)]
+    groups.extend([key for key in ranked if term in texts[key].lower()] for term in terms)
+    for matches in groups:
+        if not matches:
+            continue
+        matching = next((key for key in selected if key in matches), matches[0])
+        if matching not in selected:
+            if len(selected) < limit:
+                selected.append(matching)
+            else:
+                replace = next((index for index in range(len(selected) - 1, -1, -1)
+                                if selected[index] not in representatives), None)
+                if replace is None:
+                    continue
+                selected[replace] = matching
+        if matching not in representatives:
+            representatives.append(matching)
+    return selected, representatives
+
+
 def select_sources(query: dict[str, Any], sources: dict[str, dict[str, Any]], client=None):
     """Bound context by relevance, retaining every warning and missing-data source.
 
-    The optional model selects short IDs only from relevant optional sources.
-    Partial rankings retain valid IDs and fill only from the relevant shortlist.
-    Fully unusable output falls back to the same filtered lexical selection.
+    Topic matches boost scores without excluding other lexical matches. The
+    optional model can explore a small diverse zero-overlap sample; only its
+    accepted exploratory IDs survive. Explicit exclusions remain enforced.
+    Partial rankings retain valid IDs and fill from lexical/topic matches.
     No inference is promoted to evidence, and omitted sources remain in audit data.
     """
     text = query.get('normalized_text')
@@ -85,22 +143,39 @@ def select_sources(query: dict[str, Any], sources: dict[str, dict[str, Any]], cl
         return dict(sources), {'mode': 'unchanged', 'source_count': len(sources)}
     tokens = _terms(text)
     contract = query.get('question_contract')
-    raw_topics = contract.get('topic_ids') if isinstance(contract, dict) else None
-    topics = {topic for topic in raw_topics if isinstance(topic, str)} if isinstance(raw_topics, list) else None
-    if topics == set() and not contract.get('excluded_topics'):
-        topics = None  # Unmapped questions retain the existing lexical path.
+    contract = contract if isinstance(contract, dict) else {}
+    raw_topics = contract.get('topic_ids')
+    topics = {t for t in raw_topics if isinstance(t, str)} if isinstance(raw_topics, list) else set()
+    raw_excluded = contract.get('excluded_topics')
+    excluded = {t for t in raw_excluded if isinstance(t, str)} if isinstance(raw_excluded, list) else set()
     mandatory = [key for key, source in sources.items() if source.get('bucket') in _MANDATORY_BUCKETS]
-    scored = []
+    scored, exploratory = [], []
+    texts = {}
+    topic_by_source = {}
+    families = set()
     for position, (source_id, source) in enumerate(sources.items()):
         if source.get('bucket') in _MANDATORY_BUCKETS:
             continue
-        words = _terms(str(source.get('text') or ''))
-        score = sum(min(count, words[term]) for term, count in tokens.items())
-        if (topics is not None and not topics.intersection(source_topic_ids(source))) or (topics is None and score <= 0):
+        source_topics = source_topic_ids(source)
+        if source_topics & excluded and not source_topics & topics:
             continue
-        scored.append((source_id, score, position))
+        topic_by_source[source_id] = source_topics
+        lexical = _lexical_text(source)
+        texts[source_id] = lexical
+        words = _terms(lexical)
+        overlap = sum(min(count, words[term]) for term, count in tokens.items())
+        boost = 3 * len(topics & source_topics)
+        if overlap > 0 or boost:
+            scored.append((source_id, overlap + boost, position))
+        elif client is not None and len(exploratory) < MAX_EXPLORATION_SOURCES:
+            family = (source.get('bucket'), lexical)
+            if family not in families:
+                families.add(family)
+                exploratory.append(source_id)
     ranked = [row[0] for row in sorted(scored, key=lambda row: (-row[1], row[2]))]
-    shortlist = ranked[:MAX_RERANK_SOURCES]
+    terms = _coverage_terms(text)
+    relevant_shortlist, coverage = _with_coverage(ranked, texts, terms, MAX_RERANK_SOURCES - len(exploratory), topics, topic_by_source)
+    shortlist = relevant_shortlist + exploratory
     mode, error = 'lexical', None
     top_k = min(TOP_SOURCES, len(shortlist))
     diagnostics = {
@@ -140,7 +215,7 @@ def select_sources(query: dict[str, Any], sources: dict[str, dict[str, Any]], cl
                     accepted.append(aliases[alias])
             diagnostics['accepted_count'] = len(accepted)
             diagnostics['omitted_count'] = len(shortlist) - len(accepted)
-            diagnostics['backfilled_count'] = max(0, top_k - len(accepted))
+            diagnostics['backfilled_count'] = min(max(0, top_k - len(accepted)), len([key for key in ranked if key not in accepted]))
             if not accepted:
                 diagnostics['failure_reason'] = 'no_valid_ids'
                 raise LLMRuntimeError('리랭킹 응답에 유효한 출처 ID가 없습니다.')
@@ -153,13 +228,14 @@ def select_sources(query: dict[str, Any], sources: dict[str, dict[str, Any]], cl
         except LLMRuntimeError as exc:
             diagnostics['failure_reason'] = diagnostics['failure_reason'] or 'runtime_error'
             error = str(exc)
-    selected_ids = ranked[:TOP_SOURCES]
+    selected_ids, coverage = _with_coverage(ranked, texts, terms, TOP_SOURCES, topics, topic_by_source)
     # Mandatory safety/uncertainty sources survive independently of relevance.
     selected_ids.extend(mandatory)
     return {key: sources[key] for key in selected_ids}, {
         'mode': mode, 'source_count': len(sources), 'selected_count': len(selected_ids),
         'selected_ids': selected_ids, 'shortlist_count': len(shortlist), 'error': error,
-        'mandatory_count': len(mandatory), 'relevant_count': len(ranked),
+        'mandatory_count': len(mandatory), 'relevant_count': len(scored),
+        'exploration_count': len(exploratory), 'coverage_ids': coverage,
         'excluded_count': len(sources) - len(selected_ids),
         'diagnostics': diagnostics,
     }
