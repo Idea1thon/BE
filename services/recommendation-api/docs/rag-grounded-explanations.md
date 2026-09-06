@@ -47,3 +47,38 @@
 `relevance_by_candidate`의 `mode`는 보정 없이 충분한 순위를 받은 `llm`, 유효한 일부 순위를 활용한 `llm_partial`, 전체 토큰 복귀인 `lexical`, 질문 없는 `unchanged`로 구분한다. 소비자는 이 값을 설명 카드의 `explanation_mode`와 구분해야 한다.
 
 `diagnostics`는 요청한 상위 개수(`requested_count`), 실제 응답 배열 길이(`returned_count`), 중복 제거 후 유효 ID 수(`accepted_count`), 중복/미등록/타입 오류 수, 사전선별48개 중 반환되지 않은 수(`omitted_count`), 상위 개수를 채우기 위해 보충한 수(`backfilled_count`)를 제공한다. 상위16개만 요청하므로 omitted_count가 양수여도 정상이다. `failure_reason`은 `invalid_format`, `no_valid_ids`, `runtime_error` 또는 null이다. 모델 호출을 하지 않은 lexical/unchanged 경로는 실패를 뜻하지 않는다. 원문 모델 응답이나 사용자 자격증명은 진단에 기록하지 않는다.
+
+### 설명 검증 전후 진단
+
+`explanations.verification_by_candidate[candidate_id]`는 생성 초안과 최종 설명의 차이를 반환한다. 기존 `cards`, `explanation_mode`, `degraded`, `llm.validation_or_runtime_errors`의 의미와 검증·fallback 정책은 유지한다. 검증에서 일부 재서술이 삭제돼도 최종 카드가 유효하면 `explanation_mode=llm`, 오류 목록 `[]`일 수 있으므로 문장 단위 손실은 이 진단으로 확인한다. 추가 LLM 호출은 없다.
+
+진단의 `content_status=unverified_draft`는 발췌문에 거부된 주장도 포함됨을 나타낸다. 진단을 사용자용 추천 문장, 관측 Evidence, 후속 검색 원천으로 사용하지 않는다. `supported`는 기존 검토기가 통과시켰다는 뜻이며 독립적인 사실 검증을 의미하지 않는다. 원시 응답 전체, 가설 배열, 프롬프트, 인증 정보를 별도로 수집하지 않는다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `generation_status` | `not_attempted`, `generated`, `invalid_card`, `runtime_error` |
+| `final_mode`, `fallback_reason` | 최종 카드 모드와 전체 카드 복귀 사유. 사유는 `no_client`, `generation_error`, `verification_error`, `card_validation_failed` 또는 null |
+| `summary_reverted` | 생성된 문자열 요약이 템플릿과 달랐으나 최종적으로 템플릿 요약으로 돌아갔는지 여부. 처음부터 템플릿 요약을 생성한 경우 false |
+| `draft_claim_count`, `rewritten_claim_count`, `verified_claim_count` | 초안 관측 항목 수(요약 포함), 문자열 재서술 수, 의미 검토까지 통과한 재서술 수. 검토 통과 후 전체 카드 fallback이 발생할 수도 있음 |
+| `removed_claim_count` | 부분 정리로 제거된 목록 항목 수. 요약 복귀 및 전체 카드 fallback 수와 구분 |
+| `verification_counts`, `disposition_counts` | 전체 초안의 검사 결과·최종 처리별 개수. 문장 상세가 잘려도 전체 집계는 유지 |
+| `draft_citation_count`, `final_citation_count` | 초안·최종 인용 배열의 문자열 출처 참조 발생 횟수. 고유 출처 수나 인용 문장 수가 아님 |
+| `draft_retrieval_citation_count`, `final_retrieval_citation_count` | 위 참조 중 `retrieval-` 접두사가 있는 횟수. 초안 값에는 미등록 ID나 잘못된 위치의 인용도 포함되므로 출처 유효성을 뜻하지 않음 |
+| `claims`, `claims_truncated_count` | 초안 순서의 항목 상세 최대100개와 생략 항목 수 |
+
+각 `claims` 항목은 다음 필드를 갖는다.
+
+- `draft_position`: 생성 당시 위치. 예: `context_notes:2`.
+- `final_position`: 부분 삭제와 관련도 재정렬을 모두 거친 최종 카드 위치. 유지되지 않았으면 null. 같은 문장이 반복되더라도 검사 결과·인용·발생 순서로 대응한다.
+- `verification`: `verbatim`(원문 복사), `supported`, `missing_citations`, `invalid_citations`, `unknown_source`, `disallowed_source_bucket`, `unsupported_number`, `semantic_rejected`, `missing_verdict`, `invalid_verdict`, `verifier_runtime_error`, `invalid_claim_type`, `not_checked` 중 하나. 로컬 검사에서는 첫 실패 사유를 기록한다. `semantic_rejected`는 명시적 false, `missing_verdict`는 항목 누락, `invalid_verdict`는 형식 오류이며 셋을 동일한 의미 거부로 해석하지 않는다.
+- `disposition`: `kept`, `removed`, `summary_reverted`, `card_fallback`. 의미 검토에서 통과했어도 후보 ID 오류 등으로 전체 카드가 복귀하면 `card_fallback`이다.
+- `text_excerpt`, `text_truncated`, `text_sha256`: 원문 최대500자, 절단 여부, 전체 원문 SHA-256. 비문자열 항목은 빈 발췌·null 해시로 보고한다.
+- `source_ids`, `source_ids_truncated`: 초안의 문자열 출처 ID 최대8개, ID당 최대128자와 절단 여부. 전체 인용이 필요하면 최종 `cards.citations` 및 `sources_by_candidate`를 함께 확인한다. 절단된 ID는 조회 키로 사용하지 않는다.
+
+발췌와 출처 ID의 잘못된 Unicode surrogate는 대체 문자로 치환해 UTF-8 응답·파일 저장 실패를 막는다. 해시는 치환 전 문자열을 UTF-8 `surrogatepass`로 인코딩한 값이다.
+
+SQL 직접 인용이 최종0건이면 초안 인용과 문장별 처리를 확인한다. 초안에도0건이면 검증에서 지운 인용은 없다. 초안에 있으면 로컬 거부·의미 거부·검토 오류·카드 fallback을 구분한다. 원문 복사(`verbatim`)는 기존 정책에 따라 인용을 제거해도 문장을 유지하므로 인용 감소를 의미 검토 거부로 간주하지 않는다. 이 진단만으로 모델이 특정 출처를 선택하지 않은 이유나 검토기의 오탐 여부까지 판정할 수는 없으며, 발췌문과 출처를 대조해야 한다. 비정상 인용 위치처럼 실제 초안 항목이 없는 인용은 개수에는 포함되지만 항목 상세에는 나오지 않는다.
+
+`required`에서 검토 호출 또는 카드 검증이 실패하면 기존처럼 예외를 반환하므로 성공 응답의 후보별 진단도 반환되지 않는다. 장애 진단을 확인하려면 `auto` fallback 응답을 사용한다. 이 변경은 단계별 지연 계측, 검색 확장, 근거 축소, 검증 기준 변경을 포함하지 않는다.
+
+검증: `test_verification_diagnostics.py`는 모의 모델 응답으로 생성 없음/수용/삭제, 원문 인용 제거, 요약 복귀, 재정렬·중복 문장, 검토 장애, 전체 카드 fallback, 진단 상한을 확인한다. Azure의 실제 검증 오탐과 SQL 인용 미사용 원인은 배포 후 새 요청으로 확인해야 한다.
