@@ -5,7 +5,7 @@ from datetime import date
 
 from services.siren.models import RiskSirenRequest, SirenAnalyzeTrigger
 from services.siren.orchestrator import RiskSirenOrchestrator
-from services.siren.providers.fmp_provider import BranchSnapshot
+from services.siren.providers.fmp_provider import BranchSnapshot, FmpProvider, ProviderUnavailable
 from services.siren.providers.ideaton_provider import MarketSnapshot
 
 
@@ -25,6 +25,15 @@ class _Fmp:
                     "items": {"HALL_CARD": 1000},
                 }
             ],
+            franchise_closure={
+                "franchise_id": "10",
+                "year": 2025,
+                "previous_year_end_count": 100,
+                "new_openings": 10,
+                "closures": 5,
+                "source": "fmp:public.franchise_closure_year",
+                "synthetic": False,
+            },
         )
 
     async def close(self) -> None:
@@ -85,8 +94,17 @@ class OrchestratorContractTests(unittest.IsolatedAsyncioTestCase):
         request = captured[0]
         self.assertEqual(request.location.trade_area_code, None)
         self.assertEqual(request.branch_reports[0].sales.hall.credit, 1000)
-        self.assertEqual(request.options.llm_mode, "disabled")
+        self.assertEqual(request.options.llm_mode, "explanation_only")
         self.assertFalse(request.options.send_notifications)
+        self.assertEqual(request.franchise_closure.closures, 5)
+
+
+class FmpProviderConfigTests(unittest.TestCase):
+    def test_optional_closure_table_accepts_safe_identifier_only(self) -> None:
+        provider = FmpProvider(None, franchise_closure_table="public.franchise_closure_year")
+        self.assertEqual(provider.franchise_closure_table, "public.franchise_closure_year")
+        with self.assertRaises(ProviderUnavailable):
+            FmpProvider(None, franchise_closure_table="public.bad-name")
 
 
 if __name__ == "__main__":

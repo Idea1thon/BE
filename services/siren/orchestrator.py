@@ -79,6 +79,7 @@ def build_default_orchestrator() -> RiskSirenOrchestrator:
 
     fmp_url = os.getenv("SIREN_FMP_DATABASE_URL") or os.getenv("FMP_DATABASE_URL")
     ideaton_url = os.getenv("SIREN_IDEATON_DATABASE_URL") or os.getenv("IDEATON_DATABASE_URL")
+    closure_table = os.getenv("SIREN_FRANCHISE_CLOSURE_TABLE")
     try:
         radius = float(os.getenv("SIREN_COMPETITION_RADIUS_M", "250"))
     except ValueError as exc:
@@ -87,7 +88,7 @@ def build_default_orchestrator() -> RiskSirenOrchestrator:
         raise ProviderUnavailable("SIREN_COMPETITION_RADIUS_M must be greater than zero")
 
     return RiskSirenOrchestrator(
-        fmp_provider=FmpProvider(fmp_url),
+        fmp_provider=FmpProvider(fmp_url, franchise_closure_table=closure_table),
         ideaton_provider=IdeatonProvider(
             ideaton_url,
             competition_radius_m=radius,

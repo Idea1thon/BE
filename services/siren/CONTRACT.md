@@ -17,12 +17,17 @@ POST /internal/risk-sirens/analyze-trigger
   "franchise_id": "1",
   "branch_id": "10",
   "as_of": "2026-09-30",
-  "options": {"llm_mode": "disabled", "send_notifications": false}
+  "options": {"llm_mode": "explanation_only", "send_notifications": false}
 }
 ```
 
 사이렌 프로세스에는 `FMP_DATABASE_URL`과 `IDEATON_DATABASE_URL`(또는
 `SIREN_FMP_DATABASE_URL`/`SIREN_IDEATON_DATABASE_URL`)을 읽기 전용으로 설정한다.
+본사 연간 폐업 집계가 승인된 FMP 테이블·뷰에 있을 때만
+`SIREN_FRANCHISE_CLOSURE_TABLE=public.franchise_closure_year`처럼
+단순한 스키마·테이블명을 추가한다. 테이블이 없거나 설정하지 않으면 해당 신호는
+`missing`이며 폐업 0건으로 대체하지 않는다. 현재 저장소의 FMP 기본 스키마에는 이
+집계 테이블이 없으므로, 별도 migration 없이 운영 원천이 제공될 때만 계산된다.
 기존 full canonical payload의 `/internal/risk-sirens/analyze` 경로는 호환용으로 유지한다.
 
 middle-backend의 `SIREN_ANALYSIS_ENABLED` 기본값은 `false`다. 현재 `report_analysis`가
@@ -76,7 +81,7 @@ middle-backend의 `SIREN_ANALYSIS_ENABLED` 기본값은 `false`다. 현재 `repo
 - 연속 적자는 as_of 월부터 한 달씩 역순으로 확인한다. 중간 월 누락 또는 흑자/손익0에서 중단하며, 기준 월 자료가 없으면 현재 연속 적자는 0이다. 이는 누락 기간이 안전하다는 의미가 아니다. 기존 missing/partial 표시는 유지한다.
 - 본사 요약은 집계에 사용하는 중첩 객체를 검증한다. null 객체, 점수 범위 밖 값·불리언, 잘못된 등급 및 상태/점수 모순은 422다. 비집계 필드는 무시한다.
 - 각 branch.as_of는 요청 as_of와 정확히 같아야 한다. 미래·과거 결과를 섞지 않으며, 누락·잘못된 날짜도422다. Backend는 동일 기준일의 결과 묶음을 전달해야 한다.
-- 적자 계산 동작 변경을 구분하기 위해 score_version은 risk-siren-v1.1-provisional로 갱신했다. 이벤트 중복 방지 키에도 이 버전이 반영된다. alert_policy_version은 confirmed-branch-v1이다.
+- 적자 계산 동작 변경을 구분하기 위해 score_version은 risk-siren-v1.2로 유지한다. 현행 `report_analysis.rule_version VARCHAR(20)`에 저장할 수 있는 길이다. 이벤트 중복 방지 키에도 이 버전이 반영된다. alert_policy_version은 confirmed-branch-v1이다.
 
 ## 비용 위험 점수 및 숫자 입력 검증 보완 (v1.2)
 

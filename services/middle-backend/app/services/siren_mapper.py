@@ -247,7 +247,7 @@ def build_analysis_trigger(
         "franchise_id": str(franchise_id),
         "branch_id": str(branch_id),
         "as_of": as_of.isoformat(),
-        "options": {"llm_mode": "disabled", "send_notifications": False},
+        "options": {"llm_mode": "explanation_only", "send_notifications": False},
     }
 
 
@@ -443,6 +443,7 @@ def select_analysis_view(
             "financial_products": projection.get("financial_products", {"status": "catalog_match_pending", "items": []}),
             "explanation": projection.get("explanation", {}),
             "data_provenance": projection.get("data_provenance", {}),
+            "franchise_closure": projection.get("franchise_closure", {}),
             "risk_periods": risk_periods,
             "recommendations": recommendations,
             "rule_version": rule_version,
@@ -464,6 +465,7 @@ def select_analysis_view(
         "alert": projection.get("alert", {"should_fire": False, "dispatch_status": "disabled"}),
         "review_watchlist_flag": bool(projection.get("review_watchlist_flag", False)),
         "data_provenance": projection.get("data_provenance", {}),
+        "franchise_closure": projection.get("franchise_closure", {}),
         "risk_periods": [],
         "recommendations": [],
         "rule_version": rule_version,

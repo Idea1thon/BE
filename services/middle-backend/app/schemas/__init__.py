@@ -358,6 +358,7 @@ class AnalysisDetail(BaseModel):
     explanation: dict = Field(default_factory=dict)
     review_watchlist_flag: bool | None = None
     data_provenance: dict = Field(default_factory=dict)
+    franchise_closure: dict = Field(default_factory=dict)
 
 
 class ReportDetailResponse(BaseModel):

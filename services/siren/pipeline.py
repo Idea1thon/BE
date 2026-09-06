@@ -431,6 +431,7 @@ def _build_projections(result: dict[str, Any]) -> dict[str, Any]:
         "financial_products": result["financial_products"],
         "report_link": None,
         "data_provenance": result["data_provenance"],
+        "franchise_closure": result["franchise_closure"],
     }
     franchise_hq = {
         "branch_id": result["branch"]["branch_id"],
@@ -456,5 +457,6 @@ def _build_projections(result: dict[str, Any]) -> dict[str, Any]:
             "contains_synthetic": result["data_provenance"]["contains_synthetic"],
             "disclosure": result["data_provenance"]["disclosure"],
         },
+        "franchise_closure": result["franchise_closure"],
     }
     return {"branch_owner": branch_owner, "franchise_hq": franchise_hq}

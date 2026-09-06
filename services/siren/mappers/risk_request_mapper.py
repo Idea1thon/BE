@@ -152,10 +152,10 @@ def build_risk_request(
         "industry_code": branch.industry_code,
         "location": market.location,
         "branch_reports": [_monthly_report(report) for report in branch.reports],
-        # Runtime LLM and dispatch are intentionally off. The pipeline remains
-        # deterministic and evidence-grounded.
+        # Hosted LLM and dispatch are intentionally off. explanation_only uses
+        # the local deterministic template and never calls a model.
         "options": {
-            "llm_mode": "disabled",
+            "llm_mode": "explanation_only",
             "send_notifications": bool(trigger.options.send_notifications),
         },
     }
@@ -163,4 +163,6 @@ def build_risk_request(
         payload["market_data"] = market.market_data
     if reviews is not None:
         payload["reviews"] = reviews
+    if branch.franchise_closure is not None:
+        payload["franchise_closure"] = branch.franchise_closure
     return payload

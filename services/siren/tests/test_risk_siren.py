@@ -144,6 +144,33 @@ class RiskSirenV1Tests(unittest.TestCase):
         self.assertIn("rolling_4q_rate", closure)
         self.assertEqual(closure["status"], "calculated")
 
+    def test_annual_franchise_closure_is_exposed_without_changing_risk_score(self) -> None:
+        payload = complete_payload()
+        payload["franchise_closure"] = {
+            "franchise_id": "fr-001",
+            "year": 2025,
+            "previous_year_end_count": 100,
+            "new_openings": 20,
+            "closures": 12,
+            "source": "fmp:public.franchise_closure_year",
+            "synthetic": False,
+        }
+        result = analyze(payload)
+        closure = result["franchise_closure"]
+        self.assertEqual(closure["status"], "calculated")
+        self.assertEqual(closure["operating_base_rate_pct"], 10.0)
+        self.assertEqual(closure["previous_year_base_rate_pct"], 12.0)
+        self.assertEqual(result["projections"]["branch_owner"]["franchise_closure"], closure)
+        self.assertEqual(result["projections"]["franchise_hq"]["franchise_closure"], closure)
+
+    def test_branch_sales_exposes_recent_decay_weights_and_explanation(self) -> None:
+        result = analyze(complete_payload())
+        sales = result["components"]["sales_decline"]["branch"]
+        self.assertEqual(sales["decay_weight"], {"recent_3m": 0.7, "previous_3m": 0.3})
+        self.assertEqual(sales["score_basis"], "recent_3m_vs_previous_3m_with_previous_3m_decay")
+        self.assertIn("최근 3개월", result["explanation"]["text"])
+        self.assertIn("가중", result["explanation"]["text"])
+
     def test_profit_collapse_raises_grade_even_if_market_calm(self) -> None:
         payload = complete_payload(margin_start=0.05, margin_end=-0.20, loan_end=3_000_000)
         payload["market_data"]["sales_quarters"] = _sales_quarters(1.02)  # 시장은 성장
