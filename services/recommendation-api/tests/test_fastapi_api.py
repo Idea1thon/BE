@@ -196,6 +196,7 @@ class FastApiBoundaryTests(unittest.TestCase):
 
     def test_running_run_can_be_polled_until_completion(self) -> None:
         run_id = "20260905T000000Z-0123456789ab"
+        diagnostics = {"test": {"content_status": "unverified_draft", "removed_claim_count": 1}}
         response_payload = {
             "request_id": "backend-42",
             "run_id": run_id,
@@ -204,7 +205,7 @@ class FastApiBoundaryTests(unittest.TestCase):
             "input_interpretation": {},
             "summary": {},
             "candidates": [],
-            "explanations": {},
+            "explanations": {"verification_by_candidate": diagnostics},
         }
         with TemporaryDirectory() as temp_dir:
             run_dir = Path(temp_dir) / run_id
@@ -229,6 +230,7 @@ class FastApiBoundaryTests(unittest.TestCase):
                 completed = asyncio.run(get_recommendation_run(run_id))
             self.assertEqual(completed["run_id"], run_id)
             self.assertEqual(completed["request_id"], "backend-42")
+            self.assertEqual(completed["explanations"]["verification_by_candidate"], diagnostics)
 
     def test_timeout_response_points_to_the_run_status_endpoint(self) -> None:
         payload = PipelineRecommendationRequest(
@@ -271,10 +273,12 @@ class FastApiBoundaryTests(unittest.TestCase):
     def test_backend_contract_is_forwarded_to_pipeline(self) -> None:
         from unittest.mock import patch
 
+        diagnostics = {"test": {"content_status": "unverified_draft", "summary_reverted": True}}
         fake_result = {
             "summary": {"candidate_count": 0},
             "candidates": [],
-            "explanations": {"explanation_mode": "template", "degraded": True, "llm": {}},
+            "explanations": {"explanation_mode": "template", "degraded": True, "llm": {},
+                             "verification_by_candidate": diagnostics},
             "input_interpretation": {"resolved_industry_code": "CS100010"},
         }
         payload = PipelineRecommendationRequest(
@@ -299,6 +303,7 @@ class FastApiBoundaryTests(unittest.TestCase):
         self.assertEqual(mocked.call_args.args[4], 3)
         self.assertEqual(response["request"]["limit"], 3)
         self.assertEqual(response["summary"]["applied_limit"], 3)
+        self.assertEqual(response["explanations"]["verification_by_candidate"], diagnostics)
 
     def test_pipeline_errors_are_mapped_without_leaking_server_details(self) -> None:
         payload = PipelineRecommendationRequest(
