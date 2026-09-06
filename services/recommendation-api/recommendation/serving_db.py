@@ -17,6 +17,7 @@ import os
 import subprocess
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -146,8 +147,11 @@ def _raw_query(sql: str) -> list[dict[str, str]]:
 #  - 초기화(clear/스탬프 변경)마다 세대(_CACHE_GEN)를 올린다. 조회 시작 세대와
 #    저장 시점 세대가 다르면(진행 중 조회가 초기화를 가로지른 경우) 저장하지 않는다.
 # 락 순서: _DV_LOCK → _CACHE_LOCK (역순 금지).
-_CACHE: dict[str, tuple[float, list[dict[str, str]]]] = {}  # key -> (insert_monotonic, rows)
-_CACHE_ORDER: list[str] = []
+#
+# 삽입 순서를 OrderedDict 로 관리한다 — 별도 순서 리스트를 두면 만료로 키를 지운
+# 뒤에도 리스트에 잔여 키가 남아, 재삽입 시 중복이 쌓이고 오래된 잔여 키를 방출할
+# 때 방금 저장한 엔트리까지 삭제되는 문제가 있었다(ziholee P2-3).
+_CACHE: "OrderedDict[str, tuple[float, list[dict[str, str]]]]" = OrderedDict()  # key -> (insert_monotonic, rows)
 _CACHE_MAX = 512
 _CACHE_GEN = 0
 _CACHE_LOCK = threading.Lock()
@@ -159,7 +163,6 @@ def _reset_cache_locked() -> None:
     """_CACHE_LOCK 을 잡은 상태에서 캐시를 비우고 세대를 올린다."""
     global _CACHE_GEN
     _CACHE.clear()
-    _CACHE_ORDER.clear()
     _CACHE_GEN += 1
 
 _STAMP_SQL = (
@@ -272,17 +275,16 @@ def query(sql: str, *, use_cache: bool = True) -> list[dict[str, str]]:
             hit = entry[1]
         else:
             hit = None
-            if entry is not None:  # 만료 — 즉시 제거(느슨한 순서 목록은 방출 시 정리)
-                _CACHE.pop(key, None)
+            _CACHE.pop(key, None)  # 만료됐거나 없음 — 잔여 항목 제거
     if hit is not None:
         return _copy_rows(hit)
     rows = _raw_query(sql)
     with _CACHE_LOCK:
-        if _CACHE_GEN == gen0 and key not in _CACHE:
+        if _CACHE_GEN == gen0:
             _CACHE[key] = (time.monotonic(), rows)
-            _CACHE_ORDER.append(key)
-            while len(_CACHE_ORDER) > _CACHE_MAX:
-                _CACHE.pop(_CACHE_ORDER.pop(0), None)
+            _CACHE.move_to_end(key)  # 재삽입이면 삽입 순서상 최신으로
+            while len(_CACHE) > _CACHE_MAX:
+                _CACHE.popitem(last=False)  # 가장 오래 전 삽입 항목 방출
     return _copy_rows(rows)
 
 

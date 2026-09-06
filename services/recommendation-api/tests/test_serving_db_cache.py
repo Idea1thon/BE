@@ -164,12 +164,30 @@ class ServingDbCacheTest(unittest.TestCase):
         with patch.object(serving_db, "_CACHE_MAX", 3):
             for i in range(5):
                 serving_db.query(f"SELECT {i}")
-            self.assertEqual(len(serving_db._CACHE), 3)
-            self.assertEqual(len(serving_db._CACHE_ORDER), 3)
+            with serving_db._CACHE_LOCK:
+                self.assertEqual(len(serving_db._CACHE), 3)
             self.calls.clear()
             serving_db.query("SELECT 4")  # 최신 — 여전히 캐시
             serving_db.query("SELECT 0")  # 가장 오래됨 — 방출됐어야 함
             self.assertEqual(self._data_calls(), ["SELECT 0"])
+
+    def test_repeated_expiry_reinsert_beyond_max_still_hits(self) -> None:
+        """동일 SQL 이 만료·재삽입을 상한보다 많이 반복해도, 순서 관리가 어긋나
+        방금 저장한 엔트리가 방출되는 일이 없어야 한다 (ziholee P2-3).
+        가짜 시계로 매 조회 사이 TTL 을 넘긴 뒤, 시계를 멈추고 재조회하면 적중."""
+        clock = [0.0]
+        with patch.object(serving_db.time, "monotonic", lambda: clock[0]), \
+             patch.object(serving_db, "_cache_ttl", lambda: 300.0):
+            for i in range(serving_db._CACHE_MAX + 20):
+                if i:
+                    clock[0] += 400.0  # 직전 엔트리 만료
+                serving_db.query("SELECT SAME")
+            n = len(self._data_calls())
+            with serving_db._CACHE_LOCK:
+                self.assertEqual(len(serving_db._CACHE), 1)
+            serving_db.query("SELECT SAME")  # 시계 정지 상태 → 적중
+            serving_db.query("SELECT SAME")
+            self.assertEqual(len(self._data_calls()), n)
 
     # ── 동시성 스모크 (S2/S5) ───────────────────────────────────
     def test_concurrent_queries_are_consistent_and_converge(self) -> None:
