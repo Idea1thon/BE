@@ -1783,7 +1783,9 @@ def build_candidate(
     if conditions["unsupported_conditions"]:
         confidence_reasons.append("특별조건을 매물 데이터로 검증하지 못함")
     # FC-06a/06b 상권 crosswalk 대리 시 data_confidence 1단계 하향 (candidate-selection-spec.md §4-2).
-    # 시작 레벨과 무관하게 한 단계 내린다(high→medium, medium→low). low 는 유지.
+    # 표기 등급만 한 단계 내리고(high→medium, medium→low; low 유지) 정렬에는 반영하지
+    # 않는다 — 인구 근거는 순위 불변(F36)이라 하향 전 등급을 정렬 키로 보존한다.
+    sort_confidence = confidence
     if pop_ctx.confidence_downgrade:
         confidence_reasons.extend(pop_ctx.confidence_reasons)
         _conf_order = ("high", "medium", "low")
@@ -1932,6 +1934,8 @@ def build_candidate(
         "industry_code": request.industry_code, "fit_tier": tier, "fit_index": None, "score_version": None,
         "score_is_predictive": False, "greenfield": greenfield,
         "data_confidence": {"level": confidence, "reasons": confidence_reasons},
+        # 정렬 전용(인구 하향 반영 전 등급). run_pipeline 이 정렬 직후 제거한다.
+        "_sort_confidence": sort_confidence,
         "feature_build": {
             "build_passed": True, "merge_key_definition": "기준_년분기_코드 + 공간코드 + 서비스_업종_코드", "merge_key_dup_rate": 0,
             "quarters_used": {"flow": [request.quarter], "sales": [request.quarter], "store": [request.quarter], "change": [request.quarter], "rent": [rent_period] if re.fullmatch(r"[0-9]{5}", rent_period) else []},
@@ -2703,11 +2707,12 @@ def run_pipeline(
     # 검증된 품질 신호가 없으므로 근거 수로 등수를 매기지 않는다(-len(reasons) 제거).
     # tier → (같은 tier 안에서 candidate_type 라운드로빈으로 인터리브) → 반대근거 적은 순 → 신뢰도 → id.
     # 인터리브: --limit로 자를 때 특정 앵커 타입(예: 아파트)이 id 정렬 편향으로 통째로 잘리는 것을 막는다.
+    # 신뢰도는 _sort_confidence(인구 FC-06 하향 반영 전) 기준 — 인구 근거는 순위 불변(F36).
     _conf_rank = {"high": 0, "medium": 1, "low": 2}
     _tier_rank = {"추천": 0, "조건부 검토": 1, "주의": 2}
 
     def _within_key(c: dict[str, Any]) -> tuple:
-        return (len(c["counter_evidence"]), _conf_rank.get(c["data_confidence"]["level"], 3), c["candidate_id"])
+        return (len(c["counter_evidence"]), _conf_rank.get(c["_sort_confidence"], 3), c["candidate_id"])
 
     ordered: list[dict[str, Any]] = []
     for tier in sorted({c["fit_tier"] for c in candidates}, key=lambda t: _tier_rank.get(t, 3)):
@@ -2722,6 +2727,8 @@ def run_pipeline(
                     ordered.append(buckets[t][cursors[t]])
                     cursors[t] += 1
     candidates = ordered
+    for c in candidates:
+        c.pop("_sort_confidence", None)  # 정렬 전용 내부 키 — 스키마·출력에서 제외
     candidates = _order_by_preferences(candidates, preferences)
     if limit is not None:
         candidates = candidates[:limit]

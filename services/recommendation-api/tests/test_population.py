@@ -158,7 +158,7 @@ class PipelineInvarianceTests(unittest.TestCase):
         self.assertTrue(any("FC-03" in n for n in with_pop[0]["context_notes"]))
 
     def test_foreign_proxy_downgrades_confidence_one_level(self):
-        """FC-06a/06b 상권 crosswalk 대리 → data_confidence 1단계 하향 (spec §4-2).
+        """FC-06a/06b 상권 crosswalk 대리 → data_confidence 표기 등급 1단계 하향 (spec §4-2).
 
         지점 후보는 대개 base confidence 가 medium 이므로 medium→low 여야 한다
         (예전 코드는 high→medium 만 처리해 medium 후보에서 하향이 누락됐다).
@@ -171,6 +171,19 @@ class PipelineInvarianceTests(unittest.TestCase):
         self.assertTrue(downgraded, "외국인 대리 근거가 붙은 후보가 없음")
         for c in downgraded:
             self.assertEqual(c["data_confidence"]["level"], "low", c["candidate_id"])
+
+    def test_sort_confidence_is_internal_and_pop_downgrade_keeps_order(self):
+        """정렬용 신뢰도는 인구 하향 반영 전 값이고 출력에서 제거된다 (ziholee P2 / F36).
+
+        인구 하향이 표기 등급만 낮추고 tier 내 순위는 바꾸지 않아야 한다 — pop 유무로
+        후보 순서가 동일해야 한다.
+        """
+        with_pop = self._run(patch_pop_none=False)["candidates"]
+        without = self._run(patch_pop_none=True)["candidates"]
+        for c in with_pop:
+            self.assertNotIn("_sort_confidence", c, c["candidate_id"])
+        self.assertEqual([c["candidate_id"] for c in with_pop],
+                         [c["candidate_id"] for c in without])
 
     def test_files_mode_vacancy_evidence_has_string_period(self):
         """F38 회귀: files 모드에 R-ONE 공실률 CSV가 없어도 evidence period가 None이면 안 됨."""
