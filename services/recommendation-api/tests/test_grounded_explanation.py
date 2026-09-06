@@ -56,6 +56,42 @@ class GroundedExplanationTests(unittest.TestCase):
         self.assertEqual(verify_grounded_claims(self.candidate, template_card(self.candidate), self.sources, self.client), set())
         self.client.generate_json.assert_not_called()
 
+    def test_period_code_may_be_spelled_out_in_a_paraphrase(self):
+        # context.metric_snapshot mixes YYYYQ / YYYYMM / YYYYHn; a claim that
+        # writes "2026년 2월" from "202602" must not fail the numeric gate.
+        for code, spelled in [
+            ('202602', '2026년 2월'),
+            ('20262', '2026년 2분기'),
+            ('2026H1', '2026년 상반기'),
+        ]:
+            with self.subTest(code=code):
+                cand = {
+                    'candidate_id': 'p', 'fit_tier': '조건부 검토', 'reasons': [], 'counter_evidence': [],
+                    'missing_features': [], 'context_notes': [f'검색 관심도 최신 {code} rel_index 1.05 (FC-42)'],
+                    'evidence': [],
+                }
+                sources = explanation_sources(cand, [])
+                card = template_card(cand)
+                card['context_notes'] = [f'서울시 업종 검색 관심도는 {spelled} 기준 rel_index 1.05입니다.']
+                card['citations'] = {'context_notes:0': ['context_notes:0']}
+                self.client.generate_json.return_value = {'verdicts': [{'claim_id': 'context_notes:0', 'supported': True}]}
+                verified = verify_grounded_claims(cand, card, sources, self.client)
+                self.assertEqual(verified, {'context_notes:0'})
+                self.assertTrue(validate_card(cand, card, verified_claims=verified, source_catalog=sources)[0])
+
+    def test_period_spell_out_still_rejects_a_wrong_month(self):
+        cand = {
+            'candidate_id': 'p', 'fit_tier': '조건부 검토', 'reasons': [], 'counter_evidence': [],
+            'missing_features': [], 'context_notes': ['검색 관심도 최신 202602 rel_index 1.05'],
+            'evidence': [],
+        }
+        sources = explanation_sources(cand, [])
+        card = template_card(cand)
+        card['context_notes'] = ['검색 관심도는 2026년 7월 기준입니다.']
+        card['citations'] = {'context_notes:0': ['context_notes:0']}
+        self.assertEqual(verify_grounded_claims(cand, card, sources, self.client), set())
+        self.client.generate_json.assert_not_called()
+
     def test_retrieved_fact_can_be_cited_only_as_background(self):
         evidence = [{'evidence_id': 'retrieval-example', 'value': 700, 'unit': '원', 'period': '20261', 'spatial_unit_name': '역삼1동'}]
         sources = explanation_sources(self.candidate, evidence)
