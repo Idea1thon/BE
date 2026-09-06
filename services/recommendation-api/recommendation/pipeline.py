@@ -41,7 +41,7 @@ from . import population
 from . import urban_plan
 from .llm_explanation import explain_candidates
 from .llm_input_planner import parse_conditions, plan_input
-from .llm_runtime import LLMRuntimeError
+from .llm_runtime import LLMRuntimeError, reset_call_budget
 from .paths import SERVICE_ROOT, find_project_root
 from .rag_tools import execute_retrieval_requests
 from shapely import wkb as shapely_wkb
@@ -2605,6 +2605,7 @@ def run_pipeline(
     if seed_mode not in {"anchors", "buildings", "hybrid"}:
         raise PipelineInputError("seed_mode는 anchors, buildings, hybrid 중 하나여야 합니다.")
     selected_region = {"sido": request.sido, "sigungu": request.sigungu, "dong": request.dong}
+    reset_call_budget()  # 이 실행의 LLM 호출 상한 카운터 초기화 (LLM_MAX_CALLS_PER_RUN)
     try:
         input_interpretation = plan_input(
             selected_region=selected_region,
