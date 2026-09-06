@@ -8,7 +8,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
-from recommendation.llm_explanation import template_card, validate_card
+from recommendation.llm_explanation import explain_candidates, template_card, validate_card
 from recommendation.llm_input_planner import (
     _normalize_remote_conditions,
     _valid_preferences,
@@ -16,7 +16,12 @@ from recommendation.llm_input_planner import (
     parse_preferences,
     plan_input,
 )
-from recommendation.llm_runtime import LLMRuntimeError
+from recommendation.llm_runtime import (
+    LLMConfig,
+    LLMRuntimeError,
+    _charge_call,
+    reset_call_budget,
+)
 from recommendation.pipeline import PipelineDependencyError, RecommendationRequest, load_building_seeds, run_pipeline
 from recommendation.rag_tools import execute_retrieval_requests, validate_retrieval_requests
 from shapely.geometry import box
@@ -223,6 +228,149 @@ class LLMInputPlannerTests(unittest.TestCase):
                 run_pipeline(request, source="files", llm_mode="required")
 
 
+class LLMRuntimeConfigTests(unittest.TestCase):
+    """#25: OpenAI 연결용 자격증명 인식과 요청당 호출 예산."""
+
+    BASE = {"LLM_API_URL": "https://api.openai.com/v1", "LLM_MODEL": "gpt-5.6-luna"}
+
+    def setUp(self):
+        self.addCleanup(reset_call_budget)  # thread-local 카운터가 다른 테스트로 새지 않게
+
+    def test_only_llm_api_key_activates_not_shell_openai_api_key(self):
+        # 셸에 흔히 떠 있는 OPENAI_API_KEY 로는 활성화되지 않는다(과금 방지).
+        env = {**self.BASE, "OPENAI_API_KEY": "sk-shell"}
+        with patch.dict(environ, env, clear=False):
+            environ.pop("LLM_API_KEY", None)
+            off = LLMConfig.from_env("auto")
+            self.assertIsNone(off.api_key)
+            self.assertFalse(off.available)
+            environ["LLM_API_KEY"] = "sk-explicit"
+            on = LLMConfig.from_env("auto")
+        self.assertEqual(on.api_key, "sk-explicit")
+        self.assertTrue(on.available)
+
+    def test_call_budget_trips_after_limit_then_resets(self):
+        with patch.dict(environ, {"LLM_MAX_CALLS_PER_RUN": "2"}, clear=False):
+            reset_call_budget()
+            _charge_call()
+            _charge_call()
+            with self.assertRaises(LLMRuntimeError):
+                _charge_call()
+            reset_call_budget()
+            _charge_call()  # 초기화 후 다시 허용
+
+    def test_call_budget_zero_means_unlimited(self):
+        with patch.dict(environ, {"LLM_MAX_CALLS_PER_RUN": "0"}, clear=False):
+            reset_call_budget()
+            for _ in range(50):
+                _charge_call()
+
+    def test_required_mode_ignores_call_budget(self):
+        with patch.dict(environ, {"LLM_MAX_CALLS_PER_RUN": "1"}, clear=False):
+            reset_call_budget()
+            _charge_call(enforce=False)
+            _charge_call(enforce=False)  # required 경로는 캡 무시 → 예외 없음
+
+    def test_budget_exhaustion_mid_run_degrades_explain_candidates(self):
+        # generate_json 의 첫 줄이 _charge_call 이라, 예산이 소진되면 LLMRuntimeError 를
+        # 던진다. explain_candidates 는 그 예외를 후보별로 잡아 template 로 떨어뜨려야
+        # 하며(auto 모드) 요청 전체가 깨지면 안 된다.
+        cands = [{**ExplanationValidationTests.CANDIDATE, "candidate_id": f"APT-{i}"} for i in range(3)]
+        good_card = {
+            "candidate_id": None, "summary": "조건부 검토 후보입니다. 관측된 근거와 확인되지 않은 조건을 함께 검토해야 합니다.",
+            "reasons": [], "counter_evidence": [], "context_notes": [],
+            "missing_features": ["FC-10: 핵심 지표 결측"], "inference_hypotheses": [], "claim_type": "descriptive",
+        }
+
+        def _card(_prompt, payload):
+            _charge_call()  # 실제 generate_json 의 첫 줄
+            return {**good_card, "candidate_id": payload["candidate_evidence"]["candidate_id"]}
+
+        env = {**self.BASE, "LLM_API_KEY": "sk-explicit", "LLM_MAX_CALLS_PER_RUN": "1"}
+        with patch.dict(environ, env, clear=False), patch(
+            "recommendation.llm_explanation.OpenAICompatibleJsonClient.generate_json", side_effect=_card,
+        ):
+            reset_call_budget()
+            result = explain_candidates(cands, llm_mode="auto")  # 예외 없이 반환돼야
+        self.assertIn(result["explanation_mode"], {"mixed", "template"})
+        self.assertEqual(len(result["cards"]), 3)
+        self.assertTrue(result["degraded"])
+
+    def test_generate_json_charges_the_budget(self):
+        # 계약 고정: 실제 generate_json 첫 동작이 _charge_call 이다(HTTP 이전).
+        import inspect
+
+        from recommendation.llm_runtime import OpenAICompatibleJsonClient
+        src = inspect.getsource(OpenAICompatibleJsonClient.generate_json)
+        self.assertIn("_charge_call(", src)
+
+    def test_generate_json_retries_legacy_param_shape_on_400(self):
+        # 최신 OpenAI 모델은 max_tokens/temperature=0 을 400 으로 거부한다. 최신
+        # 형식으로 먼저 시도하고, 파라미터 400 이면 구형 형식으로 한 번 재시도한다.
+        from recommendation.llm_runtime import LLMConfig, OpenAICompatibleJsonClient
+
+        env = {**self.BASE, "LLM_API_KEY": "sk-explicit"}
+        with patch.dict(environ, env, clear=False):
+            client = OpenAICompatibleJsonClient(LLMConfig.from_env("auto"))
+        sent = []
+
+        def fake_post(body):
+            sent.append(body)
+            if "max_completion_tokens" in body:
+                raise LLMRuntimeError("LLM HTTP 오류 400: Unsupported parameter: 'max_tokens' ... use max_completion_tokens")
+            return {"ok": True}
+
+        with patch.object(client, "_post_chat", side_effect=fake_post):
+            reset_call_budget()
+            out = client.generate_json("sys", {"q": 1})
+        self.assertEqual(out, {"ok": True})
+        self.assertEqual(len(sent), 2)
+        self.assertIn("max_completion_tokens", sent[0])
+        self.assertIn("max_tokens", sent[1])
+        self.assertEqual(sent[1]["temperature"], 0)
+
+    def test_generate_json_does_not_retry_non_param_400(self):
+        from recommendation.llm_runtime import LLMConfig, OpenAICompatibleJsonClient
+
+        env = {**self.BASE, "LLM_API_KEY": "sk-explicit"}
+        with patch.dict(environ, env, clear=False):
+            client = OpenAICompatibleJsonClient(LLMConfig.from_env("auto"))
+        calls = []
+
+        def fake_post(body):
+            calls.append(body)
+            raise LLMRuntimeError("LLM HTTP 오류 400: model not found")
+
+        with patch.object(client, "_post_chat", side_effect=fake_post):
+            reset_call_budget()
+            with self.assertRaises(LLMRuntimeError):
+                client.generate_json("sys", {"q": 1})
+        self.assertEqual(len(calls), 1)  # 재시도 안 함
+
+    def test_truncated_reasoning_response_is_a_clear_error(self):
+        # 추론 모델이 max_completion_tokens 안에서 추론만 하다 잘리면 content 가 빈
+        # 문자열로 온다 — "JSON 아님" 이 아니라 잘림이라고 알려야 한다.
+        import json as _json
+
+        from recommendation.llm_runtime import LLMConfig, OpenAICompatibleJsonClient
+
+        env = {**self.BASE, "LLM_API_KEY": "sk-explicit"}
+        with patch.dict(environ, env, clear=False):
+            client = OpenAICompatibleJsonClient(LLMConfig.from_env("auto"))
+        raw = _json.dumps({"choices": [{"finish_reason": "length", "message": {"content": ""}}]}).encode()
+
+        class _Resp:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self, *_): return raw
+
+        with patch("recommendation.llm_runtime.urlopen", return_value=_Resp()):
+            reset_call_budget()
+            with self.assertRaises(LLMRuntimeError) as ctx:
+                client.generate_json("sys", {"q": 1})
+        self.assertIn("잘림", str(ctx.exception))
+
+
 class ExplanationValidationTests(unittest.TestCase):
     CANDIDATE = {
         "candidate_id": "APT-1",
@@ -239,6 +387,24 @@ class ExplanationValidationTests(unittest.TestCase):
         card = template_card(self.CANDIDATE)
         self.assertEqual(card["missing_features"], ["FC-10: 핵심 지표 결측"])
         self.assertTrue(all(isinstance(value, str) for value in card["missing_features"]))
+
+    def test_verbatim_copy_of_many_context_notes_passes(self):
+        # 파이프라인이 만든 context_notes 는 인구 FC-03~06·도시계획 FC-51/52 등으로
+        # 12개를 넘을 수 있다. 그대로 복사한 카드는 통과해야 한다(예전 상한 12 회귀).
+        notes = [f"FC-{i:02d} 배경 관측 서술 {i}." for i in range(15)]
+        candidate = {**self.CANDIDATE, "context_notes": notes}
+        card = {
+            "candidate_id": "APT-1",
+            "summary": "조건부 검토 후보입니다. 관측된 근거와 확인되지 않은 조건을 함께 검토해야 합니다.",
+            "reasons": list(candidate["reasons"]),
+            "counter_evidence": [],
+            "context_notes": list(notes),
+            "missing_features": ["FC-10: 핵심 지표 결측"],
+            "inference_hypotheses": [],
+            "claim_type": "descriptive",
+        }
+        valid, errors = validate_card(candidate, card)
+        self.assertTrue(valid, errors)
 
     def test_invented_qualitative_claim_is_rejected(self):
         card = {

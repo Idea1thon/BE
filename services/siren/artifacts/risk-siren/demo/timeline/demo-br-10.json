@@ -1,0 +1,196 @@
+{
+  "branch_id": "demo-br-10",
+  "scenario": "sales_decline",
+  "timeline": [
+    {
+      "as_of": "2024-09-30",
+      "score": 28.9588,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 55.6667,
+      "branch_risk": 14.5777,
+      "review_sub_score": 0.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2024-10-31",
+      "score": 34.8527,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 56.5417,
+      "branch_risk": 23.174,
+      "review_sub_score": 0.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2024-11-30",
+      "score": 29.5654,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 57.4167,
+      "branch_risk": 14.5686,
+      "review_sub_score": null,
+      "should_fire": false
+    },
+    {
+      "as_of": "2024-12-31",
+      "score": 17.6599,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 20.5347,
+      "branch_risk": 16.1119,
+      "review_sub_score": 100.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-01-31",
+      "score": 17.2776,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 19.6597,
+      "branch_risk": 15.995,
+      "review_sub_score": 100.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-02-28",
+      "score": 35.5189,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 18.7847,
+      "branch_risk": 35.5189,
+      "review_sub_score": 100.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-03-31",
+      "score": 44.8207,
+      "grade": "주의",
+      "calculation_status": "calculated",
+      "market_risk": 0.0,
+      "branch_risk": 44.8207,
+      "review_sub_score": null,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-04-30",
+      "score": 36.1426,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 0.0,
+      "branch_risk": 36.1426,
+      "review_sub_score": 0.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-05-31",
+      "score": 6.9345,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 2.625,
+      "branch_risk": 6.9345,
+      "review_sub_score": 0.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-06-30",
+      "score": 9.7755,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 2.625,
+      "branch_risk": 9.7755,
+      "review_sub_score": 50.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-07-31",
+      "score": 8.8622,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 2.625,
+      "branch_risk": 8.8622,
+      "review_sub_score": 99.99,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-08-31",
+      "score": 27.4521,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 0.0,
+      "branch_risk": 27.4521,
+      "review_sub_score": 50.01,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-09-30",
+      "score": 35.6245,
+      "grade": "정상",
+      "calculation_status": "calculated",
+      "market_risk": 1.0595,
+      "branch_risk": 35.6245,
+      "review_sub_score": 0.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-10-31",
+      "score": 44.2743,
+      "grade": "주의",
+      "calculation_status": "calculated",
+      "market_risk": 1.0595,
+      "branch_risk": 44.2743,
+      "review_sub_score": 0.0,
+      "should_fire": false
+    },
+    {
+      "as_of": "2025-11-30",
+      "score": 58.6083,
+      "grade": "주의",
+      "calculation_status": "calculated",
+      "market_risk": 1.0595,
+      "branch_risk": 58.6083,
+      "review_sub_score": 0.0,
+      "should_fire": true
+    },
+    {
+      "as_of": "2025-12-31",
+      "score": 77.2164,
+      "grade": "위험",
+      "calculation_status": "calculated",
+      "market_risk": 66.0,
+      "branch_risk": 77.2164,
+      "review_sub_score": 60.0,
+      "should_fire": true
+    },
+    {
+      "as_of": "2026-01-31",
+      "score": 85.6791,
+      "grade": "위험",
+      "calculation_status": "calculated",
+      "market_risk": 66.0,
+      "branch_risk": 85.6791,
+      "review_sub_score": 37.5,
+      "should_fire": true
+    },
+    {
+      "as_of": "2026-02-28",
+      "score": 88.0,
+      "grade": "위험",
+      "calculation_status": "calculated",
+      "market_risk": 66.0,
+      "branch_risk": 88.0,
+      "review_sub_score": 50.01,
+      "should_fire": true
+    },
+    {
+      "as_of": "2026-03-31",
+      "score": 89.7199,
+      "grade": "위험",
+      "calculation_status": "calculated",
+      "market_risk": 45.875,
+      "branch_risk": 89.7199,
+      "review_sub_score": 65.0,
+      "should_fire": true
+    }
+  ]
+}

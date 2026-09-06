@@ -37,9 +37,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import shapefile
+from . import population
+from . import urban_plan
 from .llm_explanation import explain_candidates
 from .llm_input_planner import parse_conditions, plan_input
-from .llm_runtime import LLMRuntimeError
+from .llm_runtime import LLMRuntimeError, reset_call_budget
 from .paths import SERVICE_ROOT, find_project_root
 from .rag_tools import execute_retrieval_requests
 from shapely import wkb as shapely_wkb
@@ -370,7 +372,13 @@ def resolve_region(
         selected = in_gu
     target_geoms = [dong_layer.geoms[dong_layer.records.index(rec)] for rec in selected]
     target_poly = unary_union(target_geoms)
-    return selected, target_poly, target_poly.buffer(DEFAULT_MARGIN_M)
+    buffered = target_poly.buffer(DEFAULT_MARGIN_M)
+    if request.dong:
+        # 행정동을 고르면 300m 여유는 두되 선택 시군구 밖으로는 넘기지 않는다.
+        # (역삼1동 요청에 강남대로 건너편 서초구 서초동 건물이 후보로 잡히던 문제)
+        gu_poly = unary_union([dong_layer.geoms[dong_layer.records.index(r)] for r in in_gu])
+        buffered = buffered.intersection(gu_poly)
+    return selected, target_poly, buffered
 
 
 def index_rows(rows: Iterable[dict[str, str]], keys: tuple[str, ...], filters: dict[str, str]) -> dict[tuple[str, ...], dict[str, str]]:
@@ -1252,6 +1260,8 @@ def build_candidate(
     source_paths: dict[str, Path], seoul_flow_density: list[float], seoul_sales_pp: list[float],
     crosswalk: dict[str, dict[str, str]], rone_areas: dict[str, dict[str, str]], rone_seoul: dict[str, str], rone_path: Path | None,
     rone_vac_areas: dict[str, dict[str, str]], rone_vac_seoul: dict[str, str], rone_vac_path: Path | None,
+    pop: "population.PopulationData | None" = None, flow_dong_total_seoul: list[float] | None = None,
+    plan: "urban_plan.PlanData | None" = None,
 ) -> dict[str, Any]:
     point = seed["pt"]
     synthetic = seed["kind"] == "생성지점"
@@ -1340,6 +1350,26 @@ def build_candidate(
     else:
         eh_scope = eh_rec = eh_dist = None
     grade, risk, eh_inputs = entry_health(eh_scope, eh_rec, eh_dist, label) if eh_scope else ("정보없음", None, {})
+
+    # 인구 3종(FC-03·04·05·06a·06b) — 전부 context_notes 버킷 (candidate-selection-spec.md §4-2).
+    pop_ctx = population.context_for_candidate(
+        pop,
+        host_code=host.code if host else None,
+        dong_code=dong_rec.code if dong_rec else None,
+        dong_sigungu=sigungu_by_prefix.get(dong_rec.code[:5]) if dong_rec else None,
+        target_sigungu=target_sigungu,
+        flow_dong_total=num(flow_dong.get(dong_rec.code), "총_유동인구_수") if dong_rec else None,
+        flow_dong_seoul=flow_dong_total_seoul or [],
+        quarter=request.quarter,
+    )
+
+    # 도시계획·정비사업 추진단계(FC-51·52) — 전부 context_notes 버킷 (candidate-selection-spec.md §202·§428).
+    plan_ctx = urban_plan.context_for_candidate(
+        plan,
+        host_code=host.code if host else None,
+        sigungu_code=dong_rec.code[:5] if dong_rec else None,
+        sigungu_name=target_sigungu,
+    )
 
     flow_p = pct(seoul_flow_density, flow_density)
     sales_p = pct(seoul_sales_pp, sales_per_store)
@@ -1458,7 +1488,7 @@ def build_candidate(
     area_vacancy = num(rone_vac_row, "값") if rone_vac_row else None
     vacancy_value = area_vacancy if area_vacancy is not None else city_vacancy
     vacancy_period = (rone_vac_row.get("기준_년분기_코드") if rone_vac_row
-                      else (rone_vac_seoul.get("quarter") if rone_vac_seoul else None))
+                      else (rone_vac_seoul.get("quarter") if rone_vac_seoul else None)) or DEFAULT_RENT_QUARTER
     vacancy_specific = area_vacancy is not None and mapping is not None
     if vacancy_value is None:
         vacancy_reason = "R-ONE 공실률 자료 없음"
@@ -1758,6 +1788,18 @@ def build_candidate(
         confidence_reasons.append("R-ONE 상권별 자동 매핑 미허용")
     if conditions["unsupported_conditions"]:
         confidence_reasons.append("특별조건을 매물 데이터로 검증하지 못함")
+    # FC-06a/06b 상권 crosswalk 대리 시 data_confidence 1단계 하향 (candidate-selection-spec.md §4-2).
+    # 표기 등급만 한 단계 내리고(high→medium, medium→low; low 유지) 정렬에는 반영하지
+    # 않는다 — 인구 근거는 순위 불변(F36)이라 하향 전 등급을 정렬 키로 보존한다.
+    sort_confidence = confidence
+    if pop_ctx.confidence_downgrade:
+        confidence_reasons.extend(pop_ctx.confidence_reasons)
+        _conf_order = ("high", "medium", "low")
+        confidence = _conf_order[min(_conf_order.index(confidence) + 1, len(_conf_order) - 1)]
+    context_notes.extend(pop_ctx.context_notes)
+    missing.extend(pop_ctx.missing)
+    context_notes.extend(plan_ctx.context_notes)
+    missing.extend(plan_ctx.missing)
 
     normalizations = [
         "encoding_detect", "eng_header_rename", "store_count_schema_map", "sales_count_column_fix",
@@ -1868,6 +1910,28 @@ def build_candidate(
     if not news_catalogs:
         missing.append({"feature": "FC-51-news", "reason": "정규화된 빅카인즈 또는 수동 네이버 시설·개발 뉴스 snapshot 없음"})
 
+    # 인구 3종(FC-03·04·05·06a·06b) evidence·정규화·최신성 병합 — 전부 context_notes 버킷.
+    ev.extend(pop_ctx.evidence)
+    for tag in pop_ctx.normalizations:
+        if tag not in normalizations:
+            normalizations.append(tag)
+    freshness.update(pop_ctx.freshness)
+    # 도시계획·정비사업(FC-51·52) evidence·최신성 병합 — 전부 context_notes 버킷 (#29).
+    ev.extend(plan_ctx.evidence)
+    freshness.update(plan_ctx.freshness)
+    for tag in ("plan_stage_3group_crosswalk", "uq120_polygon_pip"):
+        if plan_ctx.evidence and tag not in normalizations:
+            normalizations.append(tag)
+    demand_composition = {
+        "features": pop_ctx.dimension_features + (["FC-08"] if households else []),
+        "status": "partial" if pop_ctx.dimension_features else "inactive",
+        "grain_notes": {
+            **pop_ctx.grain_notes,
+            **({"FC-08": f"지점 반경 500m 아파트 {households}세대 · 약한 배경 신호(FC-03 상주인구와 세트)"} if households else {}),
+            **({"note": "인구 데이터 소스 미연결(--source db) — --source files 필요"} if pop is None else {}),
+        },
+    }
+
     return {
         "candidate_id": candidate_id, "candidate_type": candidate_type,
         "spatial_grain": "지점(생성)" if synthetic else "지점",
@@ -1876,6 +1940,8 @@ def build_candidate(
         "industry_code": request.industry_code, "fit_tier": tier, "fit_index": None, "score_version": None,
         "score_is_predictive": False, "greenfield": greenfield,
         "data_confidence": {"level": confidence, "reasons": confidence_reasons},
+        # 정렬 전용(인구 하향 반영 전 등급). run_pipeline 이 정렬 직후 제거한다.
+        "_sort_confidence": sort_confidence,
         "feature_build": {
             "build_passed": True, "merge_key_definition": "기준_년분기_코드 + 공간코드 + 서비스_업종_코드", "merge_key_dup_rate": 0,
             "quarters_used": {"flow": [request.quarter], "sales": [request.quarter], "store": [request.quarter], "change": [request.quarter], "rent": [rent_period] if re.fullmatch(r"[0-9]{5}", rent_period) else []},
@@ -1886,18 +1952,21 @@ def build_candidate(
         },
         "dimension_evidence": {
             "현재수요": {"features": ["FC-01", "FC-07", "FC-31"], "status": "mixed", "grain_notes": {"FC-01": f"{f_scope or '없음'} 배경값 · 검증상 신호 없음 → context_notes만, 판정·정렬 미반영", "FC-07": "지점 반경 직접 계산 · bus_n만 약한 배경 신호, 역거리는 서술", "FC-31": f"{u_scope or '없음'}×업종 배경값 · 약한 배경 신호(과거 실적, 신규 성공 아님)"}},
+            "수요구성": {**demand_composition, "note": "FC-03·04·05·06a·06b는 전부 context_notes 버킷(신호 없음) — 차원 status 계산만 참여, positive/negative·정렬 근거 금지 (candidate-selection-spec.md §4-2)"},
             "경쟁·시장수용": {"features": ["FC-30", "FC-31", "FC-32"], "status": "mixed", "grain_notes": {"all": f"{u_scope or '없음'}×업종 배경값", "observed_poi_context": "완결 Kakao 지점 반경 관측; 상세 맥락만 제공하며 판정·정렬에는 미사용" if poi_context else "Kakao POI context 미사용"}},
             "진입건전성": {"features": ["FC-10", "FC-11"], "status": "mixed", "entry_health_variant": "core", "entry_health_v1": {"version": "entry_health_v1", "grade": grade, "risk": risk, "formula": "0.25·폐업률분위 + 0.25·(100−개업률분위) + 0.25·(100−점포증감률분위) + 0.25·라벨리스크·100 (전 업종 통합)", "cuts": list(EH_CUTS[eh_scope]) if eh_scope else None, "cut_scope": eh_scope, "inputs": {**eh_inputs, "라벨": label}, "score_is_predictive": False, "used_in_판정": "반대근거 1항목", "ref": "docs/architecture/recommendation-fastapi.md#entry-health-v1"}},
             "미래신호": {
-                "features": ["FC-42"] + (["FC-51-news"] if news_catalogs else []),
-                "status": "partial" if (naver_industry_attention or news_catalogs) else "inactive",
+                "features": ["FC-42"] + (["FC-51-news"] if news_catalogs else []) + plan_ctx.dimension_features,
+                "status": "partial" if (naver_industry_attention or news_catalogs or plan_ctx.dimension_features) else "inactive",
                 "grain_notes": {
                     "FC-42": "업종 전체 서울시 검색 관심도. 최근 원계열·계절 국면만 context_notes/evidence에 기록하며 후보 판정·정렬에는 미반영",
                     **({"FC-51-news": "빅카인즈·네이버 뉴스 수동 snapshot(시설·개발·정비 주제 검색)에서 자치구·행정동으로 매칭한 기사 수. topic_match_rate ~1.0이면 주제로 걸러낸 부분집합이 아니라 주제 한정 snapshot 내 지역 매칭 수. 공식 도시계획사업의 상태·확정 여부가 아니며 fit_tier·정렬 미반영"} if news_catalogs else {}),
+                    **plan_ctx.grain_notes,
+                    **({"note_plan": "도시계획·정비사업 미연결(--source db 시 context.plan_snapshot 미적재) — --source files 필요"} if plan is None else {}),
                 },
             },
         },
-        "profile_ref": {"anchor_id": str(seed["id"]), "host_area": host.code if host else None, "as_of_quarter": {"flow": request.quarter, "sales": request.quarter, "store": request.quarter, "change": request.quarter, "rent": rent_period, **({"kakao_poi": poi_context.retrieved_at[:10]} if poi_context else {})}, "profile_confidence": {"level": confidence, "reasons": confidence_reasons}},
+        "profile_ref": {"anchor_id": str(seed["id"]), "host_area": host.code if host else None, "as_of_quarter": {"flow": request.quarter, "sales": request.quarter, "store": request.quarter, "change": request.quarter, "rent": rent_period, **({"kakao_poi": poi_context.retrieved_at[:10]} if poi_context else {}), **pop_ctx.as_of}, "profile_confidence": {"level": confidence, "reasons": confidence_reasons}},
         "reasons": reasons, "counter_evidence": counter, "context_notes": context_notes, "missing_features": missing,
         "source_freshness": freshness,
         "evidence": ev, "listing_url": None,
@@ -2024,6 +2093,12 @@ class FileSource:
 
     def crosswalk(self):
         return parse_trdar_crosswalk()
+
+    def population(self, flow_dong=None):
+        return population.load_population(ROOT, flow_dong)
+
+    def urban_plan(self):
+        return urban_plan.load_from_files(ROOT)
 
     def retrieve_requests(self, requests, selected_region, industry_code, quarter):
         return {
@@ -2370,6 +2445,64 @@ class DbSource:
         )
         return {r["trdar"]: {"R_ONE_상권": r["rone"]} for r in rows if r.get("trdar")}
 
+    def population(self, flow_dong=None):
+        # context.population_snapshot(dataset·grain·spatial_code·period·attributes jsonb)에서
+        # as_of 파티션을 읽어 파일 소스와 동일 코어(population.assemble)로 조립한다.
+        # 적재: services/recommendation-api/scripts/ingest_population.py.
+        # 테이블 미적재 시 None(missing 처리) — to_regclass 로 먼저 확인해 조회 실패로
+        # 요청 전체가 중단되지 않게 한다.
+        reg = self._query("SELECT to_regclass('context.population_snapshot') AS reg")
+        if not reg or not reg[0].get("reg"):
+            return None
+        # 계단식이라 dataset 별 as_of 파티션만 읽는다. 구 파티션이 남아 있어도
+        # (dataset, period) 로 고정해 조회 결과에 섞이지 않게 한다 → attributes 와
+        # as_of 가 항상 as_of 상수를 가리킨다.
+        as_of = {
+            "resident": population.RESIDENT_AS_OF,
+            "worker": population.WORKER_AS_OF,
+            "foreign_resident": population.FOREIGN_LATEST_COMPLETE,
+        }
+        _in = ", ".join(f"('{ds}', '{q}')" for ds, q in (
+            ("resident", as_of["resident"]),
+            ("worker", as_of["worker"]),
+            ("foreign", as_of["foreign_resident"]),
+        ))
+        rows = self._query(
+            "SELECT dataset, grain, spatial_code, attributes "
+            f"FROM context.population_snapshot WHERE (dataset, period) IN ({_in})"
+        )
+        if not rows:
+            return None
+        buckets: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
+        for r in rows:
+            buckets.setdefault((r["dataset"], r["grain"]), {})[r["spatial_code"]] = json.loads(r["attributes"])
+        return population.assemble(
+            resident_trdar=buckets.get(("resident", "commercial_area"), {}),
+            resident_dong=buckets.get(("resident", "admin_dong"), {}),
+            worker_trdar=buckets.get(("worker", "commercial_area"), {}),
+            worker_dong=buckets.get(("worker", "admin_dong"), {}),
+            foreign_dong_raw={
+                code: {
+                    "장기_외국인_평균": population._f(row, "장기_외국인_평균"),
+                    "단기_외국인_평균": population._f(row, "단기_외국인_평균"),
+                    "장기_관측일수": population._f(row, "장기_관측일수"),
+                    "단기_관측일수": population._f(row, "단기_관측일수"),
+                }
+                for code, row in buckets.get(("foreign", "admin_dong"), {}).items()
+            },
+            crosswalk=(population.load_crosswalk_from_db(self._query)
+                       or population.load_crosswalk(ROOT)),  # DB(location.area_crosswalk) 우선, 미적재 시 파일 폴백
+            flow_dong=flow_dong,
+            as_of=as_of,
+            source_paths={**population._SOURCE_PATHS,
+                          "population_crosswalk": "location.area_crosswalk (commercial_to_admin_overlap)"},
+        )
+
+    def urban_plan(self):
+        # context.plan_snapshot(urban_project_overlap + redevelopment_association)에서 조립.
+        # 미적재 시 None → 파일 소스 폴백/ missing 처리 (#29).
+        return urban_plan.load_from_db(self._query, ROOT)
+
     def retrieve_requests(self, requests, selected_region, industry_code, quarter):
         # RAG 검색 SQL 은 지역·차원·업종별로 갈라져 종류가 매우 많고(수백 지역 ×
         # 4차원 × 업종) 각기 LIMIT 20 로 저렴하다. 공용 캐시에 태우면 값비싼
@@ -2478,6 +2611,7 @@ def run_pipeline(
     if seed_mode not in {"anchors", "buildings", "hybrid"}:
         raise PipelineInputError("seed_mode는 anchors, buildings, hybrid 중 하나여야 합니다.")
     selected_region = {"sido": request.sido, "sigungu": request.sigungu, "dong": request.dong}
+    reset_call_budget()  # 이 실행의 LLM 호출 상한 카운터 초기화 (LLM_MAX_CALLS_PER_RUN)
     try:
         input_interpretation = plan_input(
             selected_region=selected_region,
@@ -2557,6 +2691,16 @@ def run_pipeline(
     crosswalk = src.crosswalk()
     rone_areas, rone_seoul, rone_path = src.rent()
     rone_vac_areas, rone_vac_seoul, rone_vac_path = src.vacancy()
+    pop = src.population(flow_dong)  # 인구 3종(상주·직장·외국인, #28). 테이블 미적재 시 None → missing 처리
+    try:
+        plan = src.urban_plan()  # 도시계획·정비사업 추진단계(#29). None이면 미연결 처리
+    except (PipelineError, LLMRuntimeError, OSError, RuntimeError):
+        # 원천 CSV·plan_snapshot 미가용 시 #29 근거 없이 진행(라운드 6 F43).
+        plan = None
+    flow_dong_total_seoul = sorted(
+        v for row in flow_dong.values()
+        if (v := num(row, "총_유동인구_수")) is not None
+    )
     candidates = [build_candidate(
         request, conditions, seed, trdar_layer, hinterland_layer, dong_layer, sigungu_by_prefix, target_sigungu,
         store_trdar, sales_trdar, flow_trdar, change_trdar, store_dong, sales_dong, flow_dong, change_dong,
@@ -2565,15 +2709,17 @@ def run_pipeline(
         news_catalogs,
         source_paths, all_flow_density, sorted(all_sales_pp), crosswalk, rone_areas, rone_seoul, rone_path,
         rone_vac_areas, rone_vac_seoul, rone_vac_path,
+        pop, flow_dong_total_seoul, plan,
     ) for seed in seeds]
     # 검증된 품질 신호가 없으므로 근거 수로 등수를 매기지 않는다(-len(reasons) 제거).
     # tier → (같은 tier 안에서 candidate_type 라운드로빈으로 인터리브) → 반대근거 적은 순 → 신뢰도 → id.
     # 인터리브: --limit로 자를 때 특정 앵커 타입(예: 아파트)이 id 정렬 편향으로 통째로 잘리는 것을 막는다.
+    # 신뢰도는 _sort_confidence(인구 FC-06 하향 반영 전) 기준 — 인구 근거는 순위 불변(F36).
     _conf_rank = {"high": 0, "medium": 1, "low": 2}
     _tier_rank = {"추천": 0, "조건부 검토": 1, "주의": 2}
 
     def _within_key(c: dict[str, Any]) -> tuple:
-        return (len(c["counter_evidence"]), _conf_rank.get(c["data_confidence"]["level"], 3), c["candidate_id"])
+        return (len(c["counter_evidence"]), _conf_rank.get(c["_sort_confidence"], 3), c["candidate_id"])
 
     ordered: list[dict[str, Any]] = []
     for tier in sorted({c["fit_tier"] for c in candidates}, key=lambda t: _tier_rank.get(t, 3)):
@@ -2588,6 +2734,8 @@ def run_pipeline(
                     ordered.append(buckets[t][cursors[t]])
                     cursors[t] += 1
     candidates = ordered
+    for c in candidates:
+        c.pop("_sort_confidence", None)  # 정렬 전용 내부 키 — 스키마·출력에서 제외
     candidates = _order_by_preferences(candidates, preferences)
     if limit is not None:
         candidates = candidates[:limit]

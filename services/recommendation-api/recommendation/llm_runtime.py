@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -22,6 +23,38 @@ load_env()
 
 class LLMRuntimeError(RuntimeError):
     """The configured LLM endpoint could not return valid JSON."""
+
+
+# 한 번의 추천 실행에서 허용할 LLM 호출 수 상한 (opt-in). 초과하면 generate_json 이
+# LLMRuntimeError 를 던지고, 호출부(plan_input·explain_candidates)는 기존 실패
+# 경로처럼 template/deterministic 폴백으로 전환한다. 기본값 0 = 상한 없음이며,
+# 요청당 호출 수는 1(planner) + 후보 수(explanation)라 캡을 걸 때는 그보다 크게
+# 잡아야 auto 모드에서 조용히 template 로 떨어지지 않는다. required 모드에서는
+# 캡을 무시한다(자체 비용캡을 외부 장애처럼 503 으로 보고하지 않도록).
+# run_pipeline 이 요청마다 reset_call_budget() 를 호출하므로 카운터는 요청
+# 스레드별로 격리된다.
+_call_budget = threading.local()
+
+
+def _max_calls_per_run() -> int:
+    try:
+        value = int(os.getenv("LLM_MAX_CALLS_PER_RUN", "0"))
+    except ValueError:
+        return 0
+    return value if value > 0 else 0  # 0 이하 = 상한 없음
+
+
+def reset_call_budget() -> None:
+    """추천 실행 시작 시 이 스레드의 LLM 호출 카운터를 0 으로 되돌린다."""
+    _call_budget.used = 0
+
+
+def _charge_call(*, enforce: bool = True) -> None:
+    limit = _max_calls_per_run()
+    used = getattr(_call_budget, "used", 0)
+    if enforce and limit and used >= limit:
+        raise LLMRuntimeError(f"LLM 호출 예산 초과 (LLM_MAX_CALLS_PER_RUN={limit})")
+    _call_budget.used = used + 1
 
 
 # This is deliberately shared by the planner and explanation stages. The
@@ -56,6 +89,8 @@ class LLMConfig:
         if mode not in {"auto", "required", "offline"}:
             raise ValueError(f"지원하지 않는 llm mode: {mode}")
         endpoint = os.getenv("LLM_API_URL", "").strip() or None
+        # LLM_API_KEY 만 인식한다. 셸에 흔히 떠 있는 OPENAI_API_KEY 를 폴백으로
+        # 받으면 offline 로 알고 있던 환경에서 실호출·과금이 켜질 수 있어 제외.
         api_key = os.getenv("LLM_API_KEY", "").strip() or None
         model = os.getenv("LLM_MODEL", "").strip()
         try:
@@ -63,9 +98,11 @@ class LLMConfig:
         except ValueError:
             timeout_s = 20.0
         try:
-            max_output_tokens = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "1200"))
+            # 추론 모델은 이 한도 안에서 추론 토큰을 먼저 소비한다. 설명 카드 JSON
+            # (후보 배열 verbatim 복사)은 최대 ~2k 토큰이라 여유를 둔다.
+            max_output_tokens = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "6000"))
         except ValueError:
-            max_output_tokens = 1200
+            max_output_tokens = 6000
         try:
             max_response_bytes = int(os.getenv("LLM_MAX_RESPONSE_BYTES", "2000000"))
         except ValueError:
@@ -91,6 +128,15 @@ class LLMConfig:
 def _chat_url(endpoint: str) -> str:
     endpoint = endpoint.rstrip("/")
     return endpoint if endpoint.endswith("/chat/completions") else f"{endpoint}/chat/completions"
+
+
+def _is_param_rejection(error_text: str) -> bool:
+    """요청 파라미터 형식 때문에 400 이 난 것인지(=구형 형식 재시도 가치 있음)."""
+    low = error_text.lower()
+    return "400" in low and any(
+        token in low for token in
+        ("max_tokens", "max_completion_tokens", "temperature", "unsupported_parameter", "unsupported value", "unknown_parameter")
+    )
 
 
 def _extract_json(content: Any) -> dict[str, Any]:
@@ -127,15 +173,38 @@ class OpenAICompatibleJsonClient:
     def generate_json(self, system_prompt: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.config.available:
             raise LLMRuntimeError("사용 가능한 LLM endpoint가 없습니다.")
-        body = {
+        # 요청당 호출 상한 — 초과 시 호출부가 폴백. required 모드에서는 캡을 강제하지
+        # 않는다(자체 비용캡을 외부 의존성 장애처럼 503 으로 보고하지 않도록).
+        _charge_call(enforce=self.config.mode != "required")
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
+        common = {
             "model": self.config.model,
-            "max_completion_tokens": self.config.max_output_tokens,
             "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
+            "messages": messages,
         }
+        # 최신 OpenAI 모델(gpt-5.x 등)은 `max_tokens` 를 거부하고 `temperature` 는
+        # 기본값(1)만 허용한다. 구형 OpenAI 호환 서버는 반대로 `max_completion_tokens`
+        # 를 모른다. 최신 형식을 먼저 보내고, 파라미터 관련 400 이면 구형 형식으로
+        # 한 번 재시도한다.
+        shapes = [
+            {**common, "max_completion_tokens": self.config.max_output_tokens},
+            {**common, "max_tokens": self.config.max_output_tokens, "temperature": 0},
+        ]
+        last_exc: LLMRuntimeError | None = None
+        for i, body in enumerate(shapes):
+            try:
+                return self._post_chat(body)
+            except LLMRuntimeError as exc:
+                last_exc = exc
+                if i + 1 < len(shapes) and _is_param_rejection(str(exc)):
+                    continue
+                raise
+        raise last_exc  # pragma: no cover - shapes is non-empty
+
+    def _post_chat(self, body: dict[str, Any]) -> dict[str, Any]:
         request = Request(
             _chat_url(self.config.endpoint or ""),
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -161,7 +230,12 @@ class OpenAICompatibleJsonClient:
 
         try:
             response_json = json.loads(raw)
-            content = response_json["choices"][0]["message"]["content"]
+            choice = response_json["choices"][0]
+            content = choice["message"]["content"]
         except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
             raise LLMRuntimeError(f"LLM 응답 형식 오류: {exc}") from exc
+        # 추론 모델은 max_completion_tokens 안에서 추론 토큰을 먼저 쓰므로, 한도가
+        # 낮으면 content 없이 잘린다(finish_reason=length). "JSON 아님" 대신 명확히.
+        if choice.get("finish_reason") == "length" and not str(content or "").strip():
+            raise LLMRuntimeError("LLM 응답이 max_completion_tokens 한도에서 잘림 (LLM_MAX_OUTPUT_TOKENS 상향 필요)")
         return _extract_json(content)
