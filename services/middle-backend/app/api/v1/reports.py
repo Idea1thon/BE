@@ -9,11 +9,18 @@ API_SPEC 4-5 가 REQ-HQ-15 를 따르기로 한 상태다. 뒤집히면 이 주�
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, status
+from fastapi import APIRouter, BackgroundTasks, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, OwnerUser, PathId, SessionDep, authorize_branch
+from app.api.deps import (
+    CurrentUser,
+    OffsetQuery,
+    OwnerUser,
+    PathId,
+    SessionDep,
+    authorize_branch,
+)
 from app.core.config import settings
 from app.errors import (
     CONFLICT_409,
@@ -41,12 +48,61 @@ from app.schemas import (
     ReportCreateResponse,
     ReportDetailResponse,
     ReportInputItemOut,
+    ReportListItem,
+    ReportListResponse,
+    ReportSort,
     ReportStatusResponse,
 )
 from app.services import report_service
 from app.services.siren_mapper import select_analysis_view
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+@router.get(
+    "",
+    response_model=ReportListResponse,
+    responses={**UNAUTHORIZED_401, **FORBIDDEN_403},
+)
+async def list_my_reports(
+    owner: OwnerUser,
+    session: SessionDep,
+    sort: ReportSort = Query(default=ReportSort.MONTH_DESC),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: OffsetQuery = 0,
+) -> ReportListResponse:
+    """점주 본인 점포의 운영보고서 목록(REQ-OW-01~02)."""
+    order = (
+        OperationReport.report_month.desc()
+        if sort is ReportSort.MONTH_DESC
+        else OperationReport.report_month.asc()
+    )
+    rows = (
+        await session.execute(
+            select(OperationReport, ReportAnalysis.risk_level, ReportAnalysis.risk_score)
+            .join(Branch, Branch.id == OperationReport.branch_id)
+            .outerjoin(ReportAnalysis, ReportAnalysis.report_id == OperationReport.id)
+            .where(Branch.owner_user_id == owner.id)
+            .order_by(order, OperationReport.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+
+    return ReportListResponse(
+        items=[
+            ReportListItem(
+                report_id=report.id,
+                report_month=report.report_month.strftime("%Y-%m"),
+                created_at=report.created_at,
+                status=report.status,
+                risk_level=level,
+                risk_score=score,
+                net_sales=int(report.net_sales) if report.net_sales is not None else None,
+            )
+            for report, level, score in rows
+        ]
+    )
 
 
 @router.get(
