@@ -38,6 +38,7 @@ from typing import Any, Iterable
 
 import shapefile
 from . import population
+from . import urban_plan
 from .llm_explanation import explain_candidates
 from .llm_input_planner import parse_conditions, plan_input
 from .llm_runtime import LLMRuntimeError
@@ -1254,6 +1255,7 @@ def build_candidate(
     crosswalk: dict[str, dict[str, str]], rone_areas: dict[str, dict[str, str]], rone_seoul: dict[str, str], rone_path: Path | None,
     rone_vac_areas: dict[str, dict[str, str]], rone_vac_seoul: dict[str, str], rone_vac_path: Path | None,
     pop: "population.PopulationData | None" = None, flow_dong_total_seoul: list[float] | None = None,
+    plan: "urban_plan.PlanData | None" = None,
 ) -> dict[str, Any]:
     point = seed["pt"]
     synthetic = seed["kind"] == "생성지점"
@@ -1353,6 +1355,14 @@ def build_candidate(
         flow_dong_total=num(flow_dong.get(dong_rec.code), "총_유동인구_수") if dong_rec else None,
         flow_dong_seoul=flow_dong_total_seoul or [],
         quarter=request.quarter,
+    )
+
+    # 도시계획·정비사업 추진단계(FC-51·52) — 전부 context_notes 버킷 (candidate-selection-spec.md §202·§428).
+    plan_ctx = urban_plan.context_for_candidate(
+        plan,
+        host_code=host.code if host else None,
+        sigungu_code=dong_rec.code[:5] if dong_rec else None,
+        sigungu_name=target_sigungu,
     )
 
     flow_p = pct(seoul_flow_density, flow_density)
@@ -1779,6 +1789,8 @@ def build_candidate(
             confidence = "medium"
     context_notes.extend(pop_ctx.context_notes)
     missing.extend(pop_ctx.missing)
+    context_notes.extend(plan_ctx.context_notes)
+    missing.extend(plan_ctx.missing)
 
     normalizations = [
         "encoding_detect", "eng_header_rename", "store_count_schema_map", "sales_count_column_fix",
@@ -1895,6 +1907,12 @@ def build_candidate(
         if tag not in normalizations:
             normalizations.append(tag)
     freshness.update(pop_ctx.freshness)
+    # 도시계획·정비사업(FC-51·52) evidence·최신성 병합 — 전부 context_notes 버킷 (#29).
+    ev.extend(plan_ctx.evidence)
+    freshness.update(plan_ctx.freshness)
+    for tag in ("plan_stage_3group_crosswalk", "uq120_polygon_pip"):
+        if plan_ctx.evidence and tag not in normalizations:
+            normalizations.append(tag)
     demand_composition = {
         "features": pop_ctx.dimension_features + (["FC-08"] if households else []),
         "status": "partial" if pop_ctx.dimension_features else "inactive",
@@ -1927,11 +1945,13 @@ def build_candidate(
             "경쟁·시장수용": {"features": ["FC-30", "FC-31", "FC-32"], "status": "mixed", "grain_notes": {"all": f"{u_scope or '없음'}×업종 배경값", "observed_poi_context": "완결 Kakao 지점 반경 관측; 상세 맥락만 제공하며 판정·정렬에는 미사용" if poi_context else "Kakao POI context 미사용"}},
             "진입건전성": {"features": ["FC-10", "FC-11"], "status": "mixed", "entry_health_variant": "core", "entry_health_v1": {"version": "entry_health_v1", "grade": grade, "risk": risk, "formula": "0.25·폐업률분위 + 0.25·(100−개업률분위) + 0.25·(100−점포증감률분위) + 0.25·라벨리스크·100 (전 업종 통합)", "cuts": list(EH_CUTS[eh_scope]) if eh_scope else None, "cut_scope": eh_scope, "inputs": {**eh_inputs, "라벨": label}, "score_is_predictive": False, "used_in_판정": "반대근거 1항목", "ref": "docs/architecture/recommendation-fastapi.md#entry-health-v1"}},
             "미래신호": {
-                "features": ["FC-42"] + (["FC-51-news"] if news_catalogs else []),
-                "status": "partial" if (naver_industry_attention or news_catalogs) else "inactive",
+                "features": ["FC-42"] + (["FC-51-news"] if news_catalogs else []) + plan_ctx.dimension_features,
+                "status": "partial" if (naver_industry_attention or news_catalogs or plan_ctx.dimension_features) else "inactive",
                 "grain_notes": {
                     "FC-42": "업종 전체 서울시 검색 관심도. 최근 원계열·계절 국면만 context_notes/evidence에 기록하며 후보 판정·정렬에는 미반영",
                     **({"FC-51-news": "빅카인즈·네이버 뉴스 수동 snapshot(시설·개발·정비 주제 검색)에서 자치구·행정동으로 매칭한 기사 수. topic_match_rate ~1.0이면 주제로 걸러낸 부분집합이 아니라 주제 한정 snapshot 내 지역 매칭 수. 공식 도시계획사업의 상태·확정 여부가 아니며 fit_tier·정렬 미반영"} if news_catalogs else {}),
+                    **plan_ctx.grain_notes,
+                    **({"note_plan": "도시계획·정비사업 미연결(--source db 시 context.plan_snapshot 미적재) — --source files 필요"} if plan is None else {}),
                 },
             },
         },
@@ -2065,6 +2085,9 @@ class FileSource:
 
     def population(self, flow_dong=None):
         return population.load_population(ROOT, flow_dong)
+
+    def urban_plan(self):
+        return urban_plan.load_from_files(ROOT)
 
     def retrieve_requests(self, requests, selected_region, industry_code, quarter):
         return {
@@ -2450,6 +2473,11 @@ class DbSource:
             as_of=as_of,
         )
 
+    def urban_plan(self):
+        # context.plan_snapshot(urban_project_overlap + redevelopment_association)에서 조립.
+        # 미적재 시 None → 파일 소스 폴백/ missing 처리 (#29).
+        return urban_plan.load_from_db(self._query)
+
     def retrieve_requests(self, requests, selected_region, industry_code, quarter):
         # RAG 검색 SQL 은 지역·차원·업종별로 갈라져 종류가 매우 많고(수백 지역 ×
         # 4차원 × 업종) 각기 LIMIT 20 로 저렴하다. 공용 캐시에 태우면 값비싼
@@ -2638,6 +2666,10 @@ def run_pipeline(
     rone_areas, rone_seoul, rone_path = src.rent()
     rone_vac_areas, rone_vac_seoul, rone_vac_path = src.vacancy()
     pop = src.population(flow_dong)  # 인구 3종(상주·직장·외국인). DbSource는 None(파일 소스 우선, #28)
+    try:
+        plan = src.urban_plan()  # 도시계획·정비사업 추진단계(#29). None이면 미연결 처리
+    except (PipelineError, LLMRuntimeError):
+        plan = None
     flow_dong_total_seoul = sorted(
         v for row in flow_dong.values()
         if (v := num(row, "총_유동인구_수")) is not None
@@ -2650,7 +2682,7 @@ def run_pipeline(
         news_catalogs,
         source_paths, all_flow_density, sorted(all_sales_pp), crosswalk, rone_areas, rone_seoul, rone_path,
         rone_vac_areas, rone_vac_seoul, rone_vac_path,
-        pop, flow_dong_total_seoul,
+        pop, flow_dong_total_seoul, plan,
     ) for seed in seeds]
     # 검증된 품질 신호가 없으므로 근거 수로 등수를 매기지 않는다(-len(reasons) 제거).
     # tier → (같은 tier 안에서 candidate_type 라운드로빈으로 인터리브) → 반대근거 적은 순 → 신뢰도 → id.

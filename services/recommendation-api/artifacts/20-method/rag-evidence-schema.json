@@ -307,6 +307,8 @@
               "short_foreign_over_flow_ratio",
               "population_stepwise_snapshot_load",
               "foreign_trdar_area_weight",
+              "plan_stage_3group_crosswalk",
+              "uq120_polygon_pip",
               "recent_3m_mean_no_seasonal_adjustment",
               "yoy_clean_recent_mean",
               "seasonal_phase_label",
