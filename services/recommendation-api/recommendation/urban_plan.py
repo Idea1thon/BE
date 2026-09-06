@@ -252,10 +252,12 @@ def load_from_db(query, root: Path) -> PlanData | None:
     """
     rows = query(
         "SELECT plan_type, spatial_unit_type, spatial_unit_code, project_name, project_category, "
-        "progress_stage, overlap_ratio, observed_at, source_attributes "
+        "progress_stage, overlap_ratio, source_attributes "
         "FROM context.plan_snapshot WHERE plan_type IN ('urban_project_overlap', 'redevelopment_association')"
     )
-    if not rows:
+    # F50: plan_snapshot이 비어도 계획 도시철도(파일 기반)는 살린다. 둘 다 없을 때만 None.
+    subway_sgg, subway_lines = _load_subway_plan(root)
+    if not rows and not subway_sgg:
         return None
     import json
 
@@ -272,7 +274,6 @@ def load_from_db(query, root: Path) -> PlanData | None:
             assoc_rows.append(attrs)
     # F44: 행 순서에 의존하지 않고 가장 최근 생성일을 스냅샷 기준으로.
     observed = max(created) if created else ""
-    subway_sgg, subway_lines = _load_subway_plan(root)
     return _assemble(urban_rows, assoc_rows, observed_at=observed,
                      subway_by_sigungu=subway_sgg, subway_lines=subway_lines)
 
@@ -296,13 +297,15 @@ def _stage_breakdown(projects: list[PlanProject]) -> dict[str, int]:
 
 def _ev(feature_id: str, metric_name: str, value: Any, unit: str, *, spatial_grain: str,
         grain_is_proxy: bool, observed_end_period: str, source_path: str,
-        interpretation: str, limitation: str, proxy_note: str | None = None) -> dict[str, Any]:
+        interpretation: str, limitation: str, proxy_note: str | None = None,
+        normalization: list[str] | None = None) -> dict[str, Any]:
     item: dict[str, Any] = {
         "metric_name": metric_name, "value": value, "unit": unit,
         "source_type": "observed", "comparison_scope": "none",
         "period": observed_end_period or "스냅샷", "spatial_grain": spatial_grain,
         "grain_is_proxy": grain_is_proxy, "source_path": source_path,
-        "quarter_file_source": source_path, "normalization": ["plan_stage_3group_crosswalk", "uq120_polygon_pip"],
+        "quarter_file_source": source_path,
+        "normalization": normalization or ["plan_stage_3group_crosswalk", "uq120_polygon_pip"],
         "interpretation": interpretation, "limitation": limitation,
         "feature_id": feature_id, "observed_end_period": observed_end_period or "스냅샷",
         "update_cycle": "snapshot",
@@ -417,6 +420,7 @@ def context_for_candidate(
             interpretation=f"{sigungu_name} 경유 계획 도시철도 신설·연장 {len(planned_lines)}개 노선: {', '.join(planned_lines)}",
             limitation="2020년 관보 계획 · 자치구 grain · 미개통 · 정거장 위치·개통일 미확정 · 운행개선 제외. 후보 지점의 역세권 편입을 뜻하지 않음. '예정역'·'확정' 금지. fit_tier 판정·정렬 미반영",
             proxy_note="자치구 grain(정거장 위치 미확정)",
+            normalization=["subway_network_plan_sigungu_filter"],  # F49: 폴리곤 PIP 아님 — 자치구 CSV 필터·집계
         ))
     elif plan.subway_by_sigungu:
         ctx.missing.append({"feature": "FC-52", "reason": f"{sigungu_name or sigungu_code}는 제2차 서울 도시철도망 구축계획(2020)에 신설·연장 계획 노선 없음"})
