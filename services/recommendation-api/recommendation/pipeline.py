@@ -119,6 +119,8 @@ class RecommendationRequest:
     industry_code: str | None
     special_condition_text: str = ""
     quarter: str = DEFAULT_QUARTER
+    sigungu_code: str | None = None
+    admin_dong_code: str | None = None
 
 
 @dataclass
@@ -356,13 +358,25 @@ def resolve_region(
     if request.sido not in ("서울특별시", "서울"):
         raise PipelineInputError("현재 데이터 계약은 서울특별시만 지원합니다.")
     all_sigungus = {name for name in sigungu_by_prefix.values() if name}
-    if request.sigungu not in all_sigungus:
+    gu_code = getattr(request, 'sigungu_code', None)
+    dong_code = getattr(request, 'admin_dong_code', None)
+    if dong_code and (not re.fullmatch(r'[0-9]{8}', dong_code) or (gu_code and not dong_code.startswith(gu_code))):
+        raise PipelineInputError('행정동 코드 형식 또는 시군구 연결이 올바르지 않습니다.')
+    gu_code = gu_code or (dong_code[:5] if dong_code else None)
+    if gu_code and (not re.fullmatch(r'[0-9]{5}', gu_code) or gu_code not in sigungu_by_prefix):
+        raise PipelineInputError('시군구 코드를 확인할 수 없습니다.')
+    if not gu_code and request.sigungu not in all_sigungus:
         raise PipelineInputError(f"시군구를 확인할 수 없습니다: {request.sigungu}")
-    in_gu = [r for r in dong_layer.records if sigungu_by_prefix.get(r.code[:5]) == request.sigungu]
+    in_gu = [r for r in dong_layer.records if (r.code[:5] == gu_code if gu_code
+             else sigungu_by_prefix.get(r.code[:5]) == request.sigungu)]
     if not in_gu:
         raise PipelineDependencyError(f"행정동 데이터에서 시군구가 비어 있습니다: {request.sigungu}")
 
-    if request.dong:
+    if dong_code:
+        selected = [r for r in in_gu if r.code == dong_code]
+        if not selected:
+            raise PipelineInputError('행정동 코드를 확인할 수 없습니다.')
+    elif request.dong:
         requested_dong = normalize_admin_dong_name(request.dong)
         exact = [r for r in in_gu if normalize_admin_dong_name(r.name) == requested_dong]
         selected = exact or [r for r in in_gu if r.name in LEGAL_DONG_ALIASES.get(request.dong, ())]
@@ -2610,6 +2624,9 @@ def run_pipeline(
     if seed_mode not in {"anchors", "buildings", "hybrid"}:
         raise PipelineInputError("seed_mode는 anchors, buildings, hybrid 중 하나여야 합니다.")
     selected_region = {"sido": request.sido, "sigungu": request.sigungu, "dong": request.dong}
+    for code_field in ('sigungu_code', 'admin_dong_code'):
+        if getattr(request, code_field, None):
+            selected_region[code_field] = getattr(request, code_field)
     reset_call_budget()  # 이 실행의 LLM 호출 상한 카운터 초기화 (LLM_MAX_CALLS_PER_RUN)
     try:
         input_interpretation = plan_input(
@@ -2631,18 +2648,32 @@ def run_pipeline(
         raise PipelineInputError(f"분기 코드는 YYYYQ 형식(마지막 자리는 1~4)이어야 합니다: {request.quarter}")
     conditions = input_interpretation["conditions"]
     preferences = input_interpretation.get("preferences", {})
-    query_context = build_query_context(
-        request.special_condition_text, selected_region, request.industry_code,
-        conditions, preferences,
-    )
-    question_contract = build_question_contract(query_context)
-    query_context["question_contract"] = question_contract
-    input_interpretation["question_contract"] = question_contract
     src = make_source(source)
     data_source_manifest = src.describe()
     data_source_manifest["seed_mode"] = seed_mode
     trdar_layer, hinterland_layer, dong_layer, sigungu_by_prefix = src.layers()
     selected_dongs, target_poly, target_buffer = resolve_region(request, dong_layer, sigungu_by_prefix)
+    # The spatial layer comes from location.area in DB mode. Resolve legacy
+    # name-only calls once; every downstream retrieval uses these identifiers.
+    gu_code = getattr(request, 'sigungu_code', None)
+    dong_code = getattr(request, 'admin_dong_code', None)
+    if selected_dongs:
+        gu_code = selected_dongs[0].code[:5]
+        if len(selected_dongs) == 1 and (request.dong or dong_code):
+            dong_code = selected_dongs[0].code
+        request = replace(request, sigungu=sigungu_by_prefix.get(gu_code, request.sigungu),
+                          dong=selected_dongs[0].name if dong_code else request.dong,
+                          sigungu_code=gu_code, admin_dong_code=dong_code)
+    selected_region.update(sigungu=request.sigungu, dong=request.dong)
+    if gu_code:
+        selected_region['sigungu_code'] = gu_code
+    if dong_code:
+        selected_region['admin_dong_code'] = dong_code
+    query_context = build_query_context(request.special_condition_text, selected_region,
+                                        request.industry_code, conditions, preferences)
+    question_contract = build_question_contract(query_context)
+    query_context['question_contract'] = question_contract
+    input_interpretation['question_contract'] = question_contract
     target_sigungu = request.sigungu
 
     # 현재 분기 정규화 feature table용 인덱스. 중복 키는 index_rows에서 즉시 중단한다.

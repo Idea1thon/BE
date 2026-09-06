@@ -68,10 +68,35 @@ def validate_retrieval_requests(raw: Any) -> list[dict[str, Any]]:
     return output
 
 
+_DONG_DIMENSIONS = {"sales", "stores", "flow", "change", "workplace_population"}
+
+
+def _region_code(selected_region: dict, field: str, digits: int) -> str:
+    value = str(selected_region.get(field) or "").strip()
+    if value and not re.fullmatch(r"[0-9]{%d}" % digits, value):
+        raise ValueError(f"RAG 검색 지역 코드 형식 오류: {field}")
+    return value
+
+
+def _district_predicate(selected_region: dict) -> str:
+    code = _region_code(selected_region, "sigungu_code", 5)
+    if code:
+        return f"a.sigungu_code = {_sql_literal(code)}"
+    if _region_code(selected_region, "admin_dong_code", 8):
+        # The verified administrative code itself scopes the query. Never
+        # narrow it using an optional or differently formatted display name.
+        return "true"
+    return f"a.sigungu_name = {_sql_literal(str(selected_region.get('sigungu') or '').strip())}"
+
+
 def _area_predicate(selected_region: dict[str, str | None]) -> str:
     sigungu = str(selected_region.get("sigungu") or "").strip()
     dong = str(selected_region.get("dong") or "").strip()
-    if dong:
+    dong_code = _region_code(selected_region, "admin_dong_code", 8)
+    if dong_code:
+        return ("a.spatial_unit_type = 'admin_dong' "
+                f"AND a.spatial_unit_code = {_sql_literal(dong_code)} AND {_district_predicate(selected_region)}")
+    if dong and not selected_region.get("sigungu_code"):
         return (
             "a.spatial_unit_type = 'admin_dong' "
             f"AND a.spatial_unit_name = {_sql_literal(dong)} "
@@ -79,7 +104,7 @@ def _area_predicate(selected_region: dict[str, str | None]) -> str:
         )
     return (
         "a.spatial_unit_type = 'commercial_area' "
-        f"AND a.sigungu_name = {_sql_literal(sigungu)}"
+        f"AND {_district_predicate(selected_region)}"
     )
 
 
@@ -93,11 +118,19 @@ def _dimension_sql(
 ) -> str:
     predicate = _area_predicate(selected_region)
     if target_codes is not None:
-        predicate = "a.spatial_unit_type = 'commercial_area' " + (
-            f"AND a.sigungu_name = {_sql_literal(str(selected_region.get('sigungu') or '').strip())} "
-        )
+        predicate = f"a.spatial_unit_type = 'commercial_area' AND {_district_predicate(selected_region)} "
+        dong_code = _region_code(selected_region, "admin_dong_code", 8)
         dong = str(selected_region.get("dong") or "").strip()
-        if dong:
+        if dong_code:
+            predicate += (
+                f"AND (a.admin_dong_code = {_sql_literal(dong_code)} OR EXISTS ("
+                "SELECT 1 FROM location.area_crosswalk dcw "
+                "WHERE dcw.relation_type = 'commercial_to_admin_overlap' AND dcw.join_eligible "
+                "AND dcw.source_area_id = a.area_id "
+                f"AND split_part(dcw.target_area_id, ':', 2) = {_sql_literal(dong_code)})) "
+            )
+        elif dong and not selected_region.get("sigungu_code"):
+            # Compatibility for older callers which have not resolved codes.
             predicate += (
                 f"AND (a.admin_dong_name = {_sql_literal(dong)} OR EXISTS ("
                 "SELECT 1 FROM location.area d WHERE d.spatial_unit_type = 'admin_dong' "
@@ -113,6 +146,11 @@ def _dimension_sql(
         "SELECT a.spatial_unit_type, a.spatial_unit_code, "
         "a.spatial_unit_name, a.sigungu_name, "
     )
+    if selected_region.get("sigungu_code") or selected_region.get("admin_dong_code"):
+        common = (
+            "SELECT a.spatial_unit_type, a.spatial_unit_code, a.spatial_unit_name, "
+            f"coalesce(nullif(a.sigungu_name, ''), {_sql_literal(str(selected_region.get('sigungu') or '').strip())}) AS sigungu_name, "
+        )
     if dimension in ("rent", "vacancy"):
         indicator = "임대가격지수" if dimension == "rent" else "공실률"
         return common + (
@@ -215,6 +253,8 @@ def execute_retrieval_requests(
         raise ValueError("RAG 검색 분기 형식 오류")
     if not _INDUSTRY_RE.fullmatch(industry_code):
         raise ValueError("RAG 검색 업종 코드 오류")
+    dong_code = _region_code(selected_region, "admin_dong_code", 8)
+    _region_code(selected_region, "sigungu_code", 5)
     target_codes = None if target_areas is None else list(dict.fromkeys(
         str(area.get("spatial_unit_code")) for area in target_areas[:MAX_TARGET_AREAS]
         if isinstance(area, dict) and area.get("spatial_unit_type") == "commercial_area"
@@ -231,35 +271,43 @@ def execute_retrieval_requests(
         rows: list[dict[str, str]] = []
         availability: list[dict[str, Any]] = []
         for dimension in request["dimensions"]:
-            state = {"dimension": dimension, "status": "missing", "reason": "no_rows"}
-            try:
-                if target_codes == []:
-                    state["reason"] = "no_target_areas"
-                else:
-                    for table in optional_tables.get(dimension, ()):
-                        if table not in table_available:
-                            found = query(f"SELECT to_regclass({_sql_literal(table)}) AS reg")
-                            table_available[table] = bool(found and found[0].get("reg"))
-                    if any(not table_available[t] for t in optional_tables.get(dimension, ())):
-                        state["reason"] = "table_unavailable"
+            # A verified dong has its own observations even without a host area.
+            if dong_code:
+                plans = [("commercial_area", target_codes or [])]
+                if dimension in _DONG_DIMENSIONS:
+                    plans.append(("admin_dong", None))
+            else:
+                grain = "commercial_area" if target_codes is not None or selected_region.get("sigungu_code") or not selected_region.get("dong") else "admin_dong"
+                plans = [(grain, target_codes)]
+            for grain, codes in plans:
+                state = {"dimension": dimension, "spatial_unit_type": grain,
+                         "status": "missing", "reason": "no_rows"}
+                try:
+                    if codes == []:
+                        state["reason"] = "no_target_areas"
                     else:
-                        # Targeted retrieval must cover all selected candidates. The
-                        # generic user/tool limit still applies without target areas.
-                        row_limit = len(target_codes) if target_codes is not None else request["limit"]
-                        if target_codes is not None and dimension == "change":
-                            row_limit *= 2  # code and label for each selected area
-                        dimension_rows = query(_dimension_sql(
-                            dimension, selected_region, industry_code, quarter,
-                            row_limit, target_codes,
-                        ))[:row_limit]
-                        rows.extend(dimension_rows)
-                        if dimension_rows:
-                            state.update(status="available", reason="rows_returned")
-                        state["row_count"] = len(dimension_rows)
-            except Exception:
-                # Do not leak connection details or prevent other dimensions being searched.
-                state.update(status="error", reason="query_failed")
-            availability.append(state)
+                        for table in optional_tables.get(dimension, ()):
+                            if table not in table_available:
+                                found = query(f"SELECT to_regclass({_sql_literal(table)}) AS reg")
+                                table_available[table] = bool(found and found[0].get("reg"))
+                        if any(not table_available[t] for t in optional_tables.get(dimension, ())):
+                            state["reason"] = "table_unavailable"
+                        else:
+                            row_limit = len(codes) if codes is not None else (1 if dong_code else request["limit"])
+                            if dimension == "change" and (codes is not None or dong_code):
+                                row_limit *= 2
+                            dimension_rows = query(_dimension_sql(
+                                dimension, selected_region, industry_code, quarter,
+                                row_limit, codes,
+                            ))[:row_limit]
+                            rows.extend(dimension_rows)
+                            if dimension_rows:
+                                state.update(status="available", reason="rows_returned")
+                            state["row_count"] = len(dimension_rows)
+                except Exception:
+                    # Each grain is independent; never leak connection details.
+                    state.update(status="error", reason="query_failed")
+                availability.append(state)
         results.append({
             "request_id": f"retrieval-{index}",
             "tool": request["tool"],
@@ -267,7 +315,8 @@ def execute_retrieval_requests(
             "dimensions": request["dimensions"],
             "reason": request["reason"],
             "availability": availability,
-            "target_area_count": len(target_codes) if target_codes is not None else None,
+            "target_area_count": len(target_codes) if target_codes is not None else (0 if dong_code else None),
+            "admin_dong_count": 1 if dong_code else 0,
             "row_count": len(rows),
             "rows": rows,
         })
@@ -325,6 +374,8 @@ def build_retrieval_evidence(context: Any) -> list[dict[str, Any]]:
         target_count = result.get("target_area_count")
         if type(target_count) is int and 0 <= target_count <= MAX_TARGET_AREAS and dimensions is not None:
             row_cap = target_count * (dimension_count + int("change" in dimensions))
+            if result.get("admin_dong_count") == 1:
+                row_cap += len(dimensions & _DONG_DIMENSIONS) + int("change" in dimensions)
         for row in result["rows"][:row_cap]:
             if not isinstance(row, dict):
                 continue

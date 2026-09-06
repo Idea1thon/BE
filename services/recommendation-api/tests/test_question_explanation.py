@@ -48,7 +48,7 @@ class QuestionExplanationTests(unittest.TestCase):
         self.assertEqual(self.candidate, before)
 
     def test_wrong_region_unrelated_and_invalid_sql_do_not_become_claims(self):
-        for updates in ({'spatial_unit_code': '999'}, {'sigungu_name': '강남구'},
+        for updates in ({'spatial_unit_code': '999'},
                         {'value': 'NaN'}, {'source_table': 'untrusted'}, {'source_region': ''}):
             with self.subTest(updates=updates):
                 result = self.run_explanation([{**self.row, **updates}])

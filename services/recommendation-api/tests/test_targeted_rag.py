@@ -140,3 +140,86 @@ class TargetedRetrievalTests(unittest.TestCase):
         self.assertIn("other_cw.target_area_id = cw.target_area_id", sql)
         self.assertIn("other_cw.join_eligible", sql)
         self.assertIn("other_cw.source_area_id <> cw.source_area_id", sql)
+
+    def coded_execute(self, dimensions, targets, query=None):
+        self.queries = []
+        def capture(sql):
+            self.queries.append(sql)
+            return [{"reg": "present"}] if "to_regclass" in sql else []
+        return execute_retrieval_requests(query or capture,
+            [{"tool": "search_region_evidence", "dimensions": dimensions}],
+            {"sigungu": "마포구", "dong": "잘못된 이름", "sigungu_code": "11440", "admin_dong_code": "11440660"},
+            "CS100010", "20261", target_areas=targets)
+
+    def test_verified_dong_code_searches_without_host_area(self):
+        result = self.coded_execute(["sales", "stores", "flow", "change", "workplace_population"], [])
+        data_queries = [sql for sql in self.queries if "to_regclass" not in sql]
+        self.assertEqual(len(data_queries), 5)
+        for sql in data_queries:
+            self.assertIn("a.spatial_unit_code = '11440660'", sql)
+            self.assertIn("a.sigungu_code = '11440'", sql)
+            self.assertNotIn("a.spatial_unit_name =", sql)
+            self.assertNotIn("a.sigungu_name =", sql)
+            self.assertNotIn("ST_", sql)
+        states = result["results"][0]["availability"]
+        self.assertEqual(sum(s["spatial_unit_type"] == "admin_dong" for s in states), 5)
+
+    def test_verified_codes_bound_commercial_and_dong_queries_independently(self):
+        self.coded_execute(["sales"], [{"spatial_unit_type": "commercial_area", "spatial_unit_code": "3120042"}])
+        self.assertEqual(len(self.queries), 2)
+        commercial, dong = self.queries
+        self.assertIn("a.spatial_unit_code IN ('3120042')", commercial)
+        self.assertIn("a.admin_dong_code = '11440660'", commercial)
+        self.assertIn("commercial_to_admin_overlap", commercial)
+        self.assertIn("dcw.join_eligible", commercial)
+        self.assertIn("a.spatial_unit_code = '11440660'", dong)
+        for sql in self.queries:
+            self.assertNotIn("a.sigungu_name =", sql)
+            self.assertNotIn("a.admin_dong_name =", sql)
+            self.assertNotIn("ST_", sql)
+
+    def test_dong_has_no_direct_rone_rental_search(self):
+        result = self.coded_execute(["rent", "vacancy"], [])
+        self.assertEqual(self.queries, [])
+        self.assertTrue(all(s["reason"] == "no_target_areas" for s in result["results"][0]["availability"]))
+
+    def test_dong_evidence_survives_zero_target_normalization_bound(self):
+        row = {"spatial_unit_type": "admin_dong", "spatial_unit_code": "11440660",
+            "spatial_unit_name": "서교동", "sigungu_name": "마포구", "period": "20261",
+            "dimension": "sales", "source_table": "location.sales_quarter", "value": "100",
+            "industry_code": "CS100010"}
+        result = self.coded_execute(["sales"], [], lambda sql: [row])
+        self.assertEqual(len(build_retrieval_evidence(result)), 1)
+
+    def test_invalid_verified_code_is_not_silently_replaced_by_name_search(self):
+        for field, value in (("sigungu_code", "11440' OR TRUE"), ("admin_dong_code", "11440bad")):
+            with self.assertRaises(ValueError):
+                execute_retrieval_requests(lambda sql: self.fail("unexpected query"),
+                    [{"tool": "search_region_evidence", "dimensions": ["sales"]}],
+                    {field: value, "sigungu": "마포구", "dong": "서교동"}, "CS100010", "20261")
+
+    def test_fifty_hosts_plus_dong_are_preserved_and_failure_is_per_grain(self):
+        targets = [{"spatial_unit_type": "commercial_area", "spatial_unit_code": str(3120000+i)} for i in range(50)]
+        base = {"spatial_unit_name": "서교동", "sigungu_name": "마포구", "period": "20261",
+            "dimension": "sales", "source_table": "location.sales_quarter", "value": "100",
+            "industry_code": "CS100010"}
+        def query(sql):
+            if "a.spatial_unit_type = 'admin_dong'" in sql:
+                return [{**base, "spatial_unit_type": "admin_dong", "spatial_unit_code": "11440660"}]
+            return [{**base, "spatial_unit_type": "commercial_area", "spatial_unit_code": t['spatial_unit_code']} for t in targets]
+        result = self.coded_execute(["sales"], targets, query)
+        self.assertEqual(len(build_retrieval_evidence(result)), 51)
+        def partial_failure(sql):
+            if "a.spatial_unit_type = 'commercial_area'" in sql:
+                raise RuntimeError("crosswalk unavailable")
+            return query(sql)
+        result = self.coded_execute(["sales"], targets, partial_failure)
+        states = result["results"][0]["availability"]
+        self.assertEqual([(s['spatial_unit_type'], s['status']) for s in states],
+                         [('commercial_area', 'error'), ('admin_dong', 'available')])
+        self.assertEqual(len(build_retrieval_evidence(result)), 1)
+
+    def test_code_queries_use_supplied_gu_only_as_display_fallback(self):
+        self.coded_execute(["sales"], [])
+        self.assertIn("coalesce(nullif(a.sigungu_name, ''), '마포구') AS sigungu_name", self.queries[0])
+        self.assertNotIn("a.sigungu_name =", self.queries[0])

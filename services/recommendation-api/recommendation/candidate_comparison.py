@@ -6,6 +6,7 @@ import math
 import re
 from itertools import combinations
 from typing import Any
+from .question_explanation import matches_candidate
 
 
 _METRICS = {
@@ -56,7 +57,7 @@ def _retrieval_observation(item: dict, candidate: dict) -> dict:
     if dimension in ('rent', 'vacancy'):
         normalized['spatial_grain'] = '서울시' if item.get('source_region') in ('서울', '서울시', '서울전체', '서울특별시') else '권역'
     else:
-        normalized['spatial_grain'] = '상권'
+        normalized['spatial_grain'] = '행정동' if item.get('spatial_unit_type') == 'admin_dong' else '상권'
     normalized['grain_is_proxy'] = item.get('grain_is_proxy', False)
     normalized['source_region'] = item.get('source_region') if dimension in ('rent', 'vacancy') else (item.get('source_region') or item.get('spatial_unit_code'))
     return normalized
@@ -76,13 +77,15 @@ def _cell(candidate: dict, topic: str, retrieval: list[dict]) -> dict:
                 continue
             item = _retrieval_observation(item, candidate)
             ref = item.get('evidence_id')
-            if (host and str(item.get('spatial_unit_code')) == host
-                    and item.get('spatial_unit_type') == 'commercial_area'
+            if (matches_candidate(item, candidate)
                     and isinstance(ref, str) and ref.startswith('retrieval-')
                     and _matches(topic, item.get('metric_name'), candidate)
                     and item.get('unit') == _METRICS[topic][1]
                     and _finite(item.get('value'))):
                 observations.append((item, ref))
+        commercial = [observation for observation in observations if observation[0].get('spatial_unit_type') == 'commercial_area']
+        if commercial:
+            observations = commercial
     base = {'status': 'missing', 'value': None, 'unit': _METRICS[topic][1], 'period': None,
             'spatial_grain': None, 'grain_is_proxy': None, 'source_ids': [], 'metric_name': None,
             'source_region': None, 'limitation': '질문에 필요한 유효한 관측 근거가 없습니다.'}
@@ -127,6 +130,10 @@ def _criterion(topic: str, rows: list[dict]) -> dict:
             continue
         if a['grain_is_proxy'] and (not a['source_region'] or not b['source_region'] or a['source_region'] == b['source_region']):
             continue
+        if a['spatial_grain'] == '행정동':
+            left_codes, right_codes = left['admin_dong_codes'], right['admin_dong_codes']
+            if len(left_codes) != 1 or len(right_codes) != 1 or left_codes == right_codes:
+                continue  # A shared dong statistic is not a difference between sites.
         # Same host observations cannot distinguish two sites even when legacy
         # evidence marks its regional grain as non-proxy.
         if left.get('host_area_code') and left.get('host_area_code') == right.get('host_area_code'):
@@ -158,6 +165,7 @@ def build_candidate_comparison(candidates: list[dict], contract: dict,
             'place_name': (candidate.get('location') or {}).get('place_name') or candidate.get('place_name'),
             'fit_tier': candidate.get('fit_tier'),
             'host_area_code': _host(candidate),
+            'admin_dong_codes': (candidate.get('location') or {}).get('overlapping_units', {}).get('admin_dong') or [],
             'cells': {topic: _cell(candidate, topic, retrieval_evidence or []) for topic in topics}})
     result['criteria'] = [_criterion(topic, result['rows']) for topic in topics]
     return result

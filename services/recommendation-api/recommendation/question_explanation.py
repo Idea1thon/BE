@@ -20,10 +20,12 @@ def matches_candidate(item: dict, candidate: dict) -> bool:
     if item.get('dimension') in {'sales', 'total_store_count', 'franchise_store_count'}:
         if not candidate.get('industry_code') or item.get('industry_code') != candidate['industry_code']:
             return False
+    if item.get('spatial_unit_type') == 'admin_dong':
+        codes = (location.get('overlapping_units') or {}).get('admin_dong') or []
+        return str(item.get('spatial_unit_code')) in {str(code) for code in codes}
     return bool(host.get('code')) and (
         item.get('spatial_unit_type') == 'commercial_area'
         and str(item.get('spatial_unit_code')) == str(host['code'])
-        and (not location.get('sigungu') or item.get('sigungu_name') == location['sigungu'])
     )
 
 
@@ -52,7 +54,10 @@ def finish_question_card(card: dict, candidate: dict, selected: dict,
         topic, label, source_name = _DIMENSIONS[dimension]
         if topic not in topics:
             continue
-        grouped.setdefault(topic, []).append(item)
+        # Administrative and commercial areas are distinct observations, not
+        # conflicting values of one geography. Keep both independently citable.
+        group = (topic, item['spatial_unit_type'], item['spatial_unit_code'])
+        grouped.setdefault(group, []).append(item)
     ambiguous = {topic for topic, items in grouped.items() if len({
         (item['value'], item['unit'], item['period'], item.get('source_region'), item.get('grain_is_proxy'))
         for item in items}) != 1}
@@ -76,8 +81,9 @@ def finish_question_card(card: dict, candidate: dict, selected: dict,
     result['citations'] = remapped
     diagnostics['ambiguous_topics'] = []
     result['missing_features'] = list(card.get('missing_features') or [])
-    for topic, items in grouped.items():
-        if topic in ambiguous:
+    for group, items in grouped.items():
+        topic, spatial_type, _ = group
+        if group in ambiguous:
             diagnostics['ambiguous_topics'].append(topic)
             result['missing_features'].append(f'{_DIMENSIONS[items[0]["dimension"]][1]}: 여러 관측값·기간·권역이 연결되어 단일 값으로 표시하지 않았습니다.')
             continue
@@ -88,16 +94,18 @@ def finish_question_card(card: dict, candidate: dict, selected: dict,
             continue
         period = str(item['period'])
         scope = item.get('source_region') or item['spatial_unit_name']
-        limitation = item.get('limitation') or '상권 배경 통계이며 개별 건물·점포의 실적이나 방문량이 아닙니다.'
+        grain = '행정동' if spatial_type == 'admin_dong' else '상권'
+        limitation = item.get('limitation') or f'{grain} 배경 통계이며 개별 건물·점포의 실적이나 방문량이 아닙니다.'
         proxy = ' (후보 상권에 연결된 조사권역 대리지표)' if item.get('grain_is_proxy') else ''
         industry = f" / 업종 {item['industry_code']}" if item.get('industry_code') else ''
-        claim = (f"{scope}{proxy}의 {period[:4]}년 {period[4]}분기 {label}는 "
+        claim = (f"{scope} {grain}{proxy}의 {period[:4]}년 {period[4]}분기 {label}는 "
                  f"{item['value']}{item['unit']}입니다. 출처: {source_name}{industry}. {limitation}")
         position = f"context_notes:{len(result['context_notes'])}"
         result['context_notes'].append(claim)
         remapped[position] = [ref]
         diagnostics['server_rendered_claims'].append({'final_position': position, 'source_id': ref,
-            'topic_id': topic, 'method': 'validated_sql_template'})
+            'topic_id': topic, 'spatial_unit_type': spatial_type,
+            'spatial_unit_code': item['spatial_unit_code'], 'method': 'validated_sql_template'})
     for unsupported in contract.get('unsupported') or []:
         reason = unsupported.get('reason')
         if isinstance(reason, str) and reason not in result['missing_features']:

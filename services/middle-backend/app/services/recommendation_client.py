@@ -139,6 +139,8 @@ async def request_recommendation(
     special_condition_text: str,
     limit: int | None,
     request_id: str,
+    sigungu_code: str | None = None,
+    admin_dong_code: str | None = None,
 ) -> dict[str, Any]:
     """추천을 요청한다. 완료되면 결과를, 오래 걸리면 RecommendationPending."""
     payload: dict[str, Any] = {
@@ -149,6 +151,10 @@ async def request_recommendation(
     }
     if limit is not None:
         payload["limit"] = limit
+    if sigungu_code is not None:
+        payload["region"]["sigungu_code"] = sigungu_code
+    if admin_dong_code is not None:
+        payload["region"]["admin_dong_code"] = admin_dong_code
 
     try:
         response = await get_client().post(_CREATE_PATH, json=payload)

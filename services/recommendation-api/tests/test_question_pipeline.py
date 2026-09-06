@@ -13,7 +13,7 @@ class ExplanationReached(Exception):
 
 
 class QuestionPipelineTests(unittest.TestCase):
-    def _run_until_explanation(self, hosts):
+    def _run_until_explanation(self, hosts, codes=False):
         source = MagicMock()
         source.describe.return_value = {}
         source.layers.return_value = (SimpleNamespace(records=[]), None, SimpleNamespace(records=[]), {})
@@ -32,6 +32,9 @@ class QuestionPipelineTests(unittest.TestCase):
                        'location': {'host_commercial_area': host}}
                       for i, host in enumerate(hosts)]
         request = RecommendationRequest('서울특별시', '마포구', None, 'CS100010', '임대료와 공실 비교')
+        if codes:
+            request = RecommendationRequest('서울특별시', '마포구', '합정동', 'CS100010', '직장인구 비교',
+                                            sigungu_code='11440', admin_dong_code='11440680')
         contract = {'topic_ids': ['rent', 'vacancy'], 'comparison_requested': True}
         with tempfile.TemporaryDirectory() as directory, \
              patch('recommendation.pipeline.make_source', return_value=source), \
@@ -57,6 +60,13 @@ class QuestionPipelineTests(unittest.TestCase):
     def test_host_absence_preserves_explicit_empty_target_list(self):
         source, _, _, _ = self._run_until_explanation([None])
         self.assertEqual(source.retrieve_requests.call_args.kwargs['target_areas'], [])
+
+    def test_dong_code_reaches_retrieval_and_explanation_with_no_host(self):
+        source, _, explain, _ = self._run_until_explanation([None], codes=True)
+        region = source.retrieve_requests.call_args.args[1]
+        self.assertEqual(region['admin_dong_code'], '11440680')
+        self.assertEqual(region['sigungu_code'], '11440')
+        self.assertEqual(explain.call_args.kwargs['query_context']['selected_region'], region)
 
     def test_sources_accept_and_forward_empty_targets(self):
         db = DbSource.__new__(DbSource)

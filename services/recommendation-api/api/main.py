@@ -43,7 +43,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -83,6 +83,17 @@ class RegionInput(BaseModel):
     sido: str = Field(default="서울특별시", min_length=1, max_length=40)
     sigungu: str = Field(min_length=1, max_length=40)
     dong: str | None = Field(default=None, max_length=40)
+    sigungu_code: str | None = Field(default=None, pattern=r"^[0-9]{5}$")
+    admin_dong_code: str | None = Field(default=None, pattern=r"^[0-9]{8}$")
+
+    @model_validator(mode="after")
+    def validate_region_codes(self):
+        if self.admin_dong_code:
+            if not self.dong or not self.dong.strip():
+                raise ValueError("행정동 코드에는 행정동 이름이 필요합니다.")
+            if self.sigungu_code and not self.admin_dong_code.startswith(self.sigungu_code):
+                raise ValueError("행정동 코드와 시군구 코드가 일치하지 않습니다.")
+        return self
 
 
 class PipelineRecommendationRequest(BaseModel):
@@ -602,6 +613,8 @@ def _pipeline_request(payload: PipelineRecommendationRequest, config: ServiceCon
         industry_code=payload.industry_code,
         special_condition_text=payload.special_condition_text,
         quarter=config.quarter,
+        sigungu_code=payload.region.sigungu_code,
+        admin_dong_code=payload.region.admin_dong_code,
     )
 
 
