@@ -129,8 +129,7 @@ class OpenAICompatibleJsonClient:
             raise LLMRuntimeError("사용 가능한 LLM endpoint가 없습니다.")
         body = {
             "model": self.config.model,
-            "temperature": 0,
-            "max_tokens": self.config.max_output_tokens,
+            "max_completion_tokens": self.config.max_output_tokens,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},
