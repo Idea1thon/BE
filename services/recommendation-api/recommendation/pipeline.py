@@ -44,6 +44,7 @@ from .llm_input_planner import parse_conditions, plan_input
 from .llm_runtime import LLMRuntimeError, reset_call_budget
 from .paths import SERVICE_ROOT, find_project_root
 from .rag_tools import execute_retrieval_requests
+from .query_context import build_query_context
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Point, shape
 from shapely.ops import unary_union
@@ -2767,6 +2768,10 @@ def run_pipeline(
         try:
             explanations = explain_candidates(
                 candidates, llm_mode=llm_mode, retrieval_context=retrieval_context,
+                query_context=build_query_context(
+                    request.special_condition_text, selected_region, request.industry_code,
+                    conditions, preferences,
+                ),
             )
         except LLMRuntimeError as exc:
             raise PipelineDependencyError("추천 설명 LLM을 사용할 수 없습니다.") from exc
