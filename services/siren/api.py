@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from math import isfinite
 
 from fastapi import FastAPI, HTTPException, Request
@@ -66,10 +65,10 @@ def analyze_risk(request: RiskSirenRequest) -> RiskSirenResponse:
 
 
 @app.post("/internal/risk-sirens/analyze-trigger", response_model=RiskSirenResponse)
-def analyze_trigger(request: SirenAnalyzeTrigger) -> RiskSirenResponse:
+async def analyze_trigger(request: SirenAnalyzeTrigger) -> RiskSirenResponse:
     """Resolve source data inside siren and run the deterministic pipeline."""
     try:
-        return RiskSirenResponse.model_validate(asyncio.run(_orchestrator.analyze_trigger(request)))
+        return RiskSirenResponse.model_validate(await _orchestrator.analyze_trigger(request))
     except SourceNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProviderUnavailable as exc:

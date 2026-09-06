@@ -2,8 +2,8 @@
 
 - 실행일: 2026-09-07
 - 선행: signal-audit.md (RS-01), input-output-contract.md (RS-02) — 모두 current
-- score_version: `risk-siren-v1-provisional`
-- 테스트: 25개 unittest 통과, harness validator 통과 (RS-03 초기 17 → RS-05 라운드1 후 24 → RS-06 라운드2 후 25)
+- score_version: `risk-siren-v1.2`
+- 테스트: 기존 구현 단계 25개 unittest 통과 기록 + 리뷰 결함 수정 후 회귀 테스트 56개 통과
 - 독립 QA: 기존 RS-04 2회 완료. v1.2 role-scope 변경은 새 QA 대상이다.
 
 ## 0. v1.2 역할별 projection·provider 경계
@@ -29,6 +29,13 @@ JWT_SECRET='test-secret-which-is-at-least-32-characters' PYTHONPATH=services/mid
   'from app.main import app; assert any(r.path == "/api/v1/branches/risk-summary" for r in app.routes)'
 ```
 
+## 0.2 PR #36 리뷰 결함 수정
+
+- `report_analysis.rule_version VARCHAR(20)`에 저장 가능한 `risk-siren-v1.2`를 사용해 정상 분석 결과가 버전 길이 때문에 실패하지 않도록 했다. 긴 버전 문자열은 저장 경계에서 자르지 않고 blocker로 거부한다. 스키마 migration은 별도 승인 없이는 추가하지 않는다.
+- `analyze-trigger`를 `async def`로 변경하고 `asyncio.run()`을 제거해 provider의 비동기 DB engine·connection pool이 애플리케이션 이벤트 루프와 같은 수명을 사용하도록 했다.
+- IDEATON의 개업·폐업·영업중 점포 수가 NULL인 분기는 0으로 대체하지 않고 `SR-01=missing`으로 반환한다. 종합 점수·등급을 확정하지 않으며 `missing_data`에 원인을 남긴다.
+- 회귀 검증: Siren unittest 56개, middle-backend Siren 변환 테스트 40개.
+
 ## 1. v0 → v1 변경
 
 | 영역 | v0 | v1 |
@@ -40,7 +47,7 @@ JWT_SECRET='test-secret-which-is-at-least-32-characters' PYTHONPATH=services/mid
 | SR-04 | 점수 요소 | 보조 신호 — `review_signal` 블록, 종합 점수 가중치 0 |
 | 데이터 | 미연결 | market=서울시 공개데이터 실측, branch/review=대회용 합성 생성기 |
 | 응답 | 단일 blob | `layers`, `review_signal`, `data_provenance`, `projections` 추가 |
-| 엔드포인트 | analyze | analyze + hq-summary |
+| 엔드포인트 | analyze | analyze + analyze-trigger + hq-summary |
 
 ## 2. 코드 구조 (`service/siren/`)
 

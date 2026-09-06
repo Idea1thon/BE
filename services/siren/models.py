@@ -76,9 +76,11 @@ class BranchLocation(ContractModel):
 # --------------------------------------------------------------------------- #
 class MarketClosureQuarter(ContractModel):
     quarter: str
-    active_count_end: int = Field(ge=0)
-    new_openings: int = Field(ge=0)
-    closures: int = Field(ge=0)
+    # These are nullable because the source panel can contain an unknown count.
+    # The calculator surfaces that as missing rather than as zero risk.
+    active_count_end: int | None = Field(ge=0)
+    new_openings: int | None = Field(ge=0)
+    closures: int | None = Field(ge=0)
     quarter_status: Literal["완전", "부분"] = "완전"
 
     @model_validator(mode="after")

@@ -28,6 +28,13 @@ def _quarter_label(value: object) -> str | None:
     return None
 
 
+def _nonnegative_int_or_none(value: object) -> int | None:
+    """Preserve NULL source counts; never reinterpret unknown as zero."""
+    if value is None:
+        return None
+    return max(0, int(value))
+
+
 class IdeatonProvider:
     """Resolve branch location and market signals in IDEATON.
 
@@ -116,15 +123,27 @@ class IdeatonProvider:
         closure_quarters = []
         for row in closure_rows:
             quarter = _quarter_label(row["period"])
-            if quarter is None or row["total_store_count"] is None:
+            if quarter is None:
                 continue
             closure_quarters.append(
                 {
                     "quarter": quarter,
-                    "active_count_end": max(0, int(row["total_store_count"])),
-                    "new_openings": max(0, int(row["open_store_count"] or 0)),
-                    "closures": max(0, int(row["close_store_count"] or 0)),
-                    "quarter_status": "부분" if row["is_partial_latest"] else "완전",
+                    "active_count_end": _nonnegative_int_or_none(row["total_store_count"]),
+                    "new_openings": _nonnegative_int_or_none(row["open_store_count"]),
+                    "closures": _nonnegative_int_or_none(row["close_store_count"]),
+                    "quarter_status": (
+                        "부분"
+                        if row["is_partial_latest"]
+                        or any(
+                            value is None
+                            for value in (
+                                row["total_store_count"],
+                                row["open_store_count"],
+                                row["close_store_count"],
+                            )
+                        )
+                        else "완전"
+                    ),
                 }
             )
         sales_quarters = []

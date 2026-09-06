@@ -23,7 +23,10 @@ from .reports import MonthlyMetrics, mean_ratio, sum_field, window_ending
 class RiskPolicy:
     """Provisional policy values — require approval before operational use."""
 
-    version: str = "risk-siren-v1.2-provisional"
+    # Keep the persisted version within middle-backend's existing
+    # report_analysis.rule_version VARCHAR(20) until a schema migration is
+    # explicitly approved. Do not truncate this value at the storage boundary.
+    version: str = "risk-siren-v1.2"
 
     # composite weights (sum per layer = 1.0)
     market_closure_weight: float = 0.45
@@ -110,6 +113,26 @@ def calculate_market_closure(
     source = market.closure_source or market.source
     if not quarters:
         return {"score": None, "status": "missing", "source": source}
+
+    incomplete = [
+        q
+        for q in quarters
+        if q.active_count_end is None
+        or q.new_openings is None
+        or q.closures is None
+    ]
+    if incomplete:
+        missing_quarters = [q.quarter for q in incomplete]
+        return {
+            "score": None,
+            "status": "missing",
+            "source": source,
+            "reason": (
+                "개업·폐업·영업중 점포 수가 누락된 분기가 있어 폐업률을 계산하지 않았습니다: "
+                + ", ".join(missing_quarters)
+            ),
+            "missing_quarters": missing_quarters,
+        }
 
     by_index = {_quarter_index(q.quarter): q for q in quarters}
     latest = quarters[-1]

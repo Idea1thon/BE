@@ -5,7 +5,7 @@
 - 실행 목적: 폐업 사이렌 파이프라인 v1 + 대회용 데모 데이터셋
 - 실행 모드: RS-01~RS-03 완료 → RS-04 독립 QA 2회 → RS-05·RS-06 수정 2라운드 → RS-07 핸드오프 → **PR #11 리뷰 대응 부분 재실행(RS-02 계약 v1.1 → RS-03 구현 → RS-04 독립 QA) 전부 완료**. Critical/High 0건. 계약 §9 A~G 사람 승인·회신 대기 상태로 안전 기본값(strict/disabled/null)에 게이트됨.
 - 마지막 갱신: 2026-09-07 (역할별 projection·FMP/IDEATON provider 경계 반영)
-- score_version: `risk-siren-v1-provisional` / contract_version: `risk-siren-contract-v1.1`
+- score_version: `risk-siren-v1.2` / contract_version: `risk-siren-contract-v1.1`
 - 승인 상태: 사람 승인 필요 (가중치·임계값·SR-05 경계·경고 문구·금융상품·발송)
 - 실제 발송: disabled
 

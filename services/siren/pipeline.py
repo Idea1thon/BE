@@ -106,7 +106,10 @@ def analyze(
         market_sales = calculate_market_sales(request.market_data, as_of, policy)
         competition = calculate_competition(request.market_data.competition, policy)
         if closure["status"] not in ("calculated", "partial"):
-            missing_data.append({"signal_id": "SR-01", "reason": "분기 폐업률 계산 불가 (데이터 부족 또는 분모 0)"})
+            missing_data.append({
+                "signal_id": "SR-01",
+                "reason": closure.get("reason", "분기 폐업률 계산 불가 (데이터 부족 또는 분모 0)"),
+            })
         if market_sales["status"] not in ("calculated", "partial"):
             missing_data.append({"signal_id": "SR-02.market", "reason": "분기 매출 변화 계산 불가"})
         if competition["status"] not in ("calculated", "partial"):

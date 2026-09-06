@@ -3,7 +3,7 @@
 - 실행일: 2026-09-04 (v1) / 2026-09-05 (v1.1 — PR #11 중간 백엔드 리뷰 대응) / 2026-09-07 (v1.2 — 역할별 projection·provider 경계)
 - 선행: `artifacts/risk-siren/10-analysis/signal-audit.md` (current)
 - 상태: current / 사람 승인 필요 (가중치·임계값·SR-05 경계·경고 문구 + v1.1 신규 승인 항목 §9)
-- `score_version`: `risk-siren-v1-provisional` (점수 로직 무변경 — v1.1은 계약 표면만 변경)
+- `score_version`: `risk-siren-v1.2` (기존 점수 로직을 구분하는 저장 호환 버전)
 - `contract_version`: `risk-siren-contract-v1.1` (응답에 명시. 점수 버전과 별개로 계약 표면 변경을 추적)
 - 리뷰 대응표: `artifacts/risk-siren/20-method/pr11-review-response.md`
 
@@ -303,7 +303,7 @@ v1 에서 `explanation_and_review_assist` 는 **미구현** — LLM 런타임 �
              "trade_area_code": "3120189"},
   "risk": {
     "score": 63.2, "grade": "주의", "risk_level": "CAUTION",
-    "score_version": "risk-siren-v1-provisional",
+    "score_version": "risk-siren-v1.2",
     "calculation_status": "calculated",
     "policy_status": "provisional",
     "composite_basis": ["SR-01", "SR-02.market", "SR-03", "SR-02.branch", "SR-05"],

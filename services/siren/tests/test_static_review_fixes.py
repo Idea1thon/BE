@@ -1,4 +1,6 @@
 import unittest
+import asyncio
+from unittest.mock import patch
 from datetime import date
 from fastapi.testclient import TestClient
 from services.siren.api import app
@@ -10,6 +12,21 @@ from services.siren.tests.test_risk_siren import complete_payload, _month_report
 
 
 class WarningTest(unittest.TestCase):
+    def test_missing_closure_counts_are_missing_not_zero_risk(self):
+        payload = complete_payload()
+        for quarter in payload["market_data"]["closure_quarters"]:
+            quarter["new_openings"] = None
+            quarter["closures"] = None
+
+        result = analyze(payload)
+
+        closure = result["components"]["closure"]
+        self.assertIsNone(closure["score"])
+        self.assertEqual(closure["status"], "missing")
+        self.assertIsNone(result["risk"]["score"])
+        self.assertIsNone(result["risk"]["grade"])
+        self.assertTrue(any(item["signal_id"] == "SR-01" for item in result["missing_data"]))
+
     def test_missing_market_does_not_suppress_confirmed_branch_warning(self):
         p = complete_payload(margin_start=0.05, margin_end=-0.22, loan_end=3000000)
         p["market_data"] = None
@@ -103,3 +120,35 @@ class HqHttpValidationTest(unittest.TestCase):
 
     def test_valid_snapshot_is_200(self):
         self.assertEqual(self.post(self.request()).status_code, 200)
+
+
+class TriggerAsyncBoundaryTest(unittest.TestCase):
+    def test_trigger_reuses_application_loop_for_multiple_requests(self):
+        """The trigger route must await providers instead of creating per-request loops."""
+
+        class LoopProbe:
+            def __init__(self):
+                self.loop_ids = []
+
+            async def analyze_trigger(self, request):
+                self.loop_ids.append(id(asyncio.get_running_loop()))
+                return analyze(complete_payload())
+
+            async def close(self):
+                return None
+
+        probe = LoopProbe()
+        payload = {
+            "request_id": "req-1",
+            "report_id": "report-1",
+            "franchise_id": "fr-001",
+            "branch_id": "br-001",
+            "as_of": "2026-03-31",
+            "options": {"llm_mode": "disabled", "send_notifications": False},
+        }
+        with patch("services.siren.api._orchestrator", probe), TestClient(app) as client:
+            self.assertEqual(client.post("/internal/risk-sirens/analyze-trigger", json=payload).status_code, 200)
+            self.assertEqual(client.post("/internal/risk-sirens/analyze-trigger", json=payload).status_code, 200)
+
+        self.assertEqual(len(probe.loop_ids), 2)
+        self.assertEqual(probe.loop_ids[0], probe.loop_ids[1])

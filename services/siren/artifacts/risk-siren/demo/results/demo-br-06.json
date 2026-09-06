@@ -12,7 +12,7 @@
   "risk": {
     "score": 58.3882,
     "grade": "주의",
-    "score_version": "risk-siren-v1.2-provisional",
+    "score_version": "risk-siren-v1.2",
     "calculation_status": "calculated",
     "policy_status": "provisional",
     "composite_basis": [
