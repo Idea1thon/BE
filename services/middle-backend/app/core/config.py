@@ -36,6 +36,18 @@ class Settings(BaseSettings):
     # 시드 전용 (scripts/seed.py). 기본값을 두지 않는다 — 알려진 비밀번호로 계정이 생긴다.
     seed_password: str = ""
 
+    # 입지 추천 서비스 (services/recommendation-api). 서버 간 호출 전용이다.
+    #
+    # 토큰에 기본값을 두지 않는다. 값이 없으면 추천 API 가 503 fail closed 로
+    # 답하는데, 그쪽이 의도적으로 그렇게 만들어져 있으므로 우리도 맞춘다.
+    # 설정 누락이 "추천 결과가 비어 있다" 로 조용히 나타나면 원인을 못 찾는다.
+    recommendation_api_url: str = "http://localhost:8001"
+    internal_api_token: str = ""
+    # 추천 파이프라인은 최대 180초다. 그보다 조금 길게 잡아 우리 쪽이 먼저 끊지
+    # 않게 한다. 우리가 먼저 끊으면 상대는 계속 돌고 있는데 run_id 를 못 받아
+    # 폴링도 못 하는 상태가 된다.
+    recommendation_timeout_seconds: float = 190.0
+
     # CORS — FE(Vite dev server)가 브라우저에서 호출한다.
     # 쉼표로 구분된 문자열 또는 JSON 배열을 받는다. 와일드카드는 허용하지 않는다.
     # NoDecode: pydantic-settings가 환경변수를 JSON으로 먼저 파싱하지 않게 한다

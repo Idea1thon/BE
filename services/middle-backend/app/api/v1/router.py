@@ -4,6 +4,7 @@ from app.api.v1 import (
     auth,
     branches,
     financial_products,
+    location_recommendations,
     notifications,
     reference,
     reports,
@@ -18,3 +19,4 @@ api_router.include_router(branches.router)
 api_router.include_router(reports.router)
 api_router.include_router(notifications.router)
 api_router.include_router(financial_products.router)
+api_router.include_router(location_recommendations.router)
