@@ -137,7 +137,8 @@ async def analyze_report(
     표시하게 된다.
 
     `market_data` 가 없으면 상대는 시장 층을 `missing` 으로 두고 종합 점수·등급이
-    null 인 partial 결과를 준다. 실패가 아니다.
+    null 인 partial 결과를 준다. 실패가 아니므로 결과 저장 시에도 partial 상태를
+    보존한다.
     """
     branch = await session.get(Branch, report.branch_id)
     if branch is None:  # FK 가 보장하지만 조회 실패를 조용히 넘기지 않는다.
@@ -174,11 +175,11 @@ async def analyze_report(
 
 
 def build_analysis_row(report_id: int, analysis: SirenAnalysis) -> ReportAnalysis:
-    """`report_analysis` 행을 만든다. 현행 스키마로 저장 불가면 실패한다.
+    """`report_analysis` 행을 만든다. partial 결과도 null을 보존해 저장한다.
 
     막힌 이유를 그대로 올린다. 잘라 넣거나 0 으로 채우는 선택은 데이터를 조용히
-    왜곡하므로 여기서 하지 않는다 — 스키마를 바꿀지 사이렌 계약을 바꿀지는
-    사람이 정할 일이다.
+    왜곡하므로 여기서 하지 않는다. 실제 저장 불가 사유는 버전 초과나
+    점수·등급 구간 모순처럼 계약 위반인 경우뿐이다.
     """
     values = analysis.values
     if not values.storable:

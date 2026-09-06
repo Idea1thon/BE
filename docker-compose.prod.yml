@@ -30,7 +30,7 @@ services:
     build: ./services/middle-backend
     environment:
       ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT 를 설정하세요}
-      DATABASE_URL: ${FMP_DATABASE_URL:?Azure fmp 연결 문자열이 필요합니다}
+      DATABASE_URL: ${IDEATON_DATABASE_URL:?Azure ideaton 연결 문자열이 필요합니다}
       JWT_SECRET: ${JWT_SECRET:?32자 이상의 값이 필요합니다}
       SEED_PASSWORD: ${SEED_PASSWORD:-}
       # nginx 뒤에서 같은 오리진으로 서빙하므로 브라우저는 CORS 를 태우지 않는다.

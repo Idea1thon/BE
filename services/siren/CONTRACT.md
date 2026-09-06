@@ -7,9 +7,9 @@
 ## 책임
 
 middle-backend는 인증·테넌트 경계를 확인한 뒤 점포·보고서 ID만 사이렌에 전달한다.
-사이렌 orchestrator는 FMP 보고서 저장소와 IDEATON 위치/상권 저장소를 읽어 canonical
-요청으로 매핑하고, 결정론적 pipeline을 실행한다. middle-backend는 결과 상태·결과 저장을
-담당한다. 실제 알림 발송은 계속 disabled다.
+사이렌 orchestrator는 IDEATON에 통합된 운영보고서·합성 폐업 집계·리뷰와 위치/상권
+저장소를 읽어 canonical 요청으로 매핑하고, 결정론적 pipeline을 실행한다.
+middle-backend는 결과 상태·결과 저장을 담당한다. 실제 알림 발송은 계속 disabled다.
 
 ID-only 호출 경로는 다음과 같다.
 
@@ -25,22 +25,27 @@ POST /internal/risk-sirens/analyze-trigger
 }
 ```
 
-사이렌 프로세스에는 `FMP_DATABASE_URL`과 `IDEATON_DATABASE_URL`(또는
-`SIREN_FMP_DATABASE_URL`/`SIREN_IDEATON_DATABASE_URL`)을 읽기 전용으로 설정한다.
-본사 연간 폐업 집계가 승인된 FMP 테이블·뷰에 있을 때만
+사이렌 프로세스에는 통합 원천인 `IDEATON_DATABASE_URL` 또는 공통
+`SIREN_DATABASE_URL`/`DATABASE_URL`을 읽기 전용으로 설정한다. 기존 분리 배포가
+필요하면 `SIREN_FMP_DATABASE_URL`과 `SIREN_IDEATON_DATABASE_URL`을 각각 지정할 수
+있지만, FMP URL은 필수가 아니다. 본사 연간 폐업 집계가 승인된 테이블·뷰에 있을 때만
 `SIREN_FRANCHISE_CLOSURE_TABLE=public.franchise_closure_year`처럼
 단순한 스키마·테이블명을 추가한다. 테이블이 없거나 설정하지 않으면 해당 신호는
 `missing`이며 폐업 0건으로 대체하지 않는다. 현재 저장소의 FMP 기본 스키마에는 이
-집계 테이블이 없으므로, 별도 migration 없이 운영 원천이 제공될 때만 계산된다.
+집계 테이블이 없던 배포는 0004 migration으로 통합 DB에 추가해야 계산된다.
 운영보고서는 `operation_report.status='COMPLETED'`인 행만 분석 대상으로 삼으며,
 작성 중·분석 중·실패 행은 매출 시계열에 포함하지 않는다.
+리뷰는 `SIREN_REVIEW_TABLE`(기본 `public.siren_review`)에서 읽으며, 테이블이 없거나
+점포 행이 없으면 `review_signal.status=missing`으로 둔다. 리뷰 원문·평점·감성 라벨의
+출처와 기준일 이후 행 제외는 Provider가 보장하고, 리뷰가 없는 점포를 0점 위험으로
+해석하지 않는다.
 기존 full canonical payload의 `/internal/risk-sirens/analyze` 경로는 호환용으로 유지한다.
 
-middle-backend의 `SIREN_ANALYSIS_ENABLED` 기본값은 `false`다. 현재 `report_analysis`가
-`risk_score`·`risk_level` NOT NULL이고 `rule_version` VARCHAR(20)이어서 partial 결과를
-안전하게 저장할 수 없기 때문이다. 스키마 변경 및 운영 데이터베이스 연결을 승인한 뒤
-이 플래그를 활성화해야 한다. partial 결과는 점수/등급을 지어내지 않고 FAILED와
-`PARTIAL_ANALYSIS_NOT_STORED` 사유로 남긴다.
+middle-backend의 `SIREN_ANALYSIS_ENABLED` 기본값은 `false`다. 운영 DB에 0004
+Siren migration을 적용하고 source DB·Siren API 연결을 검증한 뒤 활성화한다.
+partial 결과는 `report_analysis`에 score/grade null과 `calculation_status=partial`을
+보존하며, 점수·등급을 지어내지 않는다. 계약 위반이나 저장 불가능한 rule version만
+FAILED로 남긴다.
 
 본사 요약은 요청 franchise_id와 각 결과의 branch.franchise_id가 일치해야 한다. branch_id가 없거나 동일 점포 결과가 중복되면 422로 거부한다. 이 입력 검증은 Backend의 인증·권한 검사를 대체하지 않는다.
 

@@ -58,7 +58,8 @@ services:
         condition: service_healthy
     environment:
       ENVIRONMENT: development
-      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-devpass}@db:5432/fmp
+      # 운영보고서와 Siren 원천을 같은 IDEATON DB에 둔다.
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-devpass}@db:5432/ideaton
       # 개발 전용 고정값. 32자 이상이어야 기동한다(app/core/config.py).
       # 운영에서는 반드시 교체한다.
       JWT_SECRET: ${JWT_SECRET:-local-development-only-not-a-real-secret-0000}

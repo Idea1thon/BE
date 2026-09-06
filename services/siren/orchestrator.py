@@ -16,6 +16,7 @@ from .providers import (
     NullReviewProvider,
     ProviderUnavailable,
     ReviewProvider,
+    SqlReviewProvider,
 )
 
 
@@ -89,9 +90,20 @@ def _env_bool(name: str, default: bool = False) -> bool:
 def build_default_orchestrator() -> RiskSirenOrchestrator:
     """Create the production composition from environment variables."""
 
-    fmp_url = os.getenv("SIREN_FMP_DATABASE_URL") or os.getenv("FMP_DATABASE_URL")
-    ideaton_url = os.getenv("SIREN_IDEATON_DATABASE_URL") or os.getenv("IDEATON_DATABASE_URL")
+    # The current deployment keeps operational reports, synthetic closure
+    # aggregates, reviews, and market facts in the single IDEATON database.
+    # Keep component-specific variables as explicit overrides for a split
+    # deployment, but do not require a database that no longer exists.
+    shared_url = (
+        os.getenv("SIREN_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or os.getenv("SIREN_IDEATON_DATABASE_URL")
+        or os.getenv("IDEATON_DATABASE_URL")
+    )
+    fmp_url = os.getenv("SIREN_FMP_DATABASE_URL") or os.getenv("FMP_DATABASE_URL") or shared_url
+    ideaton_url = os.getenv("SIREN_IDEATON_DATABASE_URL") or os.getenv("IDEATON_DATABASE_URL") or shared_url
     closure_table = os.getenv("SIREN_FRANCHISE_CLOSURE_TABLE")
+    review_table = os.getenv("SIREN_REVIEW_TABLE")
     try:
         radius = float(os.getenv("SIREN_COMPETITION_RADIUS_M", "250"))
     except ValueError as exc:
@@ -110,4 +122,5 @@ def build_default_orchestrator() -> RiskSirenOrchestrator:
             competition_radius_m=radius,
             similar_industry_codes=_similar_codes_from_environment(),
         ),
+        review_provider=SqlReviewProvider(fmp_url, table=review_table),
     )

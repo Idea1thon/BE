@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import unittest
 from datetime import date
+import os
+from unittest.mock import patch
 
 from services.siren.models import RiskSirenRequest, SirenAnalyzeTrigger
 from services.siren.mappers.risk_request_mapper import build_risk_request
-from services.siren.orchestrator import RiskSirenOrchestrator
+from services.siren.orchestrator import RiskSirenOrchestrator, build_default_orchestrator
 from services.siren.providers.fmp_provider import (
     BranchSnapshot,
     FmpProvider,
@@ -205,6 +207,23 @@ class OrchestratorContractTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FmpProviderConfigTests(unittest.TestCase):
+    def test_shared_ideaton_database_is_used_when_fmp_url_is_absent(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "SIREN_DATABASE_URL": "postgresql://shared.example/ideaton",
+                "SIREN_FMP_DATABASE_URL": "",
+                "FMP_DATABASE_URL": "",
+                "SIREN_IDEATON_DATABASE_URL": "",
+                "IDEATON_DATABASE_URL": "",
+            },
+            clear=False,
+        ):
+            orchestrator = build_default_orchestrator()
+        self.assertEqual(orchestrator.fmp_provider.database_url, "postgresql://shared.example/ideaton")
+        self.assertEqual(orchestrator.ideaton_provider.database_url, "postgresql://shared.example/ideaton")
+        self.assertEqual(orchestrator.review_provider.database_url, "postgresql://shared.example/ideaton")
+
     def test_libpq_sslmode_is_translated_for_asyncpg(self) -> None:
         value = _async_database_url(
             "postgresql://user:pass@example.test:5432/db?sslmode=require&application_name=siren"

@@ -144,12 +144,13 @@ async def create_report(
 
 
 async def process_report_analysis(report_id: int, franchise_id: int) -> None:
-    """Run the ID-only siren trigger and persist only safe complete results.
+    """Run the ID-only siren trigger and persist complete/partial results safely.
 
     This background job intentionally uses a fresh session because the request
     transaction has already committed before FastAPI schedules it. Partial
-    results are marked ``FAILED`` with an explicit reason; they are never
-    coerced to score zero, a normal grade, or a truncated rule version.
+    results are stored as ``COMPLETED`` reports with nullable score/grade and
+    ``analysis.calculation_status=partial``; they are never coerced to score
+    zero, a normal grade, or a truncated rule version.
     """
 
     async with SessionLocal() as session:
@@ -177,7 +178,7 @@ async def process_report_analysis(report_id: int, franchise_id: int) -> None:
             if not analysis.values.storable:
                 report.status = ReportStatus.FAILED
                 report.analysis_error = (
-                    "PARTIAL_ANALYSIS_NOT_STORED: "
+                    "ANALYSIS_RESULT_NOT_STORED: "
                     + "; ".join(analysis.values.blockers)
                 )
                 await session.commit()

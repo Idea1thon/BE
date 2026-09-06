@@ -2,7 +2,7 @@
 
 from .fmp_provider import BranchSnapshot, FmpProvider, ProviderUnavailable, SourceNotFound
 from .ideaton_provider import IdeatonProvider, MarketSnapshot
-from .review_provider import NullReviewProvider, ReviewProvider
+from .review_provider import NullReviewProvider, ReviewProvider, SqlReviewProvider
 
 __all__ = [
     "BranchSnapshot",
@@ -12,5 +12,6 @@ __all__ = [
     "NullReviewProvider",
     "ProviderUnavailable",
     "ReviewProvider",
+    "SqlReviewProvider",
     "SourceNotFound",
 ]

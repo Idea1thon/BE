@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from math import isfinite
+import hmac
+import os
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -39,6 +41,26 @@ app = FastAPI(
 _orchestrator: RiskSirenOrchestrator = build_default_orchestrator()
 
 
+def require_internal_access(
+    x_internal_token: str | None = Header(default=None),
+) -> None:
+    """Protect internal routes when a deployment configures a shared token.
+
+    Local tests and development remain tokenless. Production fails closed when
+    the token is missing from configuration; the middle-backend already sends
+    the same value through ``X-Internal-Token``.
+    """
+
+    expected = os.getenv("SIREN_INTERNAL_API_TOKEN", "").strip()
+    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    if not expected:
+        if environment in {"production", "prod"}:
+            raise HTTPException(status_code=503, detail="siren internal token is not configured")
+        return
+    if not x_internal_token or not hmac.compare_digest(x_internal_token, expected):
+        raise HTTPException(status_code=401, detail="invalid siren internal token")
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     # JSON numbers such as 1e309 decode to infinity. Preserve the usual error
@@ -59,7 +81,11 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "risk-siren", "version": "1.0.0"}
 
 
-@app.post("/internal/risk-sirens/analyze", response_model=RiskSirenResponse)
+@app.post(
+    "/internal/risk-sirens/analyze",
+    response_model=RiskSirenResponse,
+    dependencies=[Depends(require_internal_access)],
+)
 def analyze_risk(request: RiskSirenRequest) -> RiskSirenResponse:
     try:
         return RiskSirenResponse.model_validate(analyze(request))
@@ -67,7 +93,11 @@ def analyze_risk(request: RiskSirenRequest) -> RiskSirenResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/internal/risk-sirens/analyze-trigger", response_model=RiskSirenResponse)
+@app.post(
+    "/internal/risk-sirens/analyze-trigger",
+    response_model=RiskSirenResponse,
+    dependencies=[Depends(require_internal_access)],
+)
 async def analyze_trigger(request: SirenAnalyzeTrigger) -> RiskSirenResponse:
     """Resolve source data inside siren and run the deterministic pipeline."""
     try:
@@ -80,7 +110,11 @@ async def analyze_trigger(request: SirenAnalyzeTrigger) -> RiskSirenResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/internal/risk-sirens/hq-summary", response_model=HqSummaryResponse)
+@app.post(
+    "/internal/risk-sirens/hq-summary",
+    response_model=HqSummaryResponse,
+    dependencies=[Depends(require_internal_access)],
+)
 def hq_summary(request: HqSummaryRequest) -> HqSummaryResponse:
     try:
         return HqSummaryResponse.model_validate(summarize(request))
