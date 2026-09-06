@@ -207,6 +207,17 @@ class DbSourcePlanParityTests(unittest.TestCase):
         except Exception as exc:  # noqa: BLE001
             self.skipTest(f"context.plan_snapshot 미가용: {type(exc).__name__}")
 
+    def test_subway_plan_from_db_matches_file(self):
+        from recommendation import serving_db
+        db_sgg, db_lines = urban_plan._load_subway_plan_from_db(serving_db.query)
+        file_sgg, file_lines = urban_plan._load_subway_plan(ROOT)
+        self.assertTrue(db_sgg, "context.subway_network_plan에서 못 읽음")
+        self.assertEqual(db_sgg, file_sgg)
+        self.assertEqual(set(db_lines), set(file_lines))
+        for name in db_lines:
+            self.assertEqual(db_lines[name].line_type, file_lines[name].line_type)
+            self.assertEqual(db_lines[name].endpoints, file_lines[name].endpoints)
+
     def test_db_plan_evidence_matches_files(self):
         from recommendation.pipeline import RecommendationRequest, run_pipeline
         f = {c["candidate_id"]: c for c in run_pipeline(RecommendationRequest(**self.REQ), source="files", llm_mode="offline", limit=20)["candidates"]}

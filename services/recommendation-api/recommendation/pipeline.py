@@ -2468,9 +2468,12 @@ class DbSource:
                 }
                 for code, row in buckets.get(("foreign", "admin_dong"), {}).items()
             },
-            crosswalk=population.load_crosswalk(ROOT),
+            crosswalk=(population.load_crosswalk_from_db(self._query)
+                       or population.load_crosswalk(ROOT)),  # DB(location.area_crosswalk) 우선, 미적재 시 파일 폴백
             flow_dong=flow_dong,
             as_of=as_of,
+            source_paths={**population._SOURCE_PATHS,
+                          "population_crosswalk": "location.area_crosswalk (commercial_to_admin_overlap)"},
         )
 
     def urban_plan(self):

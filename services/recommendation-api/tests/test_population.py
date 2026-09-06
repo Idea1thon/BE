@@ -180,6 +180,15 @@ class DbSourcePopulationParityTests(unittest.TestCase):
         except Exception as exc:  # noqa: BLE001
             self.skipTest(f"context.population_snapshot 미가용: {type(exc).__name__}")
 
+    def test_crosswalk_from_db_matches_file(self):
+        from recommendation import serving_db
+        db_x = population.load_crosswalk_from_db(serving_db.query)
+        file_x = population.load_crosswalk(ROOT)
+        self.assertTrue(db_x, "location.area_crosswalk에서 crosswalk 못 읽음")
+        self.assertEqual(set(db_x), set(file_x))
+        # 쌍 수 동일
+        self.assertEqual(sum(len(v) for v in db_x.values()), sum(len(v) for v in file_x.values()))
+
     def test_db_population_matches_files(self):
         from recommendation.pipeline import RecommendationRequest, run_pipeline
         f = {c["candidate_id"]: c for c in run_pipeline(RecommendationRequest(**self.REQ), source="files", llm_mode="offline", limit=20)["candidates"]}
