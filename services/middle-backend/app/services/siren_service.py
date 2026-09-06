@@ -18,7 +18,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ApiError
-from app.models import Branch, OperationReport, ReportAnalysis, ReportInputItem
+from app.models import (
+    Branch,
+    Notification,
+    OperationReport,
+    ReportAnalysis,
+    ReportInputItem,
+    UserAccount,
+)
+from app.models.enums import UserType
 from app.services import siren_client
 from app.services.siren_mapper import (
     AnalysisValues,
@@ -28,6 +36,8 @@ from app.services.siren_mapper import (
     build_analysis_trigger,
     build_location,
     build_monthly_report,
+    notification_message,
+    should_notify,
     to_analysis_values,
 )
 
@@ -197,5 +207,55 @@ def build_analysis_row(report_id: int, analysis: SirenAnalysis) -> ReportAnalysi
         risk_periods=values.risk_periods,
         recommendations=values.recommendations,
         rule_version=values.rule_version,
+        alert_policy_version=values.alert_policy_version,
+        calculation_status=values.calculation_status,
         calculated_at=values.calculated_at,
     )
+
+
+async def persist_alert_notifications(
+    session: AsyncSession,
+    report: OperationReport,
+    branch: Branch,
+    analysis: SirenAnalysis,
+) -> int:
+    """Persist in-app alert rows while leaving external delivery disabled.
+
+    The Siren service only decides whether an alert should fire. The
+    middle-backend owns recipients and stores pending notification rows; web
+    push and email delivery are intentionally handled by a later integration.
+    The recipient check makes retries idempotent for a report.
+    """
+    if not should_notify(analysis.response):
+        return 0
+
+    existing = set(
+        (
+            await session.execute(
+                select(Notification.recipient_user_id).where(
+                    Notification.report_id == report.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    recipient_ids = {branch.owner_user_id}
+    recipient_ids.update(
+        (
+            await session.execute(
+                select(UserAccount.id).where(
+                    UserAccount.franchise_id == branch.franchise_id,
+                    UserAccount.user_type == UserType.HQ,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    message = notification_message(analysis.response, branch_name=branch.name)
+    for user_id in sorted(recipient_ids - existing):
+        session.add(
+            Notification(recipient_user_id=user_id, report_id=report.id, message=message)
+        )
+    return len(recipient_ids - existing)

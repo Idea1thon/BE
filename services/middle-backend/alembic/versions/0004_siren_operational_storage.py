@@ -8,8 +8,8 @@ the stored projection envelope instead of being converted to FAILED or NORMAL.
 
 from alembic import op
 
-revision = "0004_siren_operational_storage"
-down_revision = "0003_integrity_constraints"
+revision = "0005_siren_operational_storage"
+down_revision = "0004_siren_integration"
 branch_labels = None
 depends_on = None
 

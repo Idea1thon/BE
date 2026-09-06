@@ -195,7 +195,12 @@ async def process_report_analysis(report_id: int, franchise_id: int) -> None:
                 existing.risk_periods = values.risk_periods
                 existing.recommendations = values.recommendations
                 existing.rule_version = values.rule_version
+                existing.alert_policy_version = values.alert_policy_version
+                existing.calculation_status = values.calculation_status
                 existing.calculated_at = values.calculated_at
+            await siren_service.persist_alert_notifications(
+                session, report, branch, analysis
+            )
             report.status = ReportStatus.COMPLETED
             report.analysis_error = None
             await session.commit()

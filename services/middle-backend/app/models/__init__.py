@@ -82,6 +82,8 @@ class Franchise(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
+    fixture_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    synthetic: Mapped[bool] = mapped_column(Boolean, server_default="false")
     created_at: Mapped[dt.datetime] = mapped_column(_TS, server_default=func.now())
 
 
@@ -140,6 +142,15 @@ class Branch(Base):
     business_category_code: Mapped[str] = mapped_column(
         String(20), ForeignKey("business_category.code")
     )
+    trade_area_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    x_5181: Mapped[decimal.Decimal | None] = mapped_column(
+        Numeric(12, 2), nullable=True
+    )
+    y_5181: Mapped[decimal.Decimal | None] = mapped_column(
+        Numeric(12, 2), nullable=True
+    )
+    fixture_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    synthetic: Mapped[bool] = mapped_column(Boolean, server_default="false")
     created_at: Mapped[dt.datetime] = mapped_column(_TS, server_default=func.now())
 
     owner: Mapped[UserAccount] = relationship(
@@ -179,6 +190,9 @@ class OperationReport(Base):
         _enum(InputSource, "input_source"), server_default="MANUAL"
     )
     net_sales: Mapped[decimal.Decimal | None] = mapped_column(Numeric(14, 0))
+    fixture_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    synthetic: Mapped[bool] = mapped_column(Boolean, server_default="false")
     analysis_request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     analysis_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(_TS, server_default=func.now())
@@ -203,6 +217,10 @@ class ReportAnalysis(Base):
         CheckConstraint(
             "risk_score BETWEEN 0 AND 100", name="report_analysis_risk_score_check"
         ),
+        CheckConstraint(
+            "(risk_score IS NULL) = (risk_level IS NULL)",
+            name="ck_analysis_score_grade_together",
+        ),
     )
 
     report_id: Mapped[int] = mapped_column(
@@ -220,7 +238,13 @@ class ReportAnalysis(Base):
     factors: Mapped[list] = mapped_column(JSONB)
     risk_periods: Mapped[list] = mapped_column(JSONB)
     recommendations: Mapped[list] = mapped_column(JSONB)
-    rule_version: Mapped[str] = mapped_column(String(20))
+    rule_version: Mapped[str] = mapped_column(String(60))
+    alert_policy_version: Mapped[str | None] = mapped_column(
+        String(60), nullable=True
+    )
+    calculation_status: Mapped[str] = mapped_column(
+        String(20), server_default="calculated"
+    )
     calculated_at: Mapped[dt.datetime] = mapped_column(_TS)
 
 

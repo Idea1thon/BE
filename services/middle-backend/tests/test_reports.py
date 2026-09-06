@@ -41,9 +41,10 @@ async def test_submit_returns_202_with_analysis_request_id(client, seeded):
     )
     assert res.status_code == 202, res.text
     body = res.json()
-    # 제출 직후 사이렌을 동기 호출하므로 확정 상태로 돌아온다.
-    # (conftest 의 가짜 사이렌이 calculated 결과를 준다)
-    assert body["status"] == "COMPLETED"
+    # 제출 API는 202로 즉시 반환하고, 사이렌 결과는 상태 조회로 확인한다.
+    # 통합 테스트에서는 background task가 실행되지만 응답 DTO는 제출 시점의
+    # 상태를 보존하므로 최초 응답은 ANALYZING이다.
+    assert body["status"] == "ANALYZING"
     assert isinstance(body["report_id"], int)
     assert len(body["analysis_request_id"]) == 36  # uuid4
 
