@@ -372,7 +372,13 @@ def resolve_region(
         selected = in_gu
     target_geoms = [dong_layer.geoms[dong_layer.records.index(rec)] for rec in selected]
     target_poly = unary_union(target_geoms)
-    return selected, target_poly, target_poly.buffer(DEFAULT_MARGIN_M)
+    buffered = target_poly.buffer(DEFAULT_MARGIN_M)
+    if request.dong:
+        # 행정동을 고르면 300m 여유는 두되 선택 시군구 밖으로는 넘기지 않는다.
+        # (역삼1동 요청에 강남대로 건너편 서초구 서초동 건물이 후보로 잡히던 문제)
+        gu_poly = unary_union([dong_layer.geoms[dong_layer.records.index(r)] for r in in_gu])
+        buffered = buffered.intersection(gu_poly)
+    return selected, target_poly, buffered
 
 
 def index_rows(rows: Iterable[dict[str, str]], keys: tuple[str, ...], filters: dict[str, str]) -> dict[tuple[str, ...], dict[str, str]]:

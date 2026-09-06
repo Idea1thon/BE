@@ -109,6 +109,19 @@ class FastApiBoundaryTests(unittest.TestCase):
         self.assertEqual(region_response["sido"], "서울특별시")
         self.assertIn("잠실2동", region_response["dong"])
 
+    def test_dong_target_buffer_stays_inside_the_selected_sigungu(self) -> None:
+        # 역삼1동 요청에 강남대로 건너편 서초구 건물이 후보로 잡히던 문제(#25 후속).
+        _, _, dong_layer, sigungu_by_prefix = load_layers()
+        _, _, buffered = resolve_region(
+            RecommendationRequest("서울특별시", "강남구", "역삼1동", "CS100001"),
+            dong_layer, sigungu_by_prefix,
+        )
+        seocho = [dong_layer.geoms[i] for i, r in enumerate(dong_layer.records)
+                  if sigungu_by_prefix.get(r.code[:5]) == "서초구"]
+        from shapely.ops import unary_union as _uu
+        overlap = buffered.intersection(_uu(seocho)).area
+        self.assertLess(overlap, 1.0, f"target buffer가 서초구로 {overlap:.1f}㎡ 넘어감")
+
     def test_every_catalog_dong_is_resolvable_by_the_spatial_layer(self) -> None:
         _, _, dong_layer, sigungu_by_prefix = load_layers()
         failures = []
