@@ -1783,10 +1783,13 @@ def build_candidate(
     if conditions["unsupported_conditions"]:
         confidence_reasons.append("특별조건을 매물 데이터로 검증하지 못함")
     # FC-06a/06b 상권 crosswalk 대리 시 data_confidence 1단계 하향 (candidate-selection-spec.md §4-2).
+    # 표기 등급만 한 단계 내리고(high→medium, medium→low; low 유지) 정렬에는 반영하지
+    # 않는다 — 인구 근거는 순위 불변(F36)이라 하향 전 등급을 정렬 키로 보존한다.
+    sort_confidence = confidence
     if pop_ctx.confidence_downgrade:
         confidence_reasons.extend(pop_ctx.confidence_reasons)
-        if confidence == "high":
-            confidence = "medium"
+        _conf_order = ("high", "medium", "low")
+        confidence = _conf_order[min(_conf_order.index(confidence) + 1, len(_conf_order) - 1)]
     context_notes.extend(pop_ctx.context_notes)
     missing.extend(pop_ctx.missing)
     context_notes.extend(plan_ctx.context_notes)
@@ -1931,6 +1934,8 @@ def build_candidate(
         "industry_code": request.industry_code, "fit_tier": tier, "fit_index": None, "score_version": None,
         "score_is_predictive": False, "greenfield": greenfield,
         "data_confidence": {"level": confidence, "reasons": confidence_reasons},
+        # 정렬 전용(인구 하향 반영 전 등급). run_pipeline 이 정렬 직후 제거한다.
+        "_sort_confidence": sort_confidence,
         "feature_build": {
             "build_passed": True, "merge_key_definition": "기준_년분기_코드 + 공간코드 + 서비스_업종_코드", "merge_key_dup_rate": 0,
             "quarters_used": {"flow": [request.quarter], "sales": [request.quarter], "store": [request.quarter], "change": [request.quarter], "rent": [rent_period] if re.fullmatch(r"[0-9]{5}", rent_period) else []},
@@ -2437,23 +2442,34 @@ class DbSource:
     def population(self, flow_dong=None):
         # context.population_snapshot(dataset·grain·spatial_code·period·attributes jsonb)에서
         # as_of 파티션을 읽어 파일 소스와 동일 코어(population.assemble)로 조립한다.
-        # 적재: services/recommendation-api/scripts/ingest_population.py. 미적재 시 None(missing 처리).
+        # 적재: services/recommendation-api/scripts/ingest_population.py.
+        # 테이블 미적재 시 None(missing 처리) — to_regclass 로 먼저 확인해 조회 실패로
+        # 요청 전체가 중단되지 않게 한다.
+        reg = self._query("SELECT to_regclass('context.population_snapshot') AS reg")
+        if not reg or not reg[0].get("reg"):
+            return None
+        # 계단식이라 dataset 별 as_of 파티션만 읽는다. 구 파티션이 남아 있어도
+        # (dataset, period) 로 고정해 조회 결과에 섞이지 않게 한다 → attributes 와
+        # as_of 가 항상 as_of 상수를 가리킨다.
+        as_of = {
+            "resident": population.RESIDENT_AS_OF,
+            "worker": population.WORKER_AS_OF,
+            "foreign_resident": population.FOREIGN_LATEST_COMPLETE,
+        }
+        _in = ", ".join(f"('{ds}', '{q}')" for ds, q in (
+            ("resident", as_of["resident"]),
+            ("worker", as_of["worker"]),
+            ("foreign", as_of["foreign_resident"]),
+        ))
         rows = self._query(
-            "SELECT dataset, grain, spatial_code, period, attributes "
-            "FROM context.population_snapshot"
+            "SELECT dataset, grain, spatial_code, attributes "
+            f"FROM context.population_snapshot WHERE (dataset, period) IN ({_in})"
         )
         if not rows:
             return None
         buckets: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
-        as_of: dict[str, str] = {}
-        _as_of_key = {"resident": "resident", "worker": "worker", "foreign": "foreign_resident"}
         for r in rows:
-            key = (r["dataset"], r["grain"])
-            buckets.setdefault(key, {})[r["spatial_code"]] = json.loads(r["attributes"])
-            as_of.setdefault(_as_of_key.get(r["dataset"], r["dataset"]), r["period"])
-        as_of.setdefault("resident", population.RESIDENT_AS_OF)
-        as_of.setdefault("worker", population.WORKER_AS_OF)
-        as_of.setdefault("foreign_resident", population.FOREIGN_LATEST_COMPLETE)
+            buckets.setdefault((r["dataset"], r["grain"]), {})[r["spatial_code"]] = json.loads(r["attributes"])
         return population.assemble(
             resident_trdar=buckets.get(("resident", "commercial_area"), {}),
             resident_dong=buckets.get(("resident", "admin_dong"), {}),
@@ -2668,7 +2684,7 @@ def run_pipeline(
     crosswalk = src.crosswalk()
     rone_areas, rone_seoul, rone_path = src.rent()
     rone_vac_areas, rone_vac_seoul, rone_vac_path = src.vacancy()
-    pop = src.population(flow_dong)  # 인구 3종(상주·직장·외국인). DbSource는 None(파일 소스 우선, #28)
+    pop = src.population(flow_dong)  # 인구 3종(상주·직장·외국인, #28). 테이블 미적재 시 None → missing 처리
     try:
         plan = src.urban_plan()  # 도시계획·정비사업 추진단계(#29). None이면 미연결 처리
     except (PipelineError, LLMRuntimeError, OSError, RuntimeError):
@@ -2691,11 +2707,12 @@ def run_pipeline(
     # 검증된 품질 신호가 없으므로 근거 수로 등수를 매기지 않는다(-len(reasons) 제거).
     # tier → (같은 tier 안에서 candidate_type 라운드로빈으로 인터리브) → 반대근거 적은 순 → 신뢰도 → id.
     # 인터리브: --limit로 자를 때 특정 앵커 타입(예: 아파트)이 id 정렬 편향으로 통째로 잘리는 것을 막는다.
+    # 신뢰도는 _sort_confidence(인구 FC-06 하향 반영 전) 기준 — 인구 근거는 순위 불변(F36).
     _conf_rank = {"high": 0, "medium": 1, "low": 2}
     _tier_rank = {"추천": 0, "조건부 검토": 1, "주의": 2}
 
     def _within_key(c: dict[str, Any]) -> tuple:
-        return (len(c["counter_evidence"]), _conf_rank.get(c["data_confidence"]["level"], 3), c["candidate_id"])
+        return (len(c["counter_evidence"]), _conf_rank.get(c["_sort_confidence"], 3), c["candidate_id"])
 
     ordered: list[dict[str, Any]] = []
     for tier in sorted({c["fit_tier"] for c in candidates}, key=lambda t: _tier_rank.get(t, 3)):
@@ -2710,6 +2727,8 @@ def run_pipeline(
                     ordered.append(buckets[t][cursors[t]])
                     cursors[t] += 1
     candidates = ordered
+    for c in candidates:
+        c.pop("_sort_confidence", None)  # 정렬 전용 내부 키 — 스키마·출력에서 제외
     candidates = _order_by_preferences(candidates, preferences)
     if limit is not None:
         candidates = candidates[:limit]

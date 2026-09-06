@@ -157,11 +157,87 @@ class PipelineInvarianceTests(unittest.TestCase):
         self.assertIn("수요구성", with_pop[0]["dimension_evidence"])
         self.assertTrue(any("FC-03" in n for n in with_pop[0]["context_notes"]))
 
+    def test_foreign_proxy_downgrades_confidence_one_level(self):
+        """FC-06a/06b 상권 crosswalk 대리 → data_confidence 표기 등급 1단계 하향 (spec §4-2).
+
+        지점 후보는 대개 base confidence 가 medium 이므로 medium→low 여야 한다
+        (예전 코드는 high→medium 만 처리해 medium 후보에서 하향이 누락됐다).
+        """
+        cands = self._run(patch_pop_none=False)["candidates"]
+        downgraded = [
+            c for c in cands
+            if any("FC-06a" in r and "하향" in r for r in c["data_confidence"]["reasons"])
+        ]
+        self.assertTrue(downgraded, "외국인 대리 근거가 붙은 후보가 없음")
+        for c in downgraded:
+            self.assertEqual(c["data_confidence"]["level"], "low", c["candidate_id"])
+
+    def test_sort_confidence_is_internal_and_pop_downgrade_keeps_order(self):
+        """정렬용 신뢰도는 인구 하향 반영 전 값이고 출력에서 제거된다 (ziholee P2 / F36).
+
+        인구 하향이 표기 등급만 낮추고 tier 내 순위는 바꾸지 않아야 한다 — pop 유무로
+        후보 순서가 동일해야 한다.
+        """
+        with_pop = self._run(patch_pop_none=False)["candidates"]
+        without = self._run(patch_pop_none=True)["candidates"]
+        for c in with_pop:
+            self.assertNotIn("_sort_confidence", c, c["candidate_id"])
+        self.assertEqual([c["candidate_id"] for c in with_pop],
+                         [c["candidate_id"] for c in without])
+
     def test_files_mode_vacancy_evidence_has_string_period(self):
         """F38 회귀: files 모드에 R-ONE 공실률 CSV가 없어도 evidence period가 None이면 안 됨."""
         for c in self._run(patch_pop_none=False)["candidates"]:
             for e in c["evidence"]:
                 self.assertIsInstance(e["period"], str, f"{c['candidate_id']} {e['metric_name']}")
+
+
+class DbSourcePopulationRobustnessTests(unittest.TestCase):
+    """DB 소스 인구 로더 견고성 (fix/review-edit).
+
+    - 인구 테이블 미적재 → 추천 요청 전체가 중단되지 않고 None(missing 처리).
+    - 조회가 as_of (dataset, period) 파티션으로 고정 → 구 파티션 혼입 불가.
+    """
+
+    def _db_source(self, query_fn):
+        import recommendation.pipeline as P
+
+        src = P.DbSource.__new__(P.DbSource)
+        src._query = query_fn  # type: ignore[attr-defined]
+        return src
+
+    def test_missing_table_returns_none_not_raise(self):
+        def fake_query(sql, **_):
+            if "to_regclass" in sql:
+                return [{"reg": ""}]  # 테이블 없음
+            raise AssertionError("테이블이 없는데 population_snapshot 을 조회하면 안 됨")
+
+        self.assertIsNone(self._db_source(fake_query).population())
+
+    def test_query_filters_to_as_of_partitions(self):
+        """조회 SQL 이 as_of (dataset, period) 로 고정된다 — 구 파티션이 남아 있어도
+        결과에 섞일 수 없다."""
+        seen: dict[str, str] = {}
+
+        def fake_query(sql, **_):
+            if "to_regclass" in sql:
+                return [{"reg": "context.population_snapshot"}]
+            if "population_snapshot" in sql:
+                seen["sql"] = sql
+                return [{"dataset": "resident", "grain": "admin_dong",
+                         "spatial_code": "1", "attributes": '{"총_상주인구_수": "100"}'}]
+            return []  # area_crosswalk 등
+
+        pop = self._db_source(fake_query).population()
+        self.assertIsNotNone(pop)
+        self.assertIn("where (dataset, period) in", seen["sql"].lower())
+        for q in (population.RESIDENT_AS_OF, population.WORKER_AS_OF, population.FOREIGN_LATEST_COMPLETE):
+            self.assertIn(f"'{q}'", seen["sql"])
+        self.assertEqual(pop.as_of, {
+            "resident": population.RESIDENT_AS_OF,
+            "worker": population.WORKER_AS_OF,
+            "foreign_resident": population.FOREIGN_LATEST_COMPLETE,
+        })
 
 
 class DbSourcePopulationParityTests(unittest.TestCase):
