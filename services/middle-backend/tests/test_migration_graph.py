@@ -32,6 +32,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # 이 모듈은 대상 DB 를 DROP/CREATE 한다. conftest 와 같은 안전장치를 둔다.
 BASELINE_DB = "fmp_baseline_test"
 PRUNE_DB = "fmp_prune_test"
+SERIAL_DB = "fmp_serial_test"
+
+# 0001 이 BIGSERIAL 로 만든 컬럼. `0007_repair_serial_defaults` 와 같은 목록이어야
+# 한다 — 한쪽에만 추가하면 자동생성이 없는 테이블이 조용히 생긴다.
+SERIAL_COLUMNS = (
+    ("franchise", "id"),
+    ("user_account", "id"),
+    ("branch", "id"),
+    ("operation_report", "id"),
+    ("notification", "id"),
+    ("financial_product", "id"),
+    ("refresh_token", "id"),
+)
 
 
 def _script_directory() -> ScriptDirectory:
@@ -209,7 +222,7 @@ def test_upgrade_head_recovers_a_partially_applied_database(scratch_db):
     _alembic(db, "upgrade", "head")
 
     assert _psql(db, "SELECT version_num FROM alembic_version") == (
-        "0006_merge_siren_and_regions"
+        "0007_repair_serial_defaults"
     )
     assert _psql(db, "SELECT count(*) FROM region WHERE level = 'SIGUNGU'") == "25"
     assert _psql(db, "SELECT count(*) FROM region WHERE level = 'DONG'") == "425"
@@ -250,3 +263,124 @@ def test_region_prune_keeps_legacy_codes_referenced_by_branch(scratch_db):
     assert _psql(db, "SELECT count(*) FROM region WHERE level = 'DONG'") == "426", (
         "425개 신규 코드 + 참조로 보존된 1개"
     )
+
+
+def test_serial_column_list_matches_the_repair_revision():
+    """복구 리비전의 BIGSERIAL 목록이 이 테스트의 기대와 같다.
+
+    한쪽에만 컬럼을 추가하면 자동생성이 빠진 테이블을 아무도 확인하지 않게 된다.
+    """
+    import importlib.util
+
+    path = (
+        PROJECT_ROOT / "alembic" / "versions" / "0007_repair_serial_defaults.py"
+    )
+    spec = importlib.util.spec_from_file_location("repair_serial", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert set(module.SERIAL_COLUMNS) == set(SERIAL_COLUMNS)
+
+
+@pytest.mark.parametrize("scratch_db", [SERIAL_DB], indirect=True)
+def test_upgrade_head_restores_pk_autogeneration_and_sequence_position(scratch_db):
+    """`franchise.id` 처럼 자동생성이 사라진 컬럼을 복구하고 기존 값과 충돌하지 않는다.
+
+    Azure 에서 실제로 난 오류를 재현한다.
+
+        NotNullViolationError: null value in column "id" of relation "franchise"
+
+    0001 은 테이블이 있으면 `CREATE TABLE` 을 건너뛰고, 컬럼도 있으니
+    `ADD COLUMN IF NOT EXISTS` 에도 걸리지 않는다. `DEFAULT nextval(...)` 과 시퀀스만
+    없는 상태가 그대로 남아 애플리케이션 INSERT 가 실패한다.
+
+    시퀀스 위치도 같이 본다. 기존 행이 큰 id 를 쓰고 있으면 시퀀스를 1 에서 시작하게
+    두면 안 된다 — 자동생성을 고친 직후 중복 키로 죽는다.
+    """
+    db = scratch_db
+    _alembic(db, "upgrade", "head")
+
+    # 덤프 복원처럼 id 를 명시해서 넣은 기존 행. 시퀀스는 이 값을 모른다.
+    _psql(db, "INSERT INTO franchise (id, name) VALUES (5000, '기존본사')")
+    _psql(
+        db,
+        "INSERT INTO franchise (id, name) VALUES (7, '작은본사');"
+        "INSERT INTO user_account (id, franchise_id, email, password_hash, user_type, name) "
+        "VALUES (42, 7, 'drift@example.com', 'x', 'HQ', '기존관리자')",
+    )
+
+    # ── 고장 재현: 두 테이블의 자동생성을 제거한다.
+    for table in ("franchise", "user_account"):
+        _psql(db, f"ALTER TABLE {table} ALTER COLUMN id DROP DEFAULT")
+        _psql(db, f"DROP SEQUENCE {table}_id_seq")
+        assert _psql(
+            db, f"SELECT pg_get_serial_sequence('{table}', 'id') IS NULL"
+        ) == "t", f"{table}.id 고장 재현에 실패했다"
+    # Azure 처럼 이력 테이블도 없앤다 — 0001 부터 다시 돌게 만든다.
+    _psql(db, "DROP TABLE alembic_version")
+
+    # ── 복구
+    _alembic(db, "upgrade", "head")
+
+    # 7개 BIGSERIAL 컬럼 전부 자동생성이 살아 있다.
+    for table, column in SERIAL_COLUMNS:
+        assert _psql(
+            db, f"SELECT pg_get_serial_sequence('{table}', '{column}') IS NOT NULL"
+        ) == "t", f"{table}.{column} 자동생성이 복구되지 않았다"
+
+    # id 를 생략한 INSERT 가 성공하고, 기존 최대값(5000) 뒤를 받는다.
+    new_id = int(_psql(db, "INSERT INTO franchise (name) VALUES ('신규본사') RETURNING id"))
+    assert new_id > 5000, f"새 id 가 기존 최대값보다 작다: {new_id}"
+    new_user_id = int(
+        _psql(
+            db,
+            "INSERT INTO user_account (franchise_id, email, password_hash, user_type, name) "
+            f"VALUES ({new_id}, 'new@example.com', 'x', 'HQ', '신규관리자') RETURNING id",
+        )
+    )
+    assert new_user_id > 42, f"새 user id 가 기존 최대값보다 작다: {new_user_id}"
+
+    # 기존 행은 그대로다.
+    assert _psql(db, "SELECT name FROM franchise WHERE id = 5000") == "기존본사"
+    assert _psql(db, "SELECT name FROM franchise WHERE id = 7") == "작은본사"
+    assert _psql(db, "SELECT name FROM user_account WHERE id = 42") == "기존관리자"
+    assert _psql(db, "SELECT count(*) FROM franchise") == "3"
+
+
+@pytest.mark.parametrize("scratch_db", [SERIAL_DB], indirect=True)
+def test_repair_does_not_rewind_a_sequence_that_is_already_ahead(scratch_db):
+    """이미 앞서 있는 시퀀스를 되돌리지 않는다.
+
+    `MAX(id)` 로 무조건 맞추면, 행이 지워져 최대값이 낮아진 테이블에서 시퀀스가
+    뒤로 밀린다. 그러면 이후 발급 값이 살아 있는 행과 부딪힐 수 있다.
+    """
+    db = scratch_db
+    _alembic(db, "upgrade", "head")
+    _psql(db, "SELECT setval(pg_get_serial_sequence('franchise', 'id'), 900, true)")
+
+    _alembic(db, "stamp", "0006_merge_siren_and_regions")
+    _alembic(db, "upgrade", "head")
+
+    new_id = int(_psql(db, "INSERT INTO franchise (name) VALUES ('앞선시퀀스') RETURNING id"))
+    assert new_id > 900, f"시퀀스가 되돌려졌다: {new_id}"
+
+
+@pytest.mark.parametrize("scratch_db", [SERIAL_DB], indirect=True)
+def test_repair_refuses_to_invent_values_for_unrecoverable_drift(scratch_db):
+    """기본값 없는 NOT NULL 컬럼이 없어진 경우는 조용히 넘기지 않고 실패한다.
+
+    기존 행에 넣을 값을 지어내면 그게 그대로 운영 데이터가 된다. 자동 복구 대신
+    어떤 컬럼이 문제인지 알리고 멈추는 편이 맞다.
+    """
+    db = scratch_db
+    _alembic(db, "upgrade", "head")
+    _psql(db, "INSERT INTO franchise (name) VALUES ('값있는본사')")
+    # 기존 행이 있는 테이블에서 기본값 없는 NOT NULL 컬럼을 없앤다.
+    _psql(db, "ALTER TABLE franchise DROP COLUMN name")
+    _alembic(db, "stamp", "0006_merge_siren_and_regions")
+
+    with pytest.raises(RuntimeError) as caught:
+        _alembic(db, "upgrade", "head")
+
+    message = str(caught.value)
+    assert "franchise.name" in message, message
+    assert "기존 행에 넣을 값이 없음" in message, message
