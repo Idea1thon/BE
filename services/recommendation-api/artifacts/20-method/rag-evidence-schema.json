@@ -3,7 +3,8 @@
   "title": "LocationCandidateEvidence",
   "description": "후보 선정 단계가 만든 구조화 결과를 RAG 설명용으로 담는 계약. RAG는 이 객체의 값으로만 문장을 만든다(rag-contract.md). 2026-09-01: grain 출처·결합 근거 필드, 명명된 위치(location), evidence grain에 자치구·권역, 갱신주기에 monthly·semiannual·snapshot 추가(FC-06·41·42·51·52·53 이식 반영). 2026-09-06 #28: 상주(FC-03)·직장(FC-04)·활동유형(FC-05)·외국인 거주/방문(FC-06a/06b) 인구 근거 델타 — profile_ref.as_of_quarter에 계단식 스냅샷 키(resident/worker/foreign_resident), dimension_evidence.수요구성.grain_notes, evidence[] 인구 항목 필수 필드(feature_id·observed_end_period·update_cycle·approximation_note·partial_period_excluded), source_freshness 인구 3종 항목, FC-06a/b proxy→data_confidence 하향 연결.",
   "_changelog": [
-    "2026-09-06 #28: 인구 3종(상주·직장·외국인 생활인구) RAG Evidence 스키마 델타. 전면 재설계 아님 — FC-03/04/05/06a/06b가 Evidence로 표현될 때 필요한 필드만 추가. 근거: candidate-selection-spec.md §0-8·§0-9·§4-2·§7, data-usage-classification.md 부록 C, regional-characteristics-profile.md §22~23·FC-03/04/05/06a/06b 행, rag-contract.md."
+    "2026-09-06 #28: 인구 3종(상주·직장·외국인 생활인구) RAG Evidence 스키마 델타. 전면 재설계 아님 — FC-03/04/05/06a/06b가 Evidence로 표현될 때 필요한 필드만 추가. 근거: candidate-selection-spec.md §0-8·§0-9·§4-2·§7, data-usage-classification.md 부록 C, regional-characteristics-profile.md §22~23·FC-03/04/05/06a/06b 행, rag-contract.md.",
+    "2026-09-06 #29: 도시계획·정비사업 추진단계 표준화. normalization enum에 plan_stage_3group_crosswalk·uq120_polygon_pip·subway_network_plan_sigungu_filter 추가. FC-51(상권 겹침 정비·재개발, 자치구 정비사업조합)·FC-52(대규모 개발 대분류, 계획 도시철도)는 전부 context_notes 버킷 — 추진단계 3그룹(계획/추진/착공이후) 스냅샷이며 '예정'·'확정' 단정 금지. 근거: candidate-selection-spec.md §0-10, regional-characteristics-profile.md FC-51/52 행, QA 라운드 6·7."
   ],
   "type": "object",
   "required": [
@@ -309,6 +310,7 @@
               "foreign_trdar_area_weight",
               "plan_stage_3group_crosswalk",
               "uq120_polygon_pip",
+              "subway_network_plan_sigungu_filter",
               "recent_3m_mean_no_seasonal_adjustment",
               "yoy_clean_recent_mean",
               "seasonal_phase_label",

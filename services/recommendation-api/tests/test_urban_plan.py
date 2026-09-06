@@ -219,7 +219,8 @@ class DbSourcePlanParityTests(unittest.TestCase):
                           for e in c["evidence"] if e.get("feature_id") in ("FC-51", "FC-52"))
 
         def plan_notes(c):
-            return sorted(n for n in c["context_notes"] if n.rstrip().endswith("(FC-51)") or n.rstrip().endswith("(FC-52)") or "(FC-51 보조)" in n)
+            return sorted(n for n in c["context_notes"]
+                          if "(FC-51)" in n or "(FC-52)" in n or "(FC-51 보조)" in n or "(FC-52 계획도시철도)" in n)
 
         for cid in common:
             self.assertEqual(plan_ev(f[cid]), plan_ev(d[cid]), cid)
