@@ -12,7 +12,7 @@
   "risk": {
     "score": null,
     "grade": null,
-    "score_version": "risk-siren-v1.1-provisional",
+    "score_version": "risk-siren-v1.2-provisional",
     "calculation_status": "partial",
     "policy_status": "provisional",
     "composite_basis": [
@@ -233,8 +233,8 @@
   },
   "alert": {
     "event_type": "branch_risk_evaluated",
-    "event_id": "evt-9941a2197339d6c176260f65",
-    "idempotency_key": "9941a2197339d6c176260f65",
+    "event_id": "evt-6788e8a722e886dcb13f3703",
+    "idempotency_key": "6788e8a722e886dcb13f3703",
     "branch_id": "demo-br-20",
     "grade": null,
     "previous_grade": null,
@@ -289,8 +289,8 @@
       "branch_id": "demo-br-20",
       "alert": {
         "event_type": "branch_risk_evaluated",
-        "event_id": "evt-9941a2197339d6c176260f65",
-        "idempotency_key": "9941a2197339d6c176260f65",
+        "event_id": "evt-6788e8a722e886dcb13f3703",
+        "idempotency_key": "6788e8a722e886dcb13f3703",
         "branch_id": "demo-br-20",
         "grade": null,
         "previous_grade": null,
@@ -542,8 +542,8 @@
       "branch_id": "demo-br-20",
       "alert": {
         "event_type": "branch_risk_evaluated",
-        "event_id": "evt-9941a2197339d6c176260f65",
-        "idempotency_key": "9941a2197339d6c176260f65",
+        "event_id": "evt-6788e8a722e886dcb13f3703",
+        "idempotency_key": "6788e8a722e886dcb13f3703",
         "branch_id": "demo-br-20",
         "grade": null,
         "previous_grade": null,

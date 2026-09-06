@@ -12,7 +12,7 @@
   "risk": {
     "score": 20.2475,
     "grade": "정상",
-    "score_version": "risk-siren-v1.1-provisional",
+    "score_version": "risk-siren-v1.2-provisional",
     "calculation_status": "calculated",
     "policy_status": "provisional",
     "composite_basis": [
@@ -235,8 +235,8 @@
   },
   "alert": {
     "event_type": "branch_risk_evaluated",
-    "event_id": "evt-cdf90d7ed3a11a5610fdfcc6",
-    "idempotency_key": "cdf90d7ed3a11a5610fdfcc6",
+    "event_id": "evt-2c1db71695b1655dcd7b272b",
+    "idempotency_key": "2c1db71695b1655dcd7b272b",
     "branch_id": "demo-br-05",
     "grade": "정상",
     "previous_grade": null,
@@ -293,8 +293,8 @@
       "branch_id": "demo-br-05",
       "alert": {
         "event_type": "branch_risk_evaluated",
-        "event_id": "evt-cdf90d7ed3a11a5610fdfcc6",
-        "idempotency_key": "cdf90d7ed3a11a5610fdfcc6",
+        "event_id": "evt-2c1db71695b1655dcd7b272b",
+        "idempotency_key": "2c1db71695b1655dcd7b272b",
         "branch_id": "demo-br-05",
         "grade": "정상",
         "previous_grade": null,
@@ -549,8 +549,8 @@
       "branch_id": "demo-br-05",
       "alert": {
         "event_type": "branch_risk_evaluated",
-        "event_id": "evt-cdf90d7ed3a11a5610fdfcc6",
-        "idempotency_key": "cdf90d7ed3a11a5610fdfcc6",
+        "event_id": "evt-2c1db71695b1655dcd7b272b",
+        "idempotency_key": "2c1db71695b1655dcd7b272b",
         "branch_id": "demo-br-05",
         "grade": "정상",
         "previous_grade": null,

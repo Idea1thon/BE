@@ -12,7 +12,7 @@
   "risk": {
     "score": 90.6388,
     "grade": "위험",
-    "score_version": "risk-siren-v1.1-provisional",
+    "score_version": "risk-siren-v1.2-provisional",
     "calculation_status": "calculated",
     "policy_status": "provisional",
     "composite_basis": [
@@ -248,8 +248,8 @@
   },
   "alert": {
     "event_type": "branch_risk_evaluated",
-    "event_id": "evt-aa3440719d2386c93c943dec",
-    "idempotency_key": "aa3440719d2386c93c943dec",
+    "event_id": "evt-1605b477468994c68bf0133c",
+    "idempotency_key": "1605b477468994c68bf0133c",
     "branch_id": "demo-br-12",
     "grade": "위험",
     "previous_grade": null,
@@ -321,8 +321,8 @@
       "branch_id": "demo-br-12",
       "alert": {
         "event_type": "branch_risk_evaluated",
-        "event_id": "evt-aa3440719d2386c93c943dec",
-        "idempotency_key": "aa3440719d2386c93c943dec",
+        "event_id": "evt-1605b477468994c68bf0133c",
+        "idempotency_key": "1605b477468994c68bf0133c",
         "branch_id": "demo-br-12",
         "grade": "위험",
         "previous_grade": null,
@@ -604,8 +604,8 @@
       "branch_id": "demo-br-12",
       "alert": {
         "event_type": "branch_risk_evaluated",
-        "event_id": "evt-aa3440719d2386c93c943dec",
-        "idempotency_key": "aa3440719d2386c93c943dec",
+        "event_id": "evt-1605b477468994c68bf0133c",
+        "idempotency_key": "1605b477468994c68bf0133c",
         "branch_id": "demo-br-12",
         "grade": "위험",
         "previous_grade": null,

@@ -22,7 +22,12 @@ class WarningTest(unittest.TestCase):
         self.assertEqual(r["projections"]["branch_owner"]["alert"], r["alert"])
 
     def test_available_market_does_not_cancel_confirmed_profitability_warning(self):
-        p = complete_payload(margin_start=-0.05, margin_end=-0.05)
+        p = complete_payload(margin_start=-0.06, margin_end=-0.06)
+        # Keep the same loss while isolating the profitability-only warning path
+        # from the additional labor-risk penalty introduced in score v1.2.
+        for report in p["branch_reports"]:
+            report["opex"]["rent_mgmt"] += sum(report["labor"].values())
+            report["labor"] = {key: 0 for key in report["labor"]}
         complete = analyze(p)
         p["market_data"] = None
         partial = analyze(p)

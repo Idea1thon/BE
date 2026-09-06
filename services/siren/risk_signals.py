@@ -23,7 +23,7 @@ from .reports import MonthlyMetrics, mean_ratio, sum_field, window_ending
 class RiskPolicy:
     """Provisional policy values — require approval before operational use."""
 
-    version: str = "risk-siren-v1.1-provisional"
+    version: str = "risk-siren-v1.2-provisional"
 
     # composite weights (sum per layer = 1.0)
     market_closure_weight: float = 0.45
@@ -442,20 +442,21 @@ def calculate_profitability(
             "status": "partial" if recent else "missing",
         }
 
-    # provisional scoring: blend the average of signals with the single worst one,
-    # then apply a hard floor when the branch is clearly hemorrhaging.
+    # Keep the denominator of the core signals fixed when adding expense penalties.
+    # A newly observed risk must not dilute the existing margin/loss evidence.
     parts: list[float] = []
     parts.append(clamp_score(max(0.0, -recent_margin) / 15.0 * 100))  # negative margin
     if margin_decline_pt is not None:
         parts.append(_decline_score(-margin_decline_pt, policy.profit_margin_decline_reference_pt))
     parts.append(min(100.0, consecutive_negative / 4.0 * 100))
+    core_signal_count = len(parts)
     if labor_ratio_recent is not None and labor_ratio_recent > policy.labor_ratio_reference:
         parts.append(clamp_score((labor_ratio_recent - policy.labor_ratio_reference) / 0.15 * 100))
     if coupon_ratio_recent is not None and coupon_ratio_recent > policy.coupon_ratio_reference:
         parts.append(clamp_score((coupon_ratio_recent - policy.coupon_ratio_reference) / 0.08 * 100))
     if loan_trend == "rising":
         parts.append(45.0)
-    score = clamp_score(0.55 * (sum(parts) / len(parts)) + 0.45 * max(parts)) if parts else 0.0
+    score = clamp_score(0.55 * (sum(parts) / core_signal_count) + 0.45 * max(parts))
     if recent_margin <= -12.0 or consecutive_negative >= 8:
         score = max(score, 75.0)
     elif recent_margin <= -5.0 or consecutive_negative >= 4:

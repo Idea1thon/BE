@@ -10,9 +10,9 @@
     "trade_area_code": "3120098"
   },
   "risk": {
-    "score": 65.813,
-    "grade": "주의",
-    "score_version": "risk-siren-v1.1-provisional",
+    "score": 77.7097,
+    "grade": "위험",
+    "score_version": "risk-siren-v1.2-provisional",
     "calculation_status": "calculated",
     "policy_status": "provisional",
     "composite_basis": [
@@ -33,7 +33,7 @@
       "status": "calculated"
     },
     "branch_risk": {
-      "score": 65.813,
+      "score": 77.7097,
       "status": "calculated"
     }
   },
@@ -87,7 +87,7 @@
       "status": "calculated"
     },
     "profitability": {
-      "score": 78.5323,
+      "score": 89.7097,
       "operating_margin_recent_3m_pct": -5.3699,
       "operating_margin_previous_3m_pct": 0.8773,
       "operating_margin_decline_pt": 6.2472,
@@ -265,12 +265,12 @@
   },
   "alert": {
     "event_type": "branch_risk_evaluated",
-    "event_id": "evt-4169ed6dd02e503f73a0602c",
-    "idempotency_key": "4169ed6dd02e503f73a0602c",
+    "event_id": "evt-d7e804df925ec02fa55935ad",
+    "idempotency_key": "d7e804df925ec02fa55935ad",
     "branch_id": "demo-br-07",
-    "grade": "주의",
+    "grade": "위험",
     "previous_grade": null,
-    "score": 65.813,
+    "score": 77.7097,
     "as_of": "2026-03-31",
     "recipients": [
       {
@@ -291,12 +291,18 @@
     "report_link": null,
     "should_fire": true,
     "trigger": {
-      "basis": "profitability",
-      "score": 78.5323,
+      "basis": "composite",
+      "score": 77.7097,
       "threshold": 70.0,
       "evidence_ids": [
+        "ev-closure-rolling-2q",
+        "ev-closure-quarter",
+        "ev-market-sales-qoq",
+        "ev-competition-new-3m",
+        "ev-branch-sales-3m",
         "ev-profit-margin-3m",
-        "ev-profit-negative-streak"
+        "ev-profit-negative-streak",
+        "ev-review-neg-ratio"
       ]
     },
     "alert_policy_version": "confirmed-branch-v1",
@@ -317,7 +323,7 @@
     "items": []
   },
   "explanation": {
-    "text": "일부 위험 신호가 관찰되었습니다. 최근 기간의 변화와 세부 근거를 확인해 주세요. 참고: 최근 리뷰의 부정 반응 비율이 높지만 직전 기간보다는 줄었습니다 (보조 지표, 종합 점수에는 반영되지 않음). 가맹점 매출·손익·리뷰는 대회 데모용 합성 데이터입니다. 상권×업종 폐업률·시장 매출·경쟁업체 등장은 서울시 공개데이터 실측입니다.",
+    "text": "검증된 위험 신호를 종합한 결과 집중 관리가 필요한 상태입니다. 각 근거와 기간을 함께 확인해 주세요. 참고: 최근 리뷰의 부정 반응 비율이 높지만 직전 기간보다는 줄었습니다 (보조 지표, 종합 점수에는 반영되지 않음). 가맹점 매출·손익·리뷰는 대회 데모용 합성 데이터입니다. 상권×업종 폐업률·시장 매출·경쟁업체 등장은 서울시 공개데이터 실측입니다.",
     "evidence_ids": [
       "ev-closure-rolling-2q",
       "ev-closure-quarter",
@@ -335,12 +341,12 @@
       "branch_id": "demo-br-07",
       "alert": {
         "event_type": "branch_risk_evaluated",
-        "event_id": "evt-4169ed6dd02e503f73a0602c",
-        "idempotency_key": "4169ed6dd02e503f73a0602c",
+        "event_id": "evt-d7e804df925ec02fa55935ad",
+        "idempotency_key": "d7e804df925ec02fa55935ad",
         "branch_id": "demo-br-07",
-        "grade": "주의",
+        "grade": "위험",
         "previous_grade": null,
-        "score": 65.813,
+        "score": 77.7097,
         "as_of": "2026-03-31",
         "recipients": [
           {
@@ -361,12 +367,18 @@
         "report_link": null,
         "should_fire": true,
         "trigger": {
-          "basis": "profitability",
-          "score": 78.5323,
+          "basis": "composite",
+          "score": 77.7097,
           "threshold": 70.0,
           "evidence_ids": [
+            "ev-closure-rolling-2q",
+            "ev-closure-quarter",
+            "ev-market-sales-qoq",
+            "ev-competition-new-3m",
+            "ev-branch-sales-3m",
             "ev-profit-margin-3m",
-            "ev-profit-negative-streak"
+            "ev-profit-negative-streak",
+            "ev-review-neg-ratio"
           ]
         },
         "alert_policy_version": "confirmed-branch-v1",
@@ -382,8 +394,8 @@
           "ev-review-neg-ratio"
         ]
       },
-      "score": 65.813,
-      "grade": "주의",
+      "score": 77.7097,
+      "grade": "위험",
       "calculation_status": "calculated",
       "layers": {
         "market_risk": {
@@ -391,7 +403,7 @@
           "status": "calculated"
         },
         "branch_risk": {
-          "score": 65.813,
+          "score": 77.7097,
           "status": "calculated"
         }
       },
@@ -445,7 +457,7 @@
           "status": "calculated"
         },
         "profitability": {
-          "score": 78.5323,
+          "score": 89.7097,
           "operating_margin_recent_3m_pct": -5.3699,
           "operating_margin_previous_3m_pct": 0.8773,
           "operating_margin_decline_pt": 6.2472,
@@ -631,12 +643,12 @@
       "branch_id": "demo-br-07",
       "alert": {
         "event_type": "branch_risk_evaluated",
-        "event_id": "evt-4169ed6dd02e503f73a0602c",
-        "idempotency_key": "4169ed6dd02e503f73a0602c",
+        "event_id": "evt-d7e804df925ec02fa55935ad",
+        "idempotency_key": "d7e804df925ec02fa55935ad",
         "branch_id": "demo-br-07",
-        "grade": "주의",
+        "grade": "위험",
         "previous_grade": null,
-        "score": 65.813,
+        "score": 77.7097,
         "as_of": "2026-03-31",
         "recipients": [
           {
@@ -657,12 +669,18 @@
         "report_link": null,
         "should_fire": true,
         "trigger": {
-          "basis": "profitability",
-          "score": 78.5323,
+          "basis": "composite",
+          "score": 77.7097,
           "threshold": 70.0,
           "evidence_ids": [
+            "ev-closure-rolling-2q",
+            "ev-closure-quarter",
+            "ev-market-sales-qoq",
+            "ev-competition-new-3m",
+            "ev-branch-sales-3m",
             "ev-profit-margin-3m",
-            "ev-profit-negative-streak"
+            "ev-profit-negative-streak",
+            "ev-review-neg-ratio"
           ]
         },
         "alert_policy_version": "confirmed-branch-v1",
@@ -679,8 +697,8 @@
         ]
       },
       "franchise_id": "demo-fr-01",
-      "score": 65.813,
-      "grade": "주의",
+      "score": 77.7097,
+      "grade": "위험",
       "calculation_status": "calculated",
       "component_status": {
         "closure": "calculated",

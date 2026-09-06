@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from math import isfinite
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from .hq_summary import summarize
 from .models import (
@@ -19,6 +24,21 @@ app = FastAPI(
     version="1.0.0",
     description="Deterministic franchise-branch risk analysis with evidence (v1: 5 signals, 2 layers).",
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # JSON numbers such as 1e309 decode to infinity. Preserve the usual error
+    # structure while making rejected non-finite inputs safe to serialize.
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": jsonable_encoder(
+                exc.errors(),
+                custom_encoder={float: lambda value: value if isfinite(value) else str(value)},
+            )
+        },
+    )
 
 
 @app.get("/health")

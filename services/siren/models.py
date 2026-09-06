@@ -27,7 +27,7 @@ QUARTER_PATTERN = re.compile(r"^\d{4}Q[1-4]$")
 
 
 class ContractModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False)
 
 
 class IndustryCode(str, Enum):
