@@ -128,6 +128,15 @@ def _chat_url(endpoint: str) -> str:
     return endpoint if endpoint.endswith("/chat/completions") else f"{endpoint}/chat/completions"
 
 
+def _is_param_rejection(error_text: str) -> bool:
+    """요청 파라미터 형식 때문에 400 이 난 것인지(=구형 형식 재시도 가치 있음)."""
+    low = error_text.lower()
+    return "400" in low and any(
+        token in low for token in
+        ("max_tokens", "max_completion_tokens", "temperature", "unsupported_parameter", "unsupported value", "unknown_parameter")
+    )
+
+
 def _extract_json(content: Any) -> dict[str, Any]:
     if isinstance(content, dict):
         return content
@@ -165,15 +174,35 @@ class OpenAICompatibleJsonClient:
         # 요청당 호출 상한 — 초과 시 호출부가 폴백. required 모드에서는 캡을 강제하지
         # 않는다(자체 비용캡을 외부 의존성 장애처럼 503 으로 보고하지 않도록).
         _charge_call(enforce=self.config.mode != "required")
-        body = {
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        ]
+        common = {
             "model": self.config.model,
-            "max_completion_tokens": self.config.max_output_tokens,
             "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
+            "messages": messages,
         }
+        # 최신 OpenAI 모델(gpt-5.x 등)은 `max_tokens` 를 거부하고 `temperature` 는
+        # 기본값(1)만 허용한다. 구형 OpenAI 호환 서버는 반대로 `max_completion_tokens`
+        # 를 모른다. 최신 형식을 먼저 보내고, 파라미터 관련 400 이면 구형 형식으로
+        # 한 번 재시도한다.
+        shapes = [
+            {**common, "max_completion_tokens": self.config.max_output_tokens},
+            {**common, "max_tokens": self.config.max_output_tokens, "temperature": 0},
+        ]
+        last_exc: LLMRuntimeError | None = None
+        for i, body in enumerate(shapes):
+            try:
+                return self._post_chat(body)
+            except LLMRuntimeError as exc:
+                last_exc = exc
+                if i + 1 < len(shapes) and _is_param_rejection(str(exc)):
+                    continue
+                raise
+        raise last_exc  # pragma: no cover - shapes is non-empty
+
+    def _post_chat(self, body: dict[str, Any]) -> dict[str, Any]:
         request = Request(
             _chat_url(self.config.endpoint or ""),
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
