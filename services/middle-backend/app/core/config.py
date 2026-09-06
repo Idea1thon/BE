@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     # DB
-    database_url: str = "postgresql+asyncpg://localhost:5432/fmp"
+    database_url: str = "postgresql+asyncpg://localhost:5432/ideaton"
     db_echo: bool = False
     # 테스트에서 이벤트 루프가 매번 바뀌는 환경 대응 (asyncpg 커넥션은 루프에 묶인다)
     db_use_null_pool: bool = False

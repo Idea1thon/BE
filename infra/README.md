@@ -8,11 +8,11 @@ docker compose up --build
 |---|---|
 | 중간 백엔드 | http://localhost:8000/docs |
 | 추천 API | http://localhost:8001/docs |
-| PostgreSQL | localhost:55432 (`fmp`, `ideaton`) |
+| PostgreSQL | localhost:55432 (`ideaton`) |
 
 첫 기동에서 일어나는 일:
 
-1. `db` — `fmp`·`ideaton` 두 DB 생성, `ideaton` 에 추천 스키마 DDL 적용 (PostGIS·pgcrypto 포함)
+1. `db` — `ideaton` DB 생성, 추천 스키마 DDL 적용 (PostGIS·pgcrypto 포함)
 2. `middle-backend` — `alembic upgrade head` 후 시드, 그다음 서버
 3. `recommendation-api` — 서버만
 
@@ -47,8 +47,8 @@ DDL 만으로 충분한 작업(스키마 확인, 마이그레이션, 중간 백�
 docker compose up db
 ```
 
-`postgresql://postgres:devpass@localhost:55432/fmp` 로 붙는다. 포트는 loopback 에만 게시되므로 같은 기기에서만 접근된다 — 이 구성은 저장소에 공개된 기본 비밀번호를 쓰기 때문이다.
+`postgresql://postgres:devpass@localhost:55432/ideaton` 로 붙는다. 포트는 loopback 에만 게시되므로 같은 기기에서만 접근된다 — 이 구성은 저장소에 공개된 기본 비밀번호를 쓰기 때문이다.
 
 ## Azure 와의 관계
 
-구조를 맞춰 뒀다 — 서버 1대, DB 2개(`fmp` / `ideaton`), PostGIS. 다른 점은 로컬이 `postgres` superuser 하나를 쓰고 Azure 는 서비스별 계정(`fmp_app` / `pipeline_app`)으로 나눈다는 것이다. 계정 분리까지 재현하지 않은 이유는 로컬에서 권한 문제로 막히는 시간이 얻는 것보다 크기 때문이다. **다만 DB 경계는 로컬에서도 그대로다** — 서로의 DB 를 조인할 수 없다.
+구조를 맞춰 뒀다 — 서버 1대, 통합 DB `ideaton`, PostGIS. 로컬은 `postgres` superuser 하나를 쓰고 Azure는 서비스별 계정으로 나눌 수 있다. 운영보고서·Siren 원천·추천 상권 데이터가 같은 DB에 있으므로 중간 백엔드는 ID-only trigger만 Siren에 전달하고, Siren이 읽기 전용으로 원천을 조회한다.
