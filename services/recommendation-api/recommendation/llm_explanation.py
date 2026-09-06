@@ -9,6 +9,7 @@ from typing import Any
 from .rag_tools import build_retrieval_evidence
 from .evidence_reranker import select_sources, order_card_claims
 from .verification_diagnostics import build_verification_diagnostics
+from .grounding_periods import normalize_claim_periods
 from .llm_runtime import (
     LLMConfig,
     LLMRuntimeError,
@@ -130,9 +131,9 @@ def _validate_inference_hypotheses(raw: Any) -> list[str]:
             errors.append(f"inference_hypotheses[{index}].claim 길이 제한 초과")
         if item.get("status") != "unverified":
             errors.append(f"inference_hypotheses[{index}]는 status=unverified여야 함")
-        if item.get("claim_type") not in {"hypothesis", "scenario", "causal_hypothesis", "estimate"}:
+        if item.get("claim_type") not in ("hypothesis", "scenario", "causal_hypothesis", "estimate"):
             errors.append(f"inference_hypotheses[{index}]의 claim_type 오류")
-        if item.get("confidence") not in {"low", "medium", "high"}:
+        if item.get("confidence") not in ("low", "medium", "high"):
             errors.append(f"inference_hypotheses[{index}]의 confidence 오류")
         refs = item.get("basis_refs")
         if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
@@ -219,8 +220,12 @@ def verify_grounded_claims(candidate, card, sources, client, *, decisions: dict[
             decisions[claim_id] = 'disallowed_source_bucket'
             continue
         cited = [sources[ref]["text"] for ref in refs]
+        numeric_claim, unsupported_period = normalize_claim_periods(claim, cited)
+        if unsupported_period:
+            decisions[claim_id] = 'unsupported_period'
+            continue
         numbers = _numeric_tokens(" ".join(cited))
-        if not _numeric_tokens(claim).issubset(numbers):
+        if not _numeric_tokens(numeric_claim).issubset(numbers):
             decisions[claim_id] = 'unsupported_number'
             continue
         checks.append({"claim_id": claim_id, "claim": claim, "sources": cited})
@@ -401,6 +406,47 @@ def validate_card(candidate: dict[str, Any], card: Any, *, verified_claims: set[
     return not errors, errors
 
 
+def _valid_output_text(value: Any) -> bool:
+    return (isinstance(value, str) and bool(value.strip())
+            and not re.search(r'[\ud800-\udfff]', value))
+
+
+def _draft_structure_errors(candidate: dict[str, Any], card: Any) -> list[str]:
+    """Check the generated shape before pruning can conceal malformed content."""
+    if not isinstance(card, dict):
+        return ['설명 카드가 JSON 객체가 아님']
+    errors = []
+    if card.get('candidate_id') != candidate.get('candidate_id'):
+        errors.append('candidate_id 불일치')
+    if not _valid_output_text(card.get('summary')):
+        errors.append('summary가 비어 있거나 유효한 문자열이 아님')
+    for bucket in _OBSERVED_BUCKETS:
+        values = card.get(bucket)
+        if not isinstance(values, list) or not all(_valid_output_text(value) for value in values):
+            errors.append(f'{bucket}가 비어 있지 않은 문자열의 배열이 아님')
+    errors.extend(_validate_inference_hypotheses(card.get('inference_hypotheses')))
+    if card.get('claim_type') not in ('descriptive', 'associational'):
+        errors.append('허용되지 않는 claim_type')
+    return errors
+
+
+def _restore_required_context(candidate: dict[str, Any], card: dict[str, Any]) -> list[str]:
+    """Retain server warnings/missing facts omitted by generation or pruning.
+
+    Semantic support proves a paraphrase follows from a source, not that it
+    retains every warning in that source. Keep exact originals even when a
+    shorter supported paraphrase cites them; do not invent model citations.
+    """
+    restored = []
+    for bucket in ('counter_evidence', 'missing_features'):
+        for index, text in enumerate(_candidate_claims(candidate, bucket)):
+            source_id = f'{bucket}:{index}'
+            if text not in card[bucket]:
+                card[bucket].append(text)
+                restored.append(source_id)
+    return restored
+
+
 def explain_candidates(
     candidates: list[dict[str, Any]],
     llm_mode: str = "auto",
@@ -439,6 +485,9 @@ citations에는 같은 bucket의 출처와 candidate-evidence:* 출처만 넣어
 inference_hypotheses의 값은 관측 Evidence, 후보 등급·정렬, 하드 조건으로 사용되지 않는 분석 가설이다.
 성공·수익을 보장하는 표현은 관측 필드에 쓰지 말고, 인과관계는 causal_hypothesis로만 표시하라.
 반드시 candidate_id, summary, reasons, counter_evidence, context_notes, missing_features, inference_hypotheses, claim_type을 반환하라.
+summary는 문자열이다. reasons, counter_evidence, context_notes, missing_features는 반드시 문자열 배열이다. 각 항목에 text나 citations 객체를 넣지 말라. 빈 항목이나 null도 넣지 말라.
+인용은 최상위 citations 객체에만 넣고 각 값은 출처 ID 문자열 배열로 반환하라. missing_features의 재서술에도 출처 인용이 필요하다.
+서버의 반대근거와 미확인 항목을 빠뜨리지 말라. output_contract는 반환 형식이며 후보 사실을 추가하는 근거가 아니다.
 claim_type은 descriptive 또는 associational만 허용한다."""
     for candidate in candidates:
         sources = explanation_sources(candidate, retrieval_evidence)
@@ -448,6 +497,7 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         card = None
         draft = None
         decisions: dict[str, str] = {}
+        restored: list[str] = []
         generation_status = 'not_attempted'
         fallback_reason = 'no_client' if client is None else None
         stage = 'generation'
@@ -460,24 +510,43 @@ claim_type은 descriptive 또는 associational만 허용한다."""
                                            if query_context else candidate),
                     "query_context": query_context or {},
                     "explanation_sources": selected,
+                    "output_contract": {
+                        "candidate_id": candidate.get('candidate_id'),
+                        "summary": "string",
+                        **{bucket: "array<string>" for bucket in _OBSERVED_BUCKETS},
+                        "citations": "object<claim_position, array<source_id>>",
+                        "inference_hypotheses": "array<object>; empty when no unverified hypothesis",
+                        "claim_type": "descriptive|associational",
+                    },
                 })
                 draft = card
                 generation_status = 'generated' if isinstance(card, dict) else 'invalid_card'
+                stage = 'draft_validation'
+                structure_errors = _draft_structure_errors(candidate, card)
+                if structure_errors:
+                    generation_status = 'invalid_card'
+                    fallback_reason = 'draft_schema_invalid'
+                    raise LLMRuntimeError('LLM 설명 형식 오류: ' + '; '.join(structure_errors))
                 if isinstance(card, dict):
                     stage = 'verification'
                     verified = verify_grounded_claims(candidate, card, selected, client, decisions=decisions)
                     card, verified = prune_unverified_claims(candidate, card, verified)
                 else:
                     verified = set()
+                if not any(card[bucket] for bucket in _OBSERVED_BUCKETS):
+                    fallback_reason = 'empty_explanation'
+                    raise LLMRuntimeError('검증 후 설명 목록이 모두 비어 있어 원천 근거 템플릿으로 복귀합니다.')
+                restored = _restore_required_context(candidate, card)
                 stage = 'card_validation'
                 valid, validation_errors = validate_card(candidate, card, verified_claims=verified, source_catalog=selected)
                 if valid:
-                    card["explanation_mode"] = "llm"
+                    card["explanation_mode"] = "mixed" if restored else "llm"
                     final = order_card_claims(card, selected)
                     cards.append(final)
                     verification[str(candidate.get('candidate_id'))] = build_verification_diagnostics(
                         template_card(candidate), draft, final, decisions,
                         generation_status=generation_status, fallback_reason=None,
+                        restored_source_ids=restored,
                     )
                     llm_used += 1
                     continue
@@ -494,7 +563,7 @@ claim_type은 descriptive 또는 associational만 허용한다."""
                 if stage == 'generation':
                     generation_status = 'runtime_error'
                     fallback_reason = 'generation_error'
-                elif stage == 'verification':
+                elif stage == 'verification' and fallback_reason is None:
                     fallback_reason = 'verification_error'
                 errors.append(f"{candidate.get('candidate_id')}: {exc}")
         final = order_card_claims(template_card(candidate), selected)
@@ -506,7 +575,7 @@ claim_type은 descriptive 또는 associational만 허용한다."""
 
     if not candidates:
         mode = "template"
-    elif llm_used == len(candidates) and not errors:
+    elif llm_used == len(candidates) and not errors and all(card['explanation_mode'] == 'llm' for card in cards):
         mode = "llm"
     elif llm_used:
         mode = "mixed"
