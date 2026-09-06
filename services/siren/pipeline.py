@@ -423,6 +423,7 @@ def _build_projections(result: dict[str, Any]) -> dict[str, Any]:
         "evidence": result["evidence"],
         "missing_data": result["missing_data"],
         "uncertainty": result["uncertainty"],
+        "explanation": result["explanation"],
         "recommended_actions": [],
         "financial_products": result["financial_products"],
         "report_link": None,
@@ -441,6 +442,11 @@ def _build_projections(result: dict[str, Any]) -> dict[str, Any]:
             "sales_decline_branch": result["components"]["sales_decline"]["branch"].get("status"),
             "competition": result["components"]["competition"].get("status"),
             "profitability": result["components"]["profitability"].get("status"),
+        },
+        "profitability": {
+            "consecutive_negative_months": result["components"]["profitability"].get(
+                "consecutive_negative_months", 0
+            )
         },
         "review_watchlist_flag": bool(review.get("watchlist_flag")),
         "data_provenance": {

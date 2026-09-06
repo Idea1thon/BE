@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     # 보고서를 한 번에 보내므로 기본 60초를 둔다.
     siren_api_url: str = "http://localhost:8002"
     siren_request_timeout_seconds: float = 60.0
+    # The trigger path is opt-in until the deployment supplies both source DB
+    # access and a nullable/partial-result storage migration.
+    siren_analysis_enabled: bool = False
 
     # CORS — FE(Vite dev server)가 브라우저에서 호출한다.
     # 쉼표로 구분된 문자열 또는 JSON 배열을 받는다. 와일드카드는 허용하지 않는다.

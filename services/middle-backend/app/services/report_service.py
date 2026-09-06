@@ -1,17 +1,14 @@
-"""운영보고서 제출. API_SPEC 4-2, REQ-OW-11~16.
+"""운영보고서 제출과 선택적 위험도 분석 작업. API_SPEC 4-2, REQ-OW-11~16.
 
-제출 직후 위험도 분석(사이렌)을 부른다. 상대가 동기 단일 호출이라 202+폴링
-계층을 우리가 얹지 않는다 — `GET /reports/{id}/status` 는 그대로 두어 폴링하는
-FE 도 첫 호출에서 확정 상태를 받는다.
-
-분석 실패가 제출을 되돌리지 않는다. 점주는 이미 값을 냈고 그 사실은 분석
-성공 여부와 무관하다. 실패는 `status=FAILED` 와 `analysis_error` 로 남는다.
+분석은 요청 트랜잭션과 분리된 background task에서 ID-only siren trigger로
+실행한다. feature flag가 꺼져 있으면 기존처럼 ANALYZING 상태로 남긴다.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import decimal
+import logging
 import uuid
 from collections import Counter
 
@@ -19,11 +16,22 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import SessionLocal
+from app.errors import ApiError
 from app.errors import conflict, forbidden, validation_error
-from app.models import Branch, OperationReport, ReportInputField, ReportInputItem, UserAccount
+from app.models import (
+    Branch,
+    OperationReport,
+    ReportAnalysis,
+    ReportInputField,
+    ReportInputItem,
+    UserAccount,
+)
 from app.models.enums import ReportStatus
 from app.schemas import AMOUNT_MAX, ReportCreateRequest
 from app.services import siren_service
+
+logger = logging.getLogger("app.report_service")
 
 # net_sales 산식 (DB_SCHEMA 4-7 D1 확정).
 #   net_sales = 매출 3그룹 합계 − 매출 차감 항목 합계
@@ -131,10 +139,80 @@ async def create_report(
         ]
     )
     await session.commit()
-
-    # 분석은 별도 트랜잭션이다. 여기서 예외가 나도 위에서 커밋한 보고서와
-    # 입력 항목은 남는다.
-    await siren_service.run_analysis(session, report)
-
     await session.refresh(report)
     return report
+
+
+async def process_report_analysis(report_id: int, franchise_id: int) -> None:
+    """Run the ID-only siren trigger and persist only safe complete results.
+
+    This background job intentionally uses a fresh session because the request
+    transaction has already committed before FastAPI schedules it. Partial
+    results are marked ``FAILED`` with an explicit reason; they are never
+    coerced to score zero, a normal grade, or a truncated rule version.
+    """
+
+    async with SessionLocal() as session:
+        row = (
+            await session.execute(
+                select(OperationReport, Branch)
+                .join(Branch, Branch.id == OperationReport.branch_id)
+                .where(
+                    OperationReport.id == report_id,
+                    Branch.franchise_id == franchise_id,
+                )
+            )
+        ).first()
+        if row is None:
+            logger.error("analysis target not found report_id=%s franchise_id=%s", report_id, franchise_id)
+            return
+        report, branch = row
+
+        try:
+            analysis = await siren_service.request_report_analysis(
+                report,
+                franchise_id=branch.franchise_id,
+                branch_id=branch.id,
+            )
+            if not analysis.values.storable:
+                report.status = ReportStatus.FAILED
+                report.analysis_error = (
+                    "PARTIAL_ANALYSIS_NOT_STORED: "
+                    + "; ".join(analysis.values.blockers)
+                )
+                await session.commit()
+                return
+
+            existing = await session.get(ReportAnalysis, report.id)
+            values = analysis.values
+            if existing is None:
+                session.add(siren_service.build_analysis_row(report.id, analysis))
+            else:
+                existing.risk_score = values.risk_score
+                existing.risk_level = values.risk_level
+                existing.factors = values.factors
+                existing.risk_periods = values.risk_periods
+                existing.recommendations = values.recommendations
+                existing.rule_version = values.rule_version
+                existing.calculated_at = values.calculated_at
+            report.status = ReportStatus.COMPLETED
+            report.analysis_error = None
+            await session.commit()
+        except ApiError as exc:
+            await session.rollback()
+            await _mark_analysis_failed(session, report_id, f"{exc.code}: {exc.message}")
+        except Exception:
+            logger.exception("risk siren processing failed report_id=%s", report_id)
+            await session.rollback()
+            await _mark_analysis_failed(session, report_id, "분석 서비스 처리 중 오류가 발생했습니다")
+
+
+async def _mark_analysis_failed(
+    session: AsyncSession, report_id: int, message: str
+) -> None:
+    report = await session.get(OperationReport, report_id)
+    if report is None:
+        return
+    report.status = ReportStatus.FAILED
+    report.analysis_error = message[:4000]
+    await session.commit()

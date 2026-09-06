@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -282,6 +283,21 @@ class BranchListResponse(BaseModel):
     items: list[BranchListItem]
 
 
+class HqRiskSummaryResponse(BaseModel):
+    """본사 전용 프랜차이즈 위험 요약."""
+
+    audience: Literal["franchise_hq"] = "franchise_hq"
+    franchise_id: int
+    as_of: str
+    branch_count: int
+    calculated_count: int
+    grade_distribution: dict
+    danger_ratio_pct: float | None
+    average_score: float | None
+    watchlist: list[dict]
+    data_provenance: dict
+
+
 class ReportListItem(BaseModel):
     """API_SPEC 4-4."""
 
@@ -315,26 +331,33 @@ class ReportInputItemOut(BaseModel):
 
 
 class AnalysisDetail(BaseModel):
-    """API_SPEC 4-5 `analysis`.
+    """API_SPEC 4-5 `analysis`, filtered by the authenticated audience.
 
-    factors · risk_periods · recommendations 는 분석 서비스 응답 DTO 그대로다.
-    Backend 는 변환하지 않는다 (INTERFACE_SPEC 4-2).
-
-    `risk_score`·`risk_level` 은 nullable 이다. 사이렌은 시장·가맹점 층 중 하나라도
-    불완전하면 둘을 의도적으로 null 로 주고(0004), 저장도 그대로 한다. 여기서만
-    NOT NULL 로 두면 partial 분석이 붙은 보고서는 상세 조회가 500 이 된다.
-
-    `factors` 는 사이렌 `components` 를 그대로 실으므로 **dict** 다. 예전 행은
-    리스트라 둘 다 받는다 — 변환하지 않기로 한 이상 형태를 좁히면 안 된다.
+    OWNER receives evidence and actionable branch detail. HQ receives the
+    franchise-safe component status and watchlist projection. The same stored
+    analysis is never returned wholesale to both audiences.
     """
 
+    audience: Literal["branch_owner", "franchise_hq"]
     risk_score: int | None
     risk_level: RiskLevel | None
+    calculation_status: Literal["calculated", "partial"]
     factors: dict | list
     risk_periods: list
     recommendations: list
     rule_version: str
     calculated_at: datetime
+    components: dict | None = None
+    component_status: dict | None = None
+    evidence: list[dict] = Field(default_factory=list)
+    missing_data: list[dict] = Field(default_factory=list)
+    uncertainty: list[str] = Field(default_factory=list)
+    alert: dict = Field(default_factory=dict)
+    recommended_actions: list = Field(default_factory=list)
+    financial_products: dict = Field(default_factory=dict)
+    explanation: dict = Field(default_factory=dict)
+    review_watchlist_flag: bool | None = None
+    data_provenance: dict = Field(default_factory=dict)
 
 
 class ReportDetailResponse(BaseModel):

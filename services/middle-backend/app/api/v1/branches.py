@@ -16,8 +16,12 @@ group by 하는 것보다 싸다.
 
 from __future__ import annotations
 
+import calendar
+import datetime as dt
+import uuid
+
 from fastapi import APIRouter, Query
-from sqlalchemy import Select, case, or_, select, true
+from sqlalchemy import Select, case, func, or_, select, true
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import (
@@ -34,6 +38,7 @@ from app.errors import (
     UNAUTHORIZED_401,
     VALIDATION_400,
     not_found,
+    validation_error,
 )
 from app.models import (
     Branch,
@@ -50,12 +55,15 @@ from app.schemas import (
     BranchListResponse,
     BranchSort,
     CodeName,
+    HqRiskSummaryResponse,
     LatestReportBrief,
     OwnerBrief,
     ReportListItem,
     ReportListResponse,
     ReportSort,
 )
+from app.services import siren_client
+from app.services.siren_mapper import select_analysis_view
 
 router = APIRouter(prefix="/branches", tags=["branches"])
 
@@ -185,6 +193,132 @@ async def list_branches(
             )
         )
     return BranchListResponse(items=items)
+
+
+def _month_end(month: dt.date) -> dt.date:
+    return dt.date(month.year, month.month, calendar.monthrange(month.year, month.month)[1])
+
+
+@router.get(
+    "/risk-summary",
+    response_model=HqRiskSummaryResponse,
+    responses={**VALIDATION_400, **UNAUTHORIZED_401, **FORBIDDEN_403, **NOT_FOUND_404},
+)
+async def get_risk_summary(
+    hq: HqUser,
+    session: SessionDep,
+    report_month: str | None = Query(
+        default=None,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+        description="집계할 보고서 월. 생략하면 본사 내 최신 보고서 월.",
+    ),
+) -> HqRiskSummaryResponse:
+    """본사 전용 위험 요약.
+
+    점주용 상세 projection은 구성하지 않고, 본사에 허용된 점포 상태와
+    watchlist만 siren hq-summary 계약으로 집계한다.
+    """
+
+    if report_month is None:
+        target_month = (
+            await session.execute(
+                select(func.max(OperationReport.report_month))
+                .join(Branch, Branch.id == OperationReport.branch_id)
+                .where(Branch.franchise_id == hq.franchise_id)
+            )
+        ).scalar_one_or_none()
+        if target_month is None:
+            raise not_found("집계할 보고서가 없습니다")
+    else:
+        year, month = report_month.split("-")
+        try:
+            target_month = dt.date(int(year), int(month), 1)
+        except ValueError as exc:
+            raise validation_error("표현할 수 없는 보고서 연월입니다") from exc
+
+    rows = (
+        await session.execute(
+            select(Branch, OperationReport, ReportAnalysis)
+            .join(OperationReport, OperationReport.branch_id == Branch.id)
+            .outerjoin(ReportAnalysis, ReportAnalysis.report_id == OperationReport.id)
+            .where(
+                Branch.franchise_id == hq.franchise_id,
+                OperationReport.report_month == target_month,
+            )
+            .order_by(Branch.id)
+        )
+    ).all()
+    if not rows:
+        raise not_found("해당 월의 보고서가 없습니다")
+
+    as_of = _month_end(target_month)
+    branch_results = []
+    grade_to_korean = {
+        RiskLevel.NORMAL.value: "정상",
+        RiskLevel.CAUTION.value: "주의",
+        RiskLevel.DANGER.value: "위험",
+    }
+    for branch, report, analysis in rows:
+        if analysis is None:
+            score = None
+            level = None
+            status = "partial"
+            hq_view: dict = {}
+        else:
+            score = analysis.risk_score
+            level = analysis.risk_level
+            hq_view = select_analysis_view(
+                analysis.factors,
+                audience="franchise_hq",
+                risk_score=score,
+                risk_level=level,
+                risk_periods=analysis.risk_periods,
+                recommendations=analysis.recommendations,
+                rule_version=analysis.rule_version,
+                calculated_at=analysis.calculated_at,
+            )
+            status = hq_view["calculation_status"]
+
+        data_provenance = hq_view.get("data_provenance") or {
+            "contains_synthetic": False
+        }
+        if "contains_synthetic" not in data_provenance:
+            data_provenance = {**data_provenance, "contains_synthetic": False}
+        alert = hq_view.get("alert") or {"should_fire": False}
+
+        branch_results.append(
+            {
+                "branch": {
+                    "franchise_id": str(branch.franchise_id),
+                    "branch_id": str(branch.id),
+                    "as_of": as_of.isoformat(),
+                },
+                "risk": {
+                    "score": float(score) if score is not None else None,
+                    "grade": grade_to_korean.get(getattr(level, "value", level)),
+                    "calculation_status": status,
+                },
+                "components": {
+                    "profitability": hq_view.get(
+                        "profitability", {"consecutive_negative_months": 0}
+                    )
+                },
+                "review_signal": {
+                    "watchlist_flag": bool(hq_view.get("review_watchlist_flag", False))
+                },
+                "data_provenance": data_provenance,
+                "alert": alert,
+            }
+        )
+
+    payload = {
+        "request_id": str(uuid.uuid4()),
+        "franchise_id": str(hq.franchise_id),
+        "as_of": as_of.isoformat(),
+        "branch_results": branch_results,
+    }
+    result = await siren_client.hq_summary(payload)
+    return HqRiskSummaryResponse.model_validate(result)
 
 
 @router.get(

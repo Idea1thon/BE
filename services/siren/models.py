@@ -63,9 +63,12 @@ INDUSTRY_LABELS: dict[str, str] = {
 class BranchLocation(ContractModel):
     gu_code: str = Field(min_length=1)
     admin_dong_code: str | None = None
-    trade_area_code: str = Field(min_length=1)
-    x_5181: float
-    y_5181: float
+    # Location is resolved by the IDEATON provider. A branch address may not have
+    # a commercial-building match yet, so the canonical contract preserves the
+    # absence instead of inventing a trade-area or coordinate.
+    trade_area_code: str | None = None
+    x_5181: float | None = None
+    y_5181: float | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -249,6 +252,22 @@ class RiskOptions(ContractModel):
         "explanation_only"
     )
     send_notifications: bool = False
+
+
+class SirenAnalyzeTrigger(ContractModel):
+    """Thin trigger accepted by the orchestrator-facing API.
+
+    The trigger contains identifiers and execution policy only. Providers inside
+    the siren service read the FMP and IDEATON stores and build the canonical
+    ``RiskSirenRequest`` before invoking the pure pipeline.
+    """
+
+    request_id: str = Field(min_length=1)
+    report_id: str = Field(min_length=1)
+    franchise_id: str = Field(min_length=1)
+    branch_id: str = Field(min_length=1)
+    as_of: date
+    options: RiskOptions = Field(default_factory=RiskOptions)
 
 
 class FranchiseClosureYear(ContractModel):

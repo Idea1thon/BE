@@ -2,7 +2,34 @@
 
 ## 책임
 
-Backend가 인증된 사용자 범위로 점포·보고서를 조회하고 사이렌에 전달한다. 사이렌은 계산 결과를 반환하며, 보고서 상태 전이·결과 저장·알림 생성과 발송·금융상품 조회는 Backend 책임이다. 이 변경은 호출·DB 저장 연동 자체를 구현하지 않는다.
+middle-backend는 인증·테넌트 경계를 확인한 뒤 점포·보고서 ID만 사이렌에 전달한다.
+사이렌 orchestrator는 FMP 보고서 저장소와 IDEATON 위치/상권 저장소를 읽어 canonical
+요청으로 매핑하고, 결정론적 pipeline을 실행한다. middle-backend는 결과 상태·결과 저장을
+담당한다. 실제 알림 발송은 계속 disabled다.
+
+ID-only 호출 경로는 다음과 같다.
+
+```text
+POST /internal/risk-sirens/analyze-trigger
+{
+  "request_id": "uuid",
+  "report_id": "100",
+  "franchise_id": "1",
+  "branch_id": "10",
+  "as_of": "2026-09-30",
+  "options": {"llm_mode": "disabled", "send_notifications": false}
+}
+```
+
+사이렌 프로세스에는 `FMP_DATABASE_URL`과 `IDEATON_DATABASE_URL`(또는
+`SIREN_FMP_DATABASE_URL`/`SIREN_IDEATON_DATABASE_URL`)을 읽기 전용으로 설정한다.
+기존 full canonical payload의 `/internal/risk-sirens/analyze` 경로는 호환용으로 유지한다.
+
+middle-backend의 `SIREN_ANALYSIS_ENABLED` 기본값은 `false`다. 현재 `report_analysis`가
+`risk_score`·`risk_level` NOT NULL이고 `rule_version` VARCHAR(20)이어서 partial 결과를
+안전하게 저장할 수 없기 때문이다. 스키마 변경 및 운영 데이터베이스 연결을 승인한 뒤
+이 플래그를 활성화해야 한다. partial 결과는 점수/등급을 지어내지 않고 FAILED와
+`PARTIAL_ANALYSIS_NOT_STORED` 사유로 남긴다.
 
 본사 요약은 요청 franchise_id와 각 결과의 branch.franchise_id가 일치해야 한다. branch_id가 없거나 동일 점포 결과가 중복되면 422로 거부한다. 이 입력 검증은 Backend의 인증·권한 검사를 대체하지 않는다.
 

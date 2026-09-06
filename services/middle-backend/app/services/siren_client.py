@@ -6,8 +6,9 @@
   POST /internal/risk-sirens/hq-summary   200 결과 / 422 입력 계약 위반
   GET  /health                            200
 
-추천 서비스와 달리 **동기 단일 호출**이다. 202+폴링이 아니다. 사이렌은 순수
-계산이라 외부 조회가 없고 상대가 그렇게 만들어 뒀다. INTERFACE_SPEC 4장은
+추천 서비스와 달리 **동기 단일 호출**이다. 202+폴링이 아니다. canonical payload는
+순수 계산이고 trigger payload는 siren 내부 provider가 외부 저장소를 읽는다.
+INTERFACE_SPEC 4장은
 위험도 분석을 202+폴링으로 잡아뒀는데 실제 구현과 다르다 — 어느 쪽에 맞출지는
 아직 사람이 정하지 않았다(9장 A11). 여기서는 **상대 구현을 그대로 따른다**.
 우리가 임의로 202 계층을 얹으면 상대 계약을 우리 문서에 맞춰 왜곡하게 된다.
@@ -31,6 +32,7 @@ from app.errors import ApiError
 logger = logging.getLogger("app.siren")
 
 _ANALYZE_PATH = "/internal/risk-sirens/analyze"
+_ANALYZE_TRIGGER_PATH = "/internal/risk-sirens/analyze-trigger"
 _HQ_SUMMARY_PATH = "/internal/risk-sirens/hq-summary"
 
 
@@ -130,8 +132,14 @@ async def _post(path: str, payload: dict[str, Any], *, what: str) -> dict[str, A
 
 
 async def analyze(payload: dict[str, Any]) -> dict[str, Any]:
-    """점포 1건 위험도 분석. payload 는 `siren_mapper.build_analyze_request()` 결과."""
-    return await _post(_ANALYZE_PATH, payload, what="위험도 분석 서비스")
+    """점포 1건 위험도 분석.
+
+    Canonical legacy payloads use ``/analyze``. ID-only payloads created by the
+    middle-backend trigger mapper use ``/analyze-trigger`` so the old contract's
+    validation paths remain stable.
+    """
+    path = _ANALYZE_TRIGGER_PATH if "report_id" in payload else _ANALYZE_PATH
+    return await _post(path, payload, what="위험도 분석 서비스")
 
 
 async def hq_summary(payload: dict[str, Any]) -> dict[str, Any]:

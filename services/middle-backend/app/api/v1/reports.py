@@ -9,11 +9,12 @@ API_SPEC 4-5 가 REQ-HQ-15 를 따르기로 한 상태다. 뒤집히면 이 주�
 
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, BackgroundTasks, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, OwnerUser, PathId, SessionDep, authorize_branch
+from app.core.config import settings
 from app.errors import (
     CONFLICT_409,
     FORBIDDEN_403,
@@ -30,6 +31,7 @@ from app.models import (
     ReportInputItem,
     UserAccount,
 )
+from app.models.enums import UserType
 from app.schemas import (
     AnalysisDetail,
     InputFieldItem,
@@ -42,6 +44,7 @@ from app.schemas import (
     ReportStatusResponse,
 )
 from app.services import report_service
+from app.services.siren_mapper import select_analysis_view
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -72,14 +75,25 @@ async def list_input_fields(
     responses={**VALIDATION_400, **UNAUTHORIZED_401, **FORBIDDEN_403, **CONFLICT_409},
 )
 async def create_report(
-    body: ReportCreateRequest, owner: OwnerUser, session: SessionDep
+    body: ReportCreateRequest,
+    owner: OwnerUser,
+    session: SessionDep,
+    background_tasks: BackgroundTasks,
 ) -> ReportCreateResponse:
     """REQ-OW-11~16. 점포는 인증 사용자로 결정한다 — 요청으로 받지 않는다.
 
     202 인 이유는 분석이 비동기이고 FE 가 폴링하기 때문이다(REQ-OW-16).
-    분석 서비스 연동 전까지 보고서는 ANALYZING 상태로 남는다.
+    ``SIREN_ANALYSIS_ENABLED=true`` 인 환경에서만 별도 백그라운드 작업을
+    등록한다. 기본값은 false라 기존 배포는 보고서를 만들기만 한다.
     """
     report = await report_service.create_report(session, owner, body)
+    if settings.siren_analysis_enabled:
+        # report 는 이미 commit 되었고, 작업은 독립 세션에서 다시 읽는다.
+        background_tasks.add_task(
+            report_service.process_report_analysis,
+            report.id,
+            owner.franchise_id,
+        )
     return ReportCreateResponse(
         report_id=report.id,
         status=report.status,
@@ -134,6 +148,24 @@ async def get_report(
         )
     ).scalar_one_or_none()
 
+    audience = (
+        "branch_owner"
+        if current_user.user_type is UserType.OWNER
+        else "franchise_hq"
+    )
+    analysis_view = None
+    if analysis is not None:
+        analysis_view = select_analysis_view(
+            analysis.factors,
+            audience=audience,
+            risk_score=analysis.risk_score,
+            risk_level=analysis.risk_level,
+            risk_periods=analysis.risk_periods,
+            recommendations=analysis.recommendations,
+            rule_version=analysis.rule_version,
+            calculated_at=analysis.calculated_at,
+        )
+
     return ReportDetailResponse(
         report_id=report.id,
         report_month=report.report_month.strftime("%Y-%m"),
@@ -151,21 +183,7 @@ async def get_report(
             )
             for item, field in input_rows
         ],
-        analysis=(
-            None
-            if analysis is None
-            else AnalysisDetail(
-                risk_score=analysis.risk_score,
-                risk_level=analysis.risk_level,
-                # JSONB 를 그대로 싣는다. Backend 는 분석 서비스 DTO 를 변환하지
-                # 않는다 (INTERFACE_SPEC 4-2).
-                factors=analysis.factors,
-                risk_periods=analysis.risk_periods,
-                recommendations=analysis.recommendations,
-                rule_version=analysis.rule_version,
-                calculated_at=analysis.calculated_at,
-            )
-        ),
+        analysis=None if analysis_view is None else AnalysisDetail(**analysis_view),
         analysis_error=report.analysis_error,
     )
 
