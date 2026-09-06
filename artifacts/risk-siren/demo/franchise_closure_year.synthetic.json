@@ -1,0 +1,116 @@
+{
+  "schema_version": "franchise-closure-year.v1",
+  "synthetic": true,
+  "source": "local_test_fixture:franchise_closure",
+  "purpose": "local siren HQ annual franchise closure fixture",
+  "records": [
+    {
+      "franchise_id": "101",
+      "year": 2024,
+      "previous_year_end_count": 110,
+      "new_openings": 8,
+      "closures": 3,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "101",
+      "year": 2025,
+      "previous_year_end_count": 115,
+      "new_openings": 10,
+      "closures": 4,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "102",
+      "year": 2024,
+      "previous_year_end_count": 95,
+      "new_openings": 6,
+      "closures": 3,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "102",
+      "year": 2025,
+      "previous_year_end_count": 98,
+      "new_openings": 7,
+      "closures": 5,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "103",
+      "year": 2024,
+      "previous_year_end_count": 88,
+      "new_openings": 5,
+      "closures": 2,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "103",
+      "year": 2025,
+      "previous_year_end_count": 91,
+      "new_openings": 6,
+      "closures": 7,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "104",
+      "year": 2024,
+      "previous_year_end_count": 120,
+      "new_openings": 10,
+      "closures": 4,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "104",
+      "year": 2025,
+      "previous_year_end_count": 126,
+      "new_openings": 8,
+      "closures": 12,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "105",
+      "year": 2024,
+      "previous_year_end_count": 100,
+      "new_openings": 6,
+      "closures": 4,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "105",
+      "year": 2025,
+      "previous_year_end_count": 102,
+      "new_openings": 5,
+      "closures": 14,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "106",
+      "year": 2024,
+      "previous_year_end_count": 75,
+      "new_openings": 4,
+      "closures": 2,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    },
+    {
+      "franchise_id": "106",
+      "year": 2025,
+      "previous_year_end_count": 77,
+      "new_openings": 3,
+      "closures": 9,
+      "source": "synthetic_franchise_closure",
+      "synthetic": true
+    }
+  ]
+}
