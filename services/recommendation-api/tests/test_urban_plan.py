@@ -74,9 +74,12 @@ class ContextTests(unittest.TestCase):
         # 겹침 사업이 있는 상권 하나
         cls.host = next(code for code, lst in cls.plan.by_trdar.items() if len(lst) >= 2)
 
+    _SGG_NAME = {"11710": "송파구", "11680": "강남구", "11620": "관악구"}
+
     def _ctx(self, host_code=None, sgg="11710"):
         return urban_plan.context_for_candidate(
-            self.plan, host_code=host_code, sigungu_code=sgg, sigungu_name="송파구")
+            self.plan, host_code=host_code, sigungu_code=sgg,
+            sigungu_name=self._SGG_NAME.get(sgg, "송파구"))
 
     def test_fc51_and_fc52_are_context_notes_only(self):
         ctx = self._ctx(host_code=self.host)
@@ -142,9 +145,29 @@ class ContextTests(unittest.TestCase):
         self.assertTrue(fc52_ev)
         self.assertEqual(fc52_ev[0]["update_cycle"], "snapshot")
 
-    def test_f46_planned_subway_gap_in_missing(self):
-        ctx = self._ctx(host_code=self.host)
-        self.assertTrue(any("계획 도시철도" in m["reason"] for m in ctx.missing if m["feature"] == "FC-52"))
+    def test_planned_subway_connected_for_sigungu_with_lines(self):
+        # 관악구(11620)는 제2차 도시철도망 계획에 신설·연장 노선 3개.
+        ctx = self._ctx(host_code=self.host, sgg="11620")
+        sub_notes = [n for n in ctx.context_notes if "계획 도시철도" in n]
+        self.assertTrue(sub_notes)
+        self.assertRegex(sub_notes[0], r"관악구 계획 도시철도 \d+개 노선")
+        self.assertIn("2020", sub_notes[0])
+        self.assertNotIn("예정역", sub_notes[0].replace("'예정역'·'확정' 표현 금지", ""))
+        sub_ev = [e for e in ctx.evidence if e["metric_name"] == "자치구_계획도시철도_노선수"]
+        self.assertTrue(sub_ev)
+        self.assertTrue(sub_ev[0]["grain_is_proxy"])
+        self.assertEqual(sub_ev[0]["observed_end_period"], "2020-11-17")
+
+    def test_planned_subway_missing_for_sigungu_without_lines(self):
+        # 송파구(11710)는 계획 노선 없음 → FC-52 missing에 명시.
+        ctx = self._ctx(host_code=self.host, sgg="11710")
+        self.assertFalse([n for n in ctx.context_notes if "계획 도시철도" in n])
+        self.assertTrue(any("계획 노선 없음" in m["reason"] for m in ctx.missing if m["feature"] == "FC-52"))
+
+    def test_운행개선_lines_excluded_from_plan(self):
+        for sgg, lines in self.plan.subway_by_sigungu.items():
+            for ln in lines:
+                self.assertNotIn("운행개선", ln, f"{sgg}:{ln}")
 
 
 class PipelineWiringTests(unittest.TestCase):
