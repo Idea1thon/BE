@@ -1,6 +1,7 @@
 import copy
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from shapely.geometry import box
 from recommendation.pipeline import RecommendationRequest, resolve_region, PipelineInputError
@@ -8,6 +9,16 @@ from recommendation.llm_explanation import explain_candidates
 
 
 class AdminDongGroundingTests(unittest.TestCase):
+    def test_empty_candidates_do_not_require_or_call_model(self):
+        from recommendation.llm_runtime import LLMConfig
+        with patch('recommendation.llm_explanation.LLMConfig.from_env', return_value=LLMConfig(mode='required')), \
+             patch('recommendation.llm_explanation.OpenAICompatibleJsonClient') as client:
+            result = explain_candidates([], llm_mode='required', retrieval_context={'results': []})
+        self.assertEqual(result['cards'], [])
+        self.assertEqual(result['empty_reason'], 'no_candidates')
+        self.assertEqual(result['llm']['calls_succeeded'], 0)
+        client.assert_not_called()
+
     def setUp(self):
         self.candidate = {'candidate_id': 'a', 'fit_tier': '조건부 검토', 'industry_code': 'CS100010',
             'location': {'sigungu': '표시명', 'place_name': 'A', 'host_commercial_area': None,
@@ -62,3 +73,12 @@ class AdminDongGroundingTests(unittest.TestCase):
             with self.assertRaises(PipelineInputError):
                 resolve_region(RecommendationRequest('서울특별시', '마포구', '합정동', 'CS100010',
                                sigungu_code='11440', admin_dong_code=code), layer, names)
+
+    def test_legal_alias_resolves_all_administrative_codes(self):
+        codes = ['11710670', '11710680', '11710710']
+        records = [SimpleNamespace(code=code, name=name) for code, name in
+                   zip(codes, ['잠실2동', '잠실3동', '잠실7동'])]
+        layer = SimpleNamespace(records=records, geoms=[box(i,0,i+1,1) for i in range(3)])
+        selected, _, _ = resolve_region(RecommendationRequest('서울특별시','송파구','잠실동','CS100010'),
+                                        layer, {'11710':'송파구'})
+        self.assertEqual([record.code for record in selected], codes)
