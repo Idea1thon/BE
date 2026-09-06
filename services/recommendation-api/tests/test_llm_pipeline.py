@@ -16,7 +16,12 @@ from recommendation.llm_input_planner import (
     parse_preferences,
     plan_input,
 )
-from recommendation.llm_runtime import LLMRuntimeError
+from recommendation.llm_runtime import (
+    LLMConfig,
+    LLMRuntimeError,
+    _charge_call,
+    reset_call_budget,
+)
 from recommendation.pipeline import PipelineDependencyError, RecommendationRequest, load_building_seeds, run_pipeline
 from recommendation.rag_tools import execute_retrieval_requests, validate_retrieval_requests
 from shapely.geometry import box
@@ -221,6 +226,42 @@ class LLMInputPlannerTests(unittest.TestCase):
         ):
             with self.assertRaises(PipelineDependencyError):
                 run_pipeline(request, source="files", llm_mode="required")
+
+
+class LLMRuntimeConfigTests(unittest.TestCase):
+    """#25: OpenAI 연결용 자격증명 인식과 요청당 호출 예산."""
+
+    BASE = {"LLM_API_URL": "https://api.openai.com/v1", "LLM_MODEL": "gpt-5.6-luna"}
+
+    def test_openai_api_key_is_recognized_as_fallback(self):
+        env = {**self.BASE, "OPENAI_API_KEY": "sk-openai"}
+        with patch.dict(environ, env, clear=False):
+            environ.pop("LLM_API_KEY", None)
+            config = LLMConfig.from_env("auto")
+        self.assertEqual(config.api_key, "sk-openai")
+        self.assertTrue(config.available)
+
+    def test_llm_api_key_takes_precedence(self):
+        env = {**self.BASE, "LLM_API_KEY": "sk-primary", "OPENAI_API_KEY": "sk-fallback"}
+        with patch.dict(environ, env, clear=False):
+            config = LLMConfig.from_env("auto")
+        self.assertEqual(config.api_key, "sk-primary")
+
+    def test_call_budget_trips_after_limit_then_resets(self):
+        with patch.dict(environ, {"LLM_MAX_CALLS_PER_RUN": "2"}, clear=False):
+            reset_call_budget()
+            _charge_call()
+            _charge_call()
+            with self.assertRaises(LLMRuntimeError):
+                _charge_call()
+            reset_call_budget()
+            _charge_call()  # 초기화 후 다시 허용
+
+    def test_call_budget_zero_means_unlimited(self):
+        with patch.dict(environ, {"LLM_MAX_CALLS_PER_RUN": "0"}, clear=False):
+            reset_call_budget()
+            for _ in range(50):
+                _charge_call()
 
 
 class ExplanationValidationTests(unittest.TestCase):
