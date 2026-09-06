@@ -304,6 +304,49 @@ class LLMRuntimeConfigTests(unittest.TestCase):
         src = inspect.getsource(OpenAICompatibleJsonClient.generate_json)
         self.assertIn("_charge_call(", src)
 
+    def test_generate_json_retries_legacy_param_shape_on_400(self):
+        # 최신 OpenAI 모델은 max_tokens/temperature=0 을 400 으로 거부한다. 최신
+        # 형식으로 먼저 시도하고, 파라미터 400 이면 구형 형식으로 한 번 재시도한다.
+        from recommendation.llm_runtime import LLMConfig, OpenAICompatibleJsonClient
+
+        env = {**self.BASE, "LLM_API_KEY": "sk-explicit"}
+        with patch.dict(environ, env, clear=False):
+            client = OpenAICompatibleJsonClient(LLMConfig.from_env("auto"))
+        sent = []
+
+        def fake_post(body):
+            sent.append(body)
+            if "max_completion_tokens" in body:
+                raise LLMRuntimeError("LLM HTTP 오류 400: Unsupported parameter: 'max_tokens' ... use max_completion_tokens")
+            return {"ok": True}
+
+        with patch.object(client, "_post_chat", side_effect=fake_post):
+            reset_call_budget()
+            out = client.generate_json("sys", {"q": 1})
+        self.assertEqual(out, {"ok": True})
+        self.assertEqual(len(sent), 2)
+        self.assertIn("max_completion_tokens", sent[0])
+        self.assertIn("max_tokens", sent[1])
+        self.assertEqual(sent[1]["temperature"], 0)
+
+    def test_generate_json_does_not_retry_non_param_400(self):
+        from recommendation.llm_runtime import LLMConfig, OpenAICompatibleJsonClient
+
+        env = {**self.BASE, "LLM_API_KEY": "sk-explicit"}
+        with patch.dict(environ, env, clear=False):
+            client = OpenAICompatibleJsonClient(LLMConfig.from_env("auto"))
+        calls = []
+
+        def fake_post(body):
+            calls.append(body)
+            raise LLMRuntimeError("LLM HTTP 오류 400: model not found")
+
+        with patch.object(client, "_post_chat", side_effect=fake_post):
+            reset_call_budget()
+            with self.assertRaises(LLMRuntimeError):
+                client.generate_json("sys", {"q": 1})
+        self.assertEqual(len(calls), 1)  # 재시도 안 함
+
 
 class ExplanationValidationTests(unittest.TestCase):
     CANDIDATE = {

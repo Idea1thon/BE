@@ -45,6 +45,11 @@ LLM 은 설명·해석 보조만 담당하고 점수·판정·정렬·하드조�
 chat-completions 클라이언트다(stdlib 만 사용). 새 provider 모듈을 추가하지 않고
 이 클라이언트에 자격증명을 넣어 연결한다.
 
+`gpt-5.6-luna` 같은 최신 OpenAI 모델은 `max_tokens` 를 거부하고(`max_completion_tokens`
+필요) `temperature` 는 기본값만 허용한다. `generate_json` 은 최신 파라미터 형식으로
+먼저 호출하고, 파라미터 관련 400 이면 구형 형식(`max_tokens`+`temperature=0`)으로
+한 번 재시도한다 — 최신 모델·구형 OpenAI 호환 서버 양쪽에서 동작한다.
+
 - `.env`:
   - `LLM_API_URL=https://api.openai.com/v1` (프록시/게이트웨이면 그 URL)
   - `LLM_API_KEY=<키>` — 이 변수에 실제 키를 넣는 것으로만 활성화된다.
