@@ -13,7 +13,7 @@ class ExplanationReached(Exception):
 
 
 class QuestionPipelineTests(unittest.TestCase):
-    def _run_until_explanation(self, hosts, codes=False):
+    def _run_until_explanation(self, hosts, codes=False, alias=False):
         source = MagicMock()
         source.describe.return_value = {}
         source.layers.return_value = (SimpleNamespace(records=[]), None, SimpleNamespace(records=[]), {})
@@ -35,10 +35,15 @@ class QuestionPipelineTests(unittest.TestCase):
         if codes:
             request = RecommendationRequest('서울특별시', '마포구', '합정동', 'CS100010', '직장인구 비교',
                                             sigungu_code='11440', admin_dong_code='11440680')
+        selected = []
+        if alias:
+            request = RecommendationRequest('서울특별시','송파구','잠실동','CS100010','직장인구 비교')
+            selected = [SimpleNamespace(code=code, name=name) for code, name in
+                        zip(['11710670','11710680','11710710'], ['잠실2동','잠실3동','잠실7동'])]
         contract = {'topic_ids': ['rent', 'vacancy'], 'comparison_requested': True}
         with tempfile.TemporaryDirectory() as directory, \
              patch('recommendation.pipeline.make_source', return_value=source), \
-             patch('recommendation.pipeline.resolve_region', return_value=([], None, None)), \
+             patch('recommendation.pipeline.resolve_region', return_value=(selected, None, None)), \
              patch('recommendation.pipeline.build_candidate', side_effect=candidates), \
              patch('recommendation.pipeline.validate_candidates', return_value=[]), \
              patch('recommendation.pipeline.build_question_contract', return_value=contract), \
@@ -66,6 +71,13 @@ class QuestionPipelineTests(unittest.TestCase):
         region = source.retrieve_requests.call_args.args[1]
         self.assertEqual(region['admin_dong_code'], '11440680')
         self.assertEqual(region['sigungu_code'], '11440')
+        self.assertEqual(explain.call_args.kwargs['query_context']['selected_region'], region)
+
+    def test_alias_sends_all_resolved_codes_to_retrieval(self):
+        source, _, explain, _ = self._run_until_explanation([None], alias=True)
+        region = source.retrieve_requests.call_args.args[1]
+        self.assertEqual(region['admin_dong_codes'], ['11710670','11710680','11710710'])
+        self.assertEqual(region['sigungu_code'], '11710')
         self.assertEqual(explain.call_args.kwargs['query_context']['selected_region'], region)
 
     def test_sources_accept_and_forward_empty_targets(self):

@@ -113,13 +113,15 @@ class LLMInputPlannerTests(unittest.TestCase):
         result = execute_retrieval_requests(
             fake_query,
             [{"tool": "search_region_evidence", "dimensions": ["sales"], "limit": 2, "reason": "매출 근거"}],
-            {"sido": "서울특별시", "sigungu": "송파구", "dong": "잠실동' OR 1=1 --"},
+            {"sido": "서울특별시", "sigungu": "송파구", "dong": "잠실동' OR 1=1 --",
+             "sigungu_code": "11710", "admin_dong_codes": ["11710670"]},
             "CS100010",
             "20261",
         )
         self.assertEqual(result["executed_count"], 1)
         self.assertEqual(len(captured), 1)
-        self.assertIn("잠실동'' OR 1=1 --", captured[0])
+        self.assertNotIn("잠실동", captured[0])
+        self.assertIn("a.spatial_unit_code IN ('11710670')", captured[0])
         self.assertNotIn("DROP TABLE", captured[0])
 
     def test_llm_cannot_invent_condition_values(self):

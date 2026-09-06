@@ -54,12 +54,14 @@ class RetrievalGroundingTests(unittest.TestCase):
             return [self.row()]
         context = execute_retrieval_requests(query, [{"tool": "search_region_evidence",
             "dimensions": ["sales", "stores", "flow", "change"]}],
-            {"sigungu": "송파구", "dong": "잠실동"}, "CS100010", "20261")
+            {"sigungu": "송파구", "dong": "잠실동", "sigungu_code": "11710",
+             "admin_dong_codes": ["11710670", "11710680", "11710710"]}, "CS100010", "20261")
         self.assertEqual(len(queries), 4)
         for sql in queries:
-            self.assertIn("a.sigungu_name = '송파구'", sql)
-            self.assertIn("a.spatial_unit_name = '잠실동'", sql)
-            self.assertIn("a.sigungu_name,", sql)
+            self.assertNotIn("a.sigungu_name =", sql)
+            self.assertNotIn("a.spatial_unit_name =", sql)
+            self.assertIn("a.spatial_unit_code IN ('11710670', '11710680', '11710710')", sql)
+            self.assertIn("AS sigungu_name", sql)
             self.assertIn(".period,", sql)
         self.assertEqual(len(build_retrieval_evidence(context)), 1)
 

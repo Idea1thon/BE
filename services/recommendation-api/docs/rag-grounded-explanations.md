@@ -108,7 +108,7 @@ SQL 직접 인용이 최종0건이면 초안 인용과 문장별 처리를 확�
 
 `question_contract`는 원문에 명시된 임대료·공실·직장인구·경쟁·매출·유동 주제와 원문 구절을 연결한다. 인접한 “말고/제외/비교하지”는 주제 제외로 처리하되 “월세는 추정하지 말라”는 추정 금지로 보존한다. 제한된 어휘 규칙이므로 임의의 자연어 의도 전체를 이해한다고 보장하지 않는다. 실제 점심 방문량과 개별 매물 월세는 지원하지 않는 항목으로 명시한다.
 
-검색은 후보 정렬·limit 적용 뒤 수행한다. `target_areas=[]`는 연결된 후보 상권이 없다는 뜻이다. 선택 행정동 코드가 있으면 행정동 통계는 독립적으로 조회한다. 상권 최대50개와 선택 행정동1개를 각각 조회한다. 중간 API가 지역 DB의 5자리 시군구 코드와 8자리 행정동 코드를 추천 요청까지 보존한다. 코드가 있는 요청은 공간 선택·SQL 필터에서 이름이나 경계 교차에 의존하지 않는다. 상권과 동의 연결은 코드 및 적격 commercial_to_admin_overlap 관계로 확인한다. 이름만 받는 기존 요청은 공간 레이어에서 한 번 코드로 해소하며, 코드가 잘못됐으면 이름으로 우회하지 않는다. sales/stores/flow/change는 요청 분기, 직장인구는 요청 분기를 넘지 않는 최신 유효 관측, 임대·공실은 기존 후보 엔진처럼 최신 유효 소규모상가 분기를 사용한다. 따라서 출처마다 기간이 다를 수 있다.
+검색은 후보 정렬·limit 적용 뒤 수행한다. `target_areas=[]`는 연결된 후보 상권이 없다는 뜻이다. 선택 행정동 코드가 있으면 행정동 통계는 독립적으로 조회한다. 상권 최대50개와 resolve_region이 확정한 행정동 코드 목록을 각각 조회한다. 잠실동처럼 여러 행정동으로 해소되는 별칭도 admin_dong_codes 전체를 보존한다(최대50개). 중간 API가 지역 DB의 5자리 시군구 코드와 8자리 행정동 코드를 추천 요청까지 보존한다. 코드가 있는 요청은 공간 선택·SQL 필터에서 이름이나 경계 교차에 의존하지 않는다. 최종 후보의 연결 상권 코드는 이미 확정된 검색 대상이므로 SQL에서 이름·구 메타데이터·crosswalk로 재탈락시키지 않는다. 행정동 조회는 확정 spatial_unit_code IN 조건만 사용한다. 이름만 받는 기존 요청은 공간 레이어에서 한 번 코드로 해소하며, 코드가 잘못됐으면 이름으로 우회하지 않는다. SQL에 미해결 이름만 오거나 명시적 빈 코드 목록만 있으면 region_unresolved로 처리하며 이름 기반 EXISTS나 전체 지역 조회로 우회하지 않는다. sales/stores/flow/change는 요청 분기, 직장인구는 요청 분기를 넘지 않는 최신 유효 관측, 임대·공실은 기존 후보 엔진처럼 최신 유효 소규모상가 분기를 사용한다. 따라서 출처마다 기간이 다를 수 있다.
 
 임대·공실은 `join_eligible`인 유일한 R-ONE 대리 권역만 조회한다. 복수 권역 매핑은 임의 선택하지 않으며 서울 전체 값으로 대체하지 않는다. `results[].availability`는 차원·공간단위별 `available/missing/error`와 `rows_returned/no_rows/no_target_areas/table_unavailable/query_failed`를 구분한다. 행 존재와 개별 후보의 정상 관측 여부는 다를 수 있으므로 최종 비교표의 cell 상태도 확인해야 한다.
 
@@ -119,3 +119,5 @@ SQL 직접 인용이 최종0건이면 초안 인용과 문장별 처리를 확�
 `question_grounding_by_candidate`는 선택적 문장 제거 수, SQL 서버 렌더링의 출처·최종 위치, 복수 권역 모호성, 비교 설명의 최종 위치와 방법을 기록한다. `verification_by_candidate`의 초안 인용0→최종 인용증가는 서버 렌더링일 수 있으므로 이 진단과 함께 읽는다. 서버가 설명을 보충하거나 제거한 LLM 카드는 mixed로 표시하며 이를 모델 단독 검증 성공으로 집계하지 않는다. 관측 설명이 없으면 미확인 안내를 보존한다.
 
 회귀 검증: `test_question_contract`, `test_targeted_rag`, `test_evidence_reranker`, `test_question_pipeline`, `test_candidate_comparison`, `test_question_explanation`, `test_comparison_explanation`. 실제 DB 적재·권한과 Azure 배포 후 생성 품질·지연은 별도 검증이 필요하다.
+
+빈 배열: 정상 conditions/preferences/retrieval_requests 및 하위 배열은 빈 상태로 처리한다. 문자열 필드(tool/strength/mode/anchor_type/industry_code/claim_type/confidence)에 배열·객체가 들어와도 TypeError로 중단하지 않고 해당 값을 폐기하거나 기존 기본값을 사용한다. 후보가 없으면 LLM을 호출하지 않고 cards=[]/empty_reason=no_candidates를 반환한다. 전체 LLM 응답이 객체가 아닌 경우의 형식 오류와 required 모드의 실제 생성·검증 실패 정책은 유지한다.
