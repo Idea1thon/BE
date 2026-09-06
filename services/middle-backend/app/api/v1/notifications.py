@@ -17,7 +17,7 @@ from datetime import datetime
 from fastapi import APIRouter, Query
 from sqlalchemy import func, select, tuple_, update
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import BIGINT_MAX, CurrentUser, PathId, SessionDep
 from app.errors import (
     FORBIDDEN_403,
     NOT_FOUND_404,
@@ -49,10 +49,16 @@ def _decode_cursor(cursor: str) -> tuple[datetime, int]:
     padded = cursor + "=" * (-len(cursor) % 4)
     try:
         created_at_raw, id_raw = base64.urlsafe_b64decode(padded).decode("utf-8").split("|", 1)
-        return datetime.fromisoformat(created_at_raw), int(id_raw)
+        created_at, notification_id = datetime.fromisoformat(created_at_raw), int(id_raw)
     except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
         # 커서는 서버가 만든 값이다. 깨진 값은 500이 아니라 400이다.
         raise validation_error("cursor 형식이 올바르지 않습니다") from exc
+
+    # 커서는 클라이언트가 손댈 수 있다. BIGINT 를 넘는 id 가 들어오면 경로 ID 와
+    # 같은 이유로 asyncpg 바인딩에서 터져 500 이 된다. 여기서 400 으로 막는다.
+    if not 1 <= notification_id <= BIGINT_MAX:
+        raise validation_error("cursor 형식이 올바르지 않습니다")
+    return created_at, notification_id
 
 
 @router.get(
@@ -127,7 +133,7 @@ async def list_notifications(
     responses={**UNAUTHORIZED_401, **FORBIDDEN_403, **NOT_FOUND_404},
 )
 async def mark_notification_read(
-    notification_id: int, current_user: CurrentUser, session: SessionDep
+    notification_id: PathId, current_user: CurrentUser, session: SessionDep
 ) -> NotificationReadResponse:
     """API_SPEC 5-2. REQ-HQ-10 의 미확인 뱃지가 줄어들려면 필요하다.
 

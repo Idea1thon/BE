@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_access_token
@@ -16,6 +16,21 @@ from app.models.enums import UserType
 from app.services import auth_service
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+
+# PostgreSQL BIGINT 상한. 모든 PK 가 BIGINT 다.
+#
+# 이 범위를 넘는 값이 경로에 들어오면 asyncpg 가 파라미터 바인딩 단계에서 실패하고,
+# 공통 예외 처리가 그것을 404 가 아니라 500 INTERNAL_ERROR 로 반환한다. 인증만 되면
+# 누구나 500 을 만들 수 있게 된다. DB 를 부르기 전에 400 으로 거른다.
+BIGINT_MAX = 2**63 - 1
+
+#: 경로의 리소스 ID. 새 엔드포인트는 `int` 대신 이 타입을 쓴다.
+PathId = Annotated[int, Path(ge=1, le=BIGINT_MAX)]
+
+# OFFSET 은 건너뛴 행을 DB 가 끝까지 읽으므로 깊어질수록 비싸다. 상한이 없으면
+# 큰 값 하나로 전체 스캔을 유발할 수 있다. 실제 목록 크기를 훨씬 넘는 선에서 자른다.
+MAX_OFFSET = 100_000
+OffsetQuery = Annotated[int, Query(ge=0, le=MAX_OFFSET)]
 
 
 async def get_current_user(

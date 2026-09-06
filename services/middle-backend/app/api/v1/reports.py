@@ -13,7 +13,7 @@ from fastapi import APIRouter, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, OwnerUser, SessionDep, authorize_branch
+from app.api.deps import CurrentUser, OwnerUser, PathId, SessionDep, authorize_branch
 from app.errors import (
     CONFLICT_409,
     FORBIDDEN_403,
@@ -114,7 +114,7 @@ async def _load_report_for_read(
     responses={**UNAUTHORIZED_401, **FORBIDDEN_403, **NOT_FOUND_404},
 )
 async def get_report(
-    report_id: int, current_user: CurrentUser, session: SessionDep
+    report_id: PathId, current_user: CurrentUser, session: SessionDep
 ) -> ReportDetailResponse:
     """API_SPEC 4-5. REQ-HQ-14, 15 / REQ-OW-05 / REQ-RPT-01~06."""
     report, branch = await _load_report_for_read(report_id, current_user, session)
@@ -176,7 +176,7 @@ async def get_report(
     responses={**UNAUTHORIZED_401, **FORBIDDEN_403, **NOT_FOUND_404},
 )
 async def get_report_status(
-    report_id: int, current_user: CurrentUser, session: SessionDep
+    report_id: PathId, current_user: CurrentUser, session: SessionDep
 ) -> ReportStatusResponse:
     """API_SPEC 4-6. FE 가 COMPLETED 까지 폴링한다 (REQ-OW-16, 17).
 
