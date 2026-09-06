@@ -347,6 +347,29 @@ class LLMRuntimeConfigTests(unittest.TestCase):
                 client.generate_json("sys", {"q": 1})
         self.assertEqual(len(calls), 1)  # 재시도 안 함
 
+    def test_truncated_reasoning_response_is_a_clear_error(self):
+        # 추론 모델이 max_completion_tokens 안에서 추론만 하다 잘리면 content 가 빈
+        # 문자열로 온다 — "JSON 아님" 이 아니라 잘림이라고 알려야 한다.
+        import json as _json
+
+        from recommendation.llm_runtime import LLMConfig, OpenAICompatibleJsonClient
+
+        env = {**self.BASE, "LLM_API_KEY": "sk-explicit"}
+        with patch.dict(environ, env, clear=False):
+            client = OpenAICompatibleJsonClient(LLMConfig.from_env("auto"))
+        raw = _json.dumps({"choices": [{"finish_reason": "length", "message": {"content": ""}}]}).encode()
+
+        class _Resp:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self, *_): return raw
+
+        with patch("recommendation.llm_runtime.urlopen", return_value=_Resp()):
+            reset_call_budget()
+            with self.assertRaises(LLMRuntimeError) as ctx:
+                client.generate_json("sys", {"q": 1})
+        self.assertIn("잘림", str(ctx.exception))
+
 
 class ExplanationValidationTests(unittest.TestCase):
     CANDIDATE = {
@@ -364,6 +387,24 @@ class ExplanationValidationTests(unittest.TestCase):
         card = template_card(self.CANDIDATE)
         self.assertEqual(card["missing_features"], ["FC-10: 핵심 지표 결측"])
         self.assertTrue(all(isinstance(value, str) for value in card["missing_features"]))
+
+    def test_verbatim_copy_of_many_context_notes_passes(self):
+        # 파이프라인이 만든 context_notes 는 인구 FC-03~06·도시계획 FC-51/52 등으로
+        # 12개를 넘을 수 있다. 그대로 복사한 카드는 통과해야 한다(예전 상한 12 회귀).
+        notes = [f"FC-{i:02d} 배경 관측 서술 {i}." for i in range(15)]
+        candidate = {**self.CANDIDATE, "context_notes": notes}
+        card = {
+            "candidate_id": "APT-1",
+            "summary": "조건부 검토 후보입니다. 관측된 근거와 확인되지 않은 조건을 함께 검토해야 합니다.",
+            "reasons": list(candidate["reasons"]),
+            "counter_evidence": [],
+            "context_notes": list(notes),
+            "missing_features": ["FC-10: 핵심 지표 결측"],
+            "inference_hypotheses": [],
+            "claim_type": "descriptive",
+        }
+        valid, errors = validate_card(candidate, card)
+        self.assertTrue(valid, errors)
 
     def test_invented_qualitative_claim_is_rejected(self):
         card = {
