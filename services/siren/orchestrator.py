@@ -74,6 +74,18 @@ def _similar_codes_from_environment() -> Sequence[str]:
     return values
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ProviderUnavailable(f"{name} must be a boolean")
+
+
 def build_default_orchestrator() -> RiskSirenOrchestrator:
     """Create the production composition from environment variables."""
 
@@ -88,7 +100,11 @@ def build_default_orchestrator() -> RiskSirenOrchestrator:
         raise ProviderUnavailable("SIREN_COMPETITION_RADIUS_M must be greater than zero")
 
     return RiskSirenOrchestrator(
-        fmp_provider=FmpProvider(fmp_url, franchise_closure_table=closure_table),
+        fmp_provider=FmpProvider(
+            fmp_url,
+            franchise_closure_table=closure_table,
+            franchise_closure_synthetic=_env_bool("SIREN_FRANCHISE_CLOSURE_SYNTHETIC"),
+        ),
         ideaton_provider=IdeatonProvider(
             ideaton_url,
             competition_radius_m=radius,

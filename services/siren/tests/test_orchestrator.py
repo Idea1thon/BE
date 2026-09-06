@@ -4,6 +4,7 @@ import unittest
 from datetime import date
 
 from services.siren.models import RiskSirenRequest, SirenAnalyzeTrigger
+from services.siren.mappers.risk_request_mapper import build_risk_request
 from services.siren.orchestrator import RiskSirenOrchestrator
 from services.siren.providers.fmp_provider import BranchSnapshot, FmpProvider, ProviderUnavailable
 from services.siren.providers.ideaton_provider import MarketSnapshot
@@ -22,7 +23,43 @@ class _Fmp:
                 {
                     "month": date(2026, 1, 1),
                     "input_source": "MANUAL",
-                    "items": {"HALL_CARD": 1000},
+                    "items": {
+                        "HALL_CARD": 1000,
+                        "HALL_CASH": 0,
+                        "HALL_EASYPAY": 0,
+                        "DLV_BAEMIN": 0,
+                        "DLV_COUPANG": 0,
+                        "DLV_ETC": 0,
+                        "TOGO_CARD": 0,
+                        "TOGO_CASH": 0,
+                        "TOGO_EASYPAY": 0,
+                        "DED_REFUND": 0,
+                        "DED_COUPON": 0,
+                        "MAT_FOOD": 0,
+                        "MAT_SUB": 0,
+                        "BEV_ALCOHOL": 0,
+                        "BEV_DRINK": 0,
+                        "INV_BEGIN": 0,
+                        "INV_END": 0,
+                        "LAB_FULLTIME": 0,
+                        "LAB_PARTTIME": 0,
+                        "LAB_INSURANCE": 0,
+                        "LAB_WELFARE": 0,
+                        "LAB_SHORTTERM": 0,
+                        "VAR_PLATFORM_FEE": 0,
+                        "VAR_DELIVERY_FEE": 0,
+                        "VAR_SUPPLIES": 0,
+                        "VAR_UTILITY": 0,
+                        "VAR_MARKETING": 0,
+                        "OPS_RENT": 0,
+                        "OPS_RENTAL": 0,
+                        "OPS_TELECOM": 0,
+                        "OPS_ACCOUNTING": 0,
+                        "OPS_INSURANCE": 0,
+                        "OPS_CARD_FEE": 0,
+                        "FIN_LOAN_INTEREST": 0,
+                        "FIN_MISC": 0,
+                    },
                     "synthetic": True,
                 }
             ],
@@ -99,7 +136,42 @@ class OrchestratorContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.branch_reports[0].cost_source, "synthetic_self_reported")
         self.assertEqual(request.options.llm_mode, "explanation_only")
         self.assertFalse(request.options.send_notifications)
+        self.assertEqual(request.options.grade_policy, "strict")
         self.assertEqual(request.franchise_closure.closures, 5)
+
+    def test_incomplete_source_report_is_excluded_not_zero_filled(self) -> None:
+        branch = BranchSnapshot(
+            branch_id="20",
+            franchise_id="10",
+            branch_name="테스트점",
+            address="서울시 테스트구 테스트로 1",
+            region_code="11680",
+            industry_code="CS100001",
+            reports=[
+                {
+                    "month": date(2026, 1, 1),
+                    "input_source": "MANUAL",
+                    "items": {"HALL_CARD": 1000},
+                    "synthetic": True,
+                }
+            ],
+        )
+        request = build_risk_request(
+            SirenAnalyzeTrigger(
+                request_id="req-incomplete",
+                report_id="report-1",
+                franchise_id="10",
+                branch_id="20",
+                as_of=date(2026, 1, 31),
+            ),
+            branch,
+            MarketSnapshot(
+                location={"gu_code": "11680"},
+                market_data=None,
+            ),
+        )
+        self.assertEqual(request["branch_reports"], [])
+        self.assertEqual(request["excluded_report_months"], ["2026-01"])
 
     async def test_synthetic_report_is_disclosed_without_reviews(self) -> None:
         orchestrator = RiskSirenOrchestrator(

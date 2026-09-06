@@ -29,10 +29,11 @@ def _quarter_label(value: object) -> str | None:
 
 
 def _nonnegative_int_or_none(value: object) -> int | None:
-    """Preserve NULL source counts; never reinterpret unknown as zero."""
+    """Preserve NULL/invalid source counts; never reinterpret them as zero."""
     if value is None:
         return None
-    return max(0, int(value))
+    parsed = int(value)
+    return parsed if parsed >= 0 else None
 
 
 class IdeatonProvider:
@@ -151,7 +152,12 @@ class IdeatonProvider:
             quarter = _quarter_label(row["period"])
             if quarter is None or row["sales_amount"] is None:
                 continue
-            sales_quarters.append({"quarter": quarter, "amount_krw": max(0.0, float(row["sales_amount"]))})
+            amount = float(row["sales_amount"])
+            if amount < 0:
+                # 음수 매출을 0원으로 바꾸면 시장 하락 위험을 숨긴다.
+                # 해당 분기를 제외해 이후 계산에서 missing/partial로 드러낸다.
+                continue
+            sales_quarters.append({"quarter": quarter, "amount_krw": amount})
 
         market_data: dict[str, Any] | None = None
         if closure_quarters or sales_quarters or competition is not None:

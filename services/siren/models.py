@@ -25,6 +25,31 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 QUARTER_PATTERN = re.compile(r"^\d{4}Q[1-4]$")
 
+# 계약 표면 버전과 점수 산식 버전은 서로 분리한다.
+CONTRACT_VERSION = "risk-siren-contract-v1.1"
+
+GradeKo = Literal["정상", "주의", "위험"]
+RiskLevel = Literal["NORMAL", "CAUTION", "DANGER"]
+GradePolicy = Literal["strict", "renormalized_partial", "branch_only_provisional"]
+
+# grade -> risk_level 변환은 이 함수 하나에서만 수행한다.
+GRADE_TO_RISK_LEVEL: dict[str, str] = {
+    "정상": "NORMAL",
+    "주의": "CAUTION",
+    "위험": "DANGER",
+}
+
+
+def grade_to_risk_level(grade: str | None) -> str | None:
+    """등급에서 저장용 위험 레벨을 파생한다.
+
+    계산 불가를 정상으로 강등하지 않기 위해 ``None``은 그대로 보존한다.
+    """
+
+    if grade is None:
+        return None
+    return GRADE_TO_RISK_LEVEL[grade]
+
 
 class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False)
@@ -254,6 +279,8 @@ class RiskOptions(ContractModel):
         "explanation_only"
     )
     send_notifications: bool = False
+    # 데이터 부족 시 호출자가 명시하는 degraded 계산 정책.
+    grade_policy: GradePolicy = "strict"
 
 
 class SirenAnalyzeTrigger(ContractModel):
@@ -315,6 +342,8 @@ class RiskSirenRequest(ContractModel):
     location: BranchLocation
     market_data: MarketData | None = None
     branch_reports: list[BranchMonthlyReport] = Field(default_factory=list)
+    # FMP 매핑 단계에서 필수 입력이 빠진 월은 0원으로 채우지 않고 제외한다.
+    excluded_report_months: list[str] = Field(default_factory=list)
     reviews: ReviewsInput | None = None
     options: RiskOptions = Field(default_factory=RiskOptions)
     franchise_closure: FranchiseClosureYear | None = None
@@ -332,21 +361,133 @@ class RiskSirenRequest(ContractModel):
         return self
 
 
+class BranchIdentity(ContractModel):
+    franchise_id: str
+    branch_id: str
+    brand_name: str | None = None
+    as_of: str
+    industry_code: str
+    industry_label: str
+    trade_area_code: str | None = None
+
+
+class RiskResult(ContractModel):
+    score: float | None = Field(ge=0, le=100, strict=True, allow_inf_nan=False)
+    grade: GradeKo | None
+    risk_level: RiskLevel | None
+    score_version: str
+    calculation_status: Literal["calculated", "partial"]
+    policy_status: Literal["provisional", "approved"]
+    grade_policy: GradePolicy = "strict"
+    composite_basis: list[str]
+    excludes: list[str]
+    branch_floor_applied: bool = False
+
+    @model_validator(mode="after")
+    def _matching_risk_level(self) -> "RiskResult":
+        if self.risk_level != grade_to_risk_level(self.grade):
+            raise ValueError("risk_level must be derived from grade")
+        return self
+
+
+class LayerResult(ContractModel):
+    score: float | None
+    status: Literal["calculated", "partial", "missing"]
+
+
+class Layers(ContractModel):
+    market_risk: LayerResult
+    branch_risk: LayerResult
+
+
+class EvidenceItem(ContractModel):
+    evidence_id: str
+    signal_id: str
+    layer: Literal["market", "branch", "auxiliary"]
+    value: float | int | str | None
+    unit: str
+    period: str
+    grain: str
+    source: str | None
+    synthetic: bool
+    supports: str
+
+
+class MissingDataItem(ContractModel):
+    signal_id: str
+    reason: str
+
+
+class ProvenanceSignal(ContractModel):
+    signal_id: str
+    layer: Literal["market", "branch", "auxiliary"]
+    source: str | None
+    synthetic: bool
+
+
+class DataProvenance(ContractModel):
+    contains_synthetic: bool
+    disclosure: str
+    by_signal: list[ProvenanceSignal]
+    annual_franchise_closure: dict | None = None
+
+
+class AlertRecipient(ContractModel):
+    role: Literal["branch_owner", "franchise_hq"]
+    channels: list[Literal["in_app", "email"]]
+
+
+class AlertPayload(ContractModel):
+    event_type: Literal["branch_risk_evaluated"]
+    event_id: str
+    idempotency_key: str
+    branch_id: str
+    grade: GradeKo | None
+    risk_level: RiskLevel | None
+    previous_grade: None = None
+    score: float | None
+    as_of: str
+    recipients: list[AlertRecipient]
+    report_link: None = None
+    should_fire: bool
+    trigger: dict | None = None
+    suppressed_reason: str | None = None
+    alert_policy_version: str
+    dispatch_status: Literal["disabled"]
+    dispatch_owner: Literal["middle_backend"] = "middle_backend"
+    evidence_ids: list[str]
+
+
+class FinancialProductsBlock(ContractModel):
+    owner: Literal["middle_backend"] = "middle_backend"
+    status: Literal["grade_only"] = "grade_only"
+    recommended_grade: GradeKo | None
+    recommended_risk_level: RiskLevel | None
+    items: list[dict] = Field(default_factory=list)
+
+
+class ExplanationBlock(ContractModel):
+    text: str | None
+    evidence_ids: list[str]
+    model: str | None
+
+
 class RiskSirenResponse(ContractModel):
+    contract_version: Literal["risk-siren-contract-v1.1"] = CONTRACT_VERSION
     request_id: str
-    branch: dict
-    risk: dict
-    layers: dict
+    branch: BranchIdentity
+    risk: RiskResult
+    layers: Layers
     components: dict
     review_signal: dict
-    evidence: list[dict]
-    missing_data: list[dict]
+    evidence: list[EvidenceItem]
+    missing_data: list[MissingDataItem]
     uncertainty: list[str]
     excluded_future_months: list[str]
-    data_provenance: dict
-    alert: dict
-    financial_products: dict
-    explanation: dict
+    data_provenance: DataProvenance
+    alert: AlertPayload
+    financial_products: FinancialProductsBlock
+    explanation: ExplanationBlock
     projections: dict
     franchise_closure: FranchiseClosureResult
 
@@ -368,15 +509,21 @@ class HqBranch(HqSection):
 class HqRisk(HqSection):
     score: float | None = Field(ge=0, le=100, strict=True, allow_inf_nan=False)
     grade: Literal["정상", "주의", "위험"] | None
+    risk_level: RiskLevel | None = None
     calculation_status: Literal["calculated", "partial"]
+    grade_policy: GradePolicy = "strict"
 
     @model_validator(mode="after")
     def _consistent_result(self) -> "HqRisk":
+        if self.grade_policy != "strict" and self.calculation_status != "partial":
+            raise ValueError("non-strict grade_policy must remain partial")
         if self.calculation_status == "calculated":
             if self.score is None or self.grade is None:
                 raise ValueError("calculated risk requires score and grade")
-        elif self.score is not None or self.grade is not None:
+        elif self.grade_policy == "strict" and (self.score is not None or self.grade is not None):
             raise ValueError("partial risk must not claim a composite score or grade")
+        if self.risk_level != grade_to_risk_level(self.grade):
+            raise ValueError("risk_level must be derived from grade")
         return self
 
 
@@ -436,7 +583,10 @@ class HqSummaryResponse(ContractModel):
     branch_count: int
     calculated_count: int
     grade_distribution: dict
+    risk_level_distribution: dict
     danger_ratio_pct: float | None
     average_score: float | None
     watchlist: list[dict]
+    alert_candidate_count: int
+    unread_alert_count: None = None
     data_provenance: dict

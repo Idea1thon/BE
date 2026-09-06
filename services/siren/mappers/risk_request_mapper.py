@@ -49,6 +49,21 @@ FIELD_TO_SIREN: dict[str, tuple[str, ...]] = {
     "FIN_MISC": ("finance", "other_misc"),
 }
 
+
+class IncompleteMonthlyReport(ValueError):
+    """A source report is missing one or more form fields.
+
+    Missing fields are not converted to zero. The orchestrator drops that month
+    so the calculator can surface a partial window instead of a fabricated value.
+    """
+
+    def __init__(self, month: object, missing_fields: list[str]) -> None:
+        self.month = str(month)
+        self.missing_fields = tuple(missing_fields)
+        super().__init__(
+            f"report {self.month} is missing required fields: {', '.join(missing_fields)}"
+        )
+
 _EMPTY_BLOCKS: dict[str, Any] = {
     "sales": {
         "hall": {"credit": 0.0, "cash": 0.0, "simple_pay": 0.0},
@@ -109,6 +124,10 @@ def _monthly_report(report: dict[str, Any]) -> dict[str, Any]:
     if unknown:
         raise ValueError(f"unsupported FMP input fields: {', '.join(unknown)}")
 
+    missing = sorted(set(FIELD_TO_SIREN) - set(items))
+    if missing:
+        raise IncompleteMonthlyReport(report.get("month"), missing)
+
     blocks = _blank_blocks()
     for code, amount in items.items():
         target = blocks
@@ -149,6 +168,14 @@ def build_risk_request(
     if trigger.franchise_id != branch.franchise_id:
         raise ValueError("FMP branch does not match the trigger franchise_id")
 
+    mapped_reports: list[dict[str, Any]] = []
+    excluded_report_months: list[str] = []
+    for report in branch.reports:
+        try:
+            mapped_reports.append(_monthly_report(report))
+        except IncompleteMonthlyReport as exc:
+            excluded_report_months.append(exc.month[:7])
+
     payload: dict[str, Any] = {
         "request_id": trigger.request_id,
         "franchise_id": branch.franchise_id,
@@ -157,12 +184,16 @@ def build_risk_request(
         "as_of": trigger.as_of.isoformat(),
         "industry_code": branch.industry_code,
         "location": market.location,
-        "branch_reports": [_monthly_report(report) for report in branch.reports],
+        "branch_reports": mapped_reports,
+        "excluded_report_months": sorted(set(excluded_report_months)),
         # Hosted LLM and dispatch are intentionally off. explanation_only uses
-        # the local deterministic template and never calls a model.
+        # the local deterministic template and never calls a model. Preserve the
+        # caller's explicit grade policy so trigger and canonical paths behave
+        # identically.
         "options": {
-            "llm_mode": "explanation_only",
+            "llm_mode": trigger.options.llm_mode,
             "send_notifications": bool(trigger.options.send_notifications),
+            "grade_policy": trigger.options.grade_policy,
         },
     }
     if market.market_data is not None:

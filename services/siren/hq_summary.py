@@ -17,9 +17,11 @@ def summarize(request: HqSummaryRequest | dict[str, Any]) -> dict[str, Any]:
         request = HqSummaryRequest.model_validate(request)
 
     grades = {"정상": 0, "주의": 0, "위험": 0}
+    risk_levels = {"NORMAL": 0, "CAUTION": 0, "DANGER": 0}
     scores: list[float] = []
     watchlist: list[dict[str, Any]] = []
     contains_synthetic = False
+    alert_candidate_count = 0
 
     for result in request.branch_results:
         res = result.model_dump()
@@ -29,8 +31,13 @@ def summarize(request: HqSummaryRequest | dict[str, Any]) -> dict[str, Any]:
         grade = risk.get("grade")
         if grade in grades:
             grades[grade] += 1
-        if isinstance(risk.get("score"), (int, float)):
+        risk_level = risk.get("risk_level")
+        if risk_level in risk_levels:
+            risk_levels[risk_level] += 1
+        if risk.get("calculation_status") == "calculated" and isinstance(risk.get("score"), (int, float)):
             scores.append(float(risk["score"]))
+        if res.get("alert", {}).get("should_fire"):
+            alert_candidate_count += 1
 
         review = res.get("review_signal", {})
         reasons: list[str] = []
@@ -49,11 +56,23 @@ def summarize(request: HqSummaryRequest | dict[str, Any]) -> dict[str, Any]:
             watchlist.append({
                 "branch_id": res.get("branch", {}).get("branch_id"),
                 "grade": grade,
+                "risk_level": risk_level,
                 "reasons": reasons,
             })
 
-    calculated = grades["정상"] + grades["주의"] + grades["위험"]
-    danger_ratio = round(grades["위험"] / calculated * 100, 4) if calculated else None
+    # 비표준 grade_policy의 잠정 등급은 grade_distribution/watchlist에는
+    # 표시하되, 확정 위험 비율·평균 점수의 분모에는 포함하지 않는다.
+    calculated = sum(
+        1
+        for result in request.branch_results
+        if result.risk.calculation_status == "calculated"
+    )
+    calculated_danger = sum(
+        1
+        for result in request.branch_results
+        if result.risk.calculation_status == "calculated" and result.risk.grade == "위험"
+    )
+    danger_ratio = round(calculated_danger / calculated * 100, 4) if calculated else None
     average_score = round(sum(scores) / len(scores), 4) if scores else None
 
     return {
@@ -62,9 +81,12 @@ def summarize(request: HqSummaryRequest | dict[str, Any]) -> dict[str, Any]:
         "branch_count": len(request.branch_results),
         "calculated_count": calculated,
         "grade_distribution": grades,
+        "risk_level_distribution": risk_levels,
         "danger_ratio_pct": danger_ratio,
         "average_score": average_score,
         "watchlist": watchlist,
+        "alert_candidate_count": alert_candidate_count,
+        "unread_alert_count": None,
         "data_provenance": {
             "contains_synthetic": contains_synthetic,
             "disclosure": (

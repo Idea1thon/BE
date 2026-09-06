@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from math import isfinite
 
 from fastapi import FastAPI, HTTPException, Request
@@ -22,10 +23,17 @@ from .pipeline import analyze
 from .providers import ProviderUnavailable, SourceNotFound
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    await _orchestrator.close()
+
+
 app = FastAPI(
     title="Risk Siren API",
     version="1.0.0",
     description="Deterministic franchise-branch risk analysis with evidence (v1: 5 signals, 2 layers).",
+    lifespan=lifespan,
 )
 
 _orchestrator: RiskSirenOrchestrator = build_default_orchestrator()
@@ -49,11 +57,6 @@ async def validation_error(request: Request, exc: RequestValidationError) -> JSO
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "risk-siren", "version": "1.0.0"}
-
-
-@app.on_event("shutdown")
-async def close_provider_connections() -> None:
-    await _orchestrator.close()
 
 
 @app.post("/internal/risk-sirens/analyze", response_model=RiskSirenResponse)

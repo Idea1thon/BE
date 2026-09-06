@@ -72,10 +72,12 @@ class FmpProvider:
         *,
         history_months: int = 12,
         franchise_closure_table: str | None = None,
+        franchise_closure_synthetic: bool = False,
     ) -> None:
         self.database_url = database_url.strip() if database_url else None
         self.history_months = history_months
         self.franchise_closure_table = _validated_table_name(franchise_closure_table)
+        self.franchise_closure_synthetic = franchise_closure_synthetic
         self._engine: AsyncEngine | None = None
 
     def _get_engine(self) -> AsyncEngine:
@@ -127,12 +129,19 @@ class FmpProvider:
                     await connection.execute(
                         text(
                             """
+                            WITH latest_reports AS (
+                                SELECT DISTINCT ON (r.report_month)
+                                       r.id, r.report_month, r.input_source
+                                FROM operation_report AS r
+                                WHERE r.branch_id = :branch_id
+                                  AND r.status = 'COMPLETED'
+                                  AND r.report_month <= :as_of
+                                ORDER BY r.report_month DESC, r.id DESC
+                            )
                             SELECT r.id AS report_id, r.report_month, r.input_source,
                                    i.field_code, i.amount
-                            FROM operation_report AS r
+                            FROM latest_reports AS r
                             LEFT JOIN report_input_item AS i ON i.report_id = r.id
-                            WHERE r.branch_id = :branch_id
-                              AND r.report_month <= :as_of
                             ORDER BY r.report_month DESC, r.id DESC
                             """
                         ),
@@ -155,7 +164,7 @@ class FmpProvider:
                     "items": {},
                 },
             )
-            if row["field_code"] is not None:
+            if row["field_code"] is not None and row["amount"] is not None:
                 report["items"][str(row["field_code"])] = float(row["amount"])
 
         reports = list(by_report.values())
@@ -213,6 +222,14 @@ class FmpProvider:
         ).mappings().one_or_none()
         if row is None:
             return None
+        counts = (
+            row["previous_year_end_count"],
+            row["new_openings"],
+            row["closures"],
+        )
+        if any(value is None for value in counts) or any(int(value) < 0 for value in counts):
+            # 원천 집계가 불완전하면 폐업률 0%로 가장하지 않고 신호 자체를 missing으로 둔다.
+            return None
         return {
             "franchise_id": str(row["franchise_id"]),
             "year": int(row["year"]),
@@ -220,5 +237,5 @@ class FmpProvider:
             "new_openings": int(row["new_openings"]),
             "closures": int(row["closures"]),
             "source": f"fmp:{table_name}",
-            "synthetic": False,
+            "synthetic": self.franchise_closure_synthetic,
         }

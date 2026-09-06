@@ -13,7 +13,12 @@ from typing import Any
 from .alerts import build_alert
 from .franchise import calculate_franchise_closure
 from .explanation import build_explanation
-from .models import RiskSirenRequest, INDUSTRY_LABELS
+from .models import (
+    CONTRACT_VERSION,
+    INDUSTRY_LABELS,
+    RiskSirenRequest,
+    grade_to_risk_level,
+)
 from .reports import build_metric_series
 from .risk_signals import (
     DEFAULT_POLICY,
@@ -65,6 +70,16 @@ def _weighted(pairs: list[tuple[float, float | None]]) -> float | None:
     if any(score is None for _, score in pairs):
         return None
     return round(sum(weight * score for weight, score in pairs), 4)
+
+
+def _renormalized(pairs: list[tuple[float, float | None]]) -> float | None:
+    """누락된 신호를 0점으로 바꾸지 않고 남은 가중치만 재정규화한다."""
+
+    present = [(weight, score) for weight, score in pairs if score is not None]
+    total_weight = sum(weight for weight, _ in present)
+    if not present or total_weight <= 0:
+        return None
+    return round(sum(weight * score for weight, score in present) / total_weight, 4)
 
 
 def analyze(
@@ -163,6 +178,19 @@ def analyze(
     metrics, future_months = build_metric_series(request.branch_reports, as_of)
     if future_months:
         uncertainty.append(f"기준일 이후 월은 계산에서 제외했습니다: {', '.join(future_months)}")
+    if request.excluded_report_months:
+        months = ", ".join(sorted(set(request.excluded_report_months)))
+        uncertainty.append(
+            f"필수 운영보고서 입력이 누락된 월은 0원으로 대체하지 않고 제외했습니다: {months}"
+        )
+        missing_data.append({
+            "signal_id": "SR-02.branch",
+            "reason": f"필수 입력 누락으로 제외된 운영보고서 월: {months}",
+        })
+        missing_data.append({
+            "signal_id": "SR-05",
+            "reason": f"필수 입력 누락으로 제외된 운영보고서 월: {months}",
+        })
     mismatched_reviews = (
         sorted({r.branch_id for r in request.reviews.records
                 if r.branch_id is not None and r.branch_id != request.branch_id})
@@ -255,6 +283,14 @@ def analyze(
         ))
 
     # --------------------------------------------------------------- composite
+    grade_policy = request.options.grade_policy
+    signal_scores = {
+        "SR-01": closure.get("score"),
+        "SR-02.market": market_sales.get("score"),
+        "SR-03": competition.get("score"),
+        "SR-02.branch": branch_sales.get("score"),
+        "SR-05": profitability.get("score"),
+    }
     weighted = _weighted([
         (policy.layer_market_weight, market_layer_score),
         (policy.layer_branch_weight, branch_layer_score),
@@ -269,17 +305,13 @@ def analyze(
             "(양호한 시장이 가맹점 위험을 상쇄하지 않음)."
         )
     both_calculated = market_layer_status == "calculated" and branch_layer_status == "calculated"
+    score = composite if both_calculated else None
     grade = None
-    if composite is not None and both_calculated:
-        calculation_status = "calculated"
-        if composite < policy.normal_upper_bound:
-            grade = "정상"
-        elif composite < policy.caution_upper_bound:
-            grade = "주의"
-        else:
-            grade = "위험"
-    else:
-        calculation_status = "partial"
+    calculation_status = "calculated" if both_calculated else "partial"
+    composite_basis = list(signal_scores)
+    excludes = ["SR-04"]
+
+    if not both_calculated:
         if market_layer_status == "missing":
             uncertainty.append("시장(market_risk) 층이 계산되지 않아 종합 점수를 확정하지 않았습니다.")
         elif market_layer_status == "partial":
@@ -289,15 +321,96 @@ def analyze(
         elif branch_layer_status == "partial":
             uncertainty.append("가맹점(branch_risk) 층 일부 신호가 partial 이라 종합 등급을 확정하지 않았습니다.")
 
+    if grade_policy == "renormalized_partial":
+        market_layer_score = _renormalized([
+            (policy.market_closure_weight, closure.get("score")),
+            (policy.market_sales_weight, market_sales.get("score")),
+            (policy.market_competition_weight, competition.get("score")),
+        ])
+        branch_layer_score = _renormalized([
+            (policy.branch_sales_weight, branch_sales.get("score")),
+            (policy.branch_profitability_weight, profitability.get("score")),
+        ])
+        market_layer_status = (
+            "missing" if market_layer_score is None
+            else ("calculated" if all(s == "calculated" for s in market_statuses) else "partial")
+        )
+        branch_layer_status = (
+            "missing" if branch_layer_score is None
+            else ("calculated" if all(s == "calculated" for s in branch_statuses) else "partial")
+        )
+        if market_layer_score is not None and branch_layer_score is not None:
+            score = round(
+                max(
+                    branch_layer_score,
+                    policy.layer_market_weight * market_layer_score
+                    + policy.layer_branch_weight * branch_layer_score,
+                ),
+                4,
+            )
+            branch_floor_applied = branch_layer_score > (
+                policy.layer_market_weight * market_layer_score
+                + policy.layer_branch_weight * branch_layer_score
+            )
+            if score < policy.normal_upper_bound:
+                grade = "정상"
+            elif score < policy.caution_upper_bound:
+                grade = "주의"
+            else:
+                grade = "위험"
+        else:
+            score = None
+            grade = None
+        calculation_status = "partial"
+        composite_basis = [name for name, value in signal_scores.items() if value is not None]
+        excludes = [name for name, value in signal_scores.items() if value is None] + ["SR-04"]
+        uncertainty.append(
+            "grade_policy=renormalized_partial: 누락된 신호를 제외하고 남은 신호만으로 재정규화한 "
+            "잠정 점수입니다. 부분 데이터이므로 실제 알림은 발동하지 않습니다."
+        )
+    elif grade_policy == "branch_only_provisional":
+        score = branch_layer_score
+        grade = None
+        if score is not None:
+            if score < policy.normal_upper_bound:
+                grade = "정상"
+            elif score < policy.caution_upper_bound:
+                grade = "주의"
+            else:
+                grade = "위험"
+        calculation_status = "partial"
+        composite_basis = [name for name in ("SR-02.branch", "SR-05") if signal_scores[name] is not None]
+        excludes = [name for name in signal_scores if name not in composite_basis] + ["SR-04"]
+        branch_floor_applied = False
+        uncertainty.append(
+            "grade_policy=branch_only_provisional: 시장 신호 없이 가맹점 운영보고서만으로 만든 "
+            "잠정 점수입니다. 부분 데이터이므로 실제 알림은 발동하지 않습니다."
+        )
+    elif both_calculated:
+        if score is not None and score < policy.normal_upper_bound:
+            grade = "정상"
+        elif score is not None and score < policy.caution_upper_bound:
+            grade = "주의"
+        elif score is not None:
+            grade = "위험"
+    else:
+        score = None
+        grade = None
+        composite_basis = [name for name, value in signal_scores.items() if value is not None]
+        excludes = [name for name, value in signal_scores.items() if value is None] + ["SR-04"]
+
+    risk_level = grade_to_risk_level(grade)
     risk = {
-        "score": composite if both_calculated else None,
+        "score": score,
         "grade": grade,
+        "risk_level": risk_level,
         "score_version": policy.version,
         "calculation_status": calculation_status,
         "policy_status": "provisional",
-        "composite_basis": ["SR-01", "SR-02.market", "SR-03", "SR-02.branch", "SR-05"],
-        "excludes": ["SR-04"],
-        "branch_floor_applied": branch_floor_applied if both_calculated else False,
+        "grade_policy": grade_policy,
+        "composite_basis": composite_basis,
+        "excludes": excludes,
+        "branch_floor_applied": branch_floor_applied if calculation_status == "calculated" else False,
     }
     layers = {
         "market_risk": {"score": market_layer_score, "status": market_layer_status},
@@ -319,7 +432,11 @@ def analyze(
         ) if flag
     ]
     if not any([market_synth, sales_synth, cost_synth, review_synth]):
-        disclosure = "위험도 계산 신호에는 합성 데이터가 포함되지 않았습니다."
+        disclosure = (
+            "위험도 계산 신호에는 합성 데이터가 포함되지 않았습니다."
+            if not franchise_synth
+            else "브랜드 연간 폐업 통계에 합성 데이터가 포함되어 있습니다."
+        )
     elif not market_synth:
         disclosure = (
             "가맹점 매출·손익·리뷰는 대회 데모용 합성 데이터입니다. "
@@ -340,12 +457,20 @@ def analyze(
             {"signal_id": "SR-05", "layer": "branch", "source": "synthetic_self_reported" if cost_synth else "operating_report", "synthetic": cost_synth},
             {"signal_id": "SR-04", "layer": "auxiliary", "source": review_signal.get("source"), "synthetic": review_synth},
         ],
+        "annual_franchise_closure": {
+            "source": (
+                request.franchise_closure.source
+                if request.franchise_closure is not None
+                else None
+            ),
+            "synthetic": franchise_synth,
+        },
     }
 
     # 종합 등급 미확정과 확인된 점포 위험 경고를 분리한다.
     # 기준은 기존 위험 등급 하한을 사용하며 점수/가중치는 변경하지 않는다.
     trigger = None
-    if risk["grade"] == "위험":
+    if grade_policy == "strict" and risk["grade"] == "위험":
         trigger = {
             "basis": "composite", "score": risk["score"],
             "threshold": policy.caution_upper_bound,
@@ -370,12 +495,23 @@ def analyze(
         as_of=as_of,
         score=risk["score"],
         grade=grade,
+        risk_level=risk_level,
         score_version=policy.version,
+        grade_policy=grade_policy,
         evidence_ids=[item["evidence_id"] for item in evidence],
         trigger=trigger,
     )
 
+    financial_products = {
+        "owner": "middle_backend",
+        "status": "grade_only",
+        "recommended_grade": grade,
+        "recommended_risk_level": risk_level,
+        "items": [],
+    }
+
     result: dict[str, Any] = {
+        "contract_version": CONTRACT_VERSION,
         "request_id": request.request_id,
         "branch": {
             "franchise_id": request.franchise_id,
@@ -396,7 +532,7 @@ def analyze(
         "excluded_future_months": future_months,
         "data_provenance": data_provenance,
         "alert": alert,
-        "financial_products": {"status": "catalog_match_pending", "items": []},
+        "financial_products": financial_products,
         "explanation": {},
         "projections": {},
         "franchise_closure": calculate_franchise_closure(request.franchise_closure),
@@ -416,9 +552,11 @@ def _build_projections(result: dict[str, Any]) -> dict[str, Any]:
     review = result["review_signal"]
     branch_owner = {
         "branch_id": result["branch"]["branch_id"],
+        "as_of": result["branch"]["as_of"],
         "alert": result["alert"],
         "score": risk["score"],
         "grade": risk["grade"],
+        "risk_level": risk["risk_level"],
         "calculation_status": risk["calculation_status"],
         "layers": result["layers"],
         "components": result["components"],
@@ -435,10 +573,12 @@ def _build_projections(result: dict[str, Any]) -> dict[str, Any]:
     }
     franchise_hq = {
         "branch_id": result["branch"]["branch_id"],
+        "as_of": result["branch"]["as_of"],
         "alert": result["alert"],
         "franchise_id": result["branch"]["franchise_id"],
         "score": risk["score"],
         "grade": risk["grade"],
+        "risk_level": risk["risk_level"],
         "calculation_status": risk["calculation_status"],
         "component_status": {
             "closure": result["components"]["closure"].get("status"),
