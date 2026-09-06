@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -22,6 +23,34 @@ load_env()
 
 class LLMRuntimeError(RuntimeError):
     """The configured LLM endpoint could not return valid JSON."""
+
+
+# 한 번의 추천 실행에서 허용할 LLM 호출 수 상한. 초과하면 generate_json 이
+# LLMRuntimeError 를 던지고, 호출부(plan_input·explain_candidates)는 기존 실패
+# 경로처럼 template/deterministic 폴백으로 전환한다. run_pipeline 이 요청마다
+# reset_call_budget() 를 호출하므로 카운터는 요청 스레드별로 격리된다.
+_call_budget = threading.local()
+
+
+def _max_calls_per_run() -> int:
+    try:
+        value = int(os.getenv("LLM_MAX_CALLS_PER_RUN", "12"))
+    except ValueError:
+        return 12
+    return value if value > 0 else 0  # 0 이하 = 상한 없음
+
+
+def reset_call_budget() -> None:
+    """추천 실행 시작 시 이 스레드의 LLM 호출 카운터를 0 으로 되돌린다."""
+    _call_budget.used = 0
+
+
+def _charge_call() -> None:
+    limit = _max_calls_per_run()
+    used = getattr(_call_budget, "used", 0)
+    if limit and used >= limit:
+        raise LLMRuntimeError(f"LLM 호출 예산 초과 (LLM_MAX_CALLS_PER_RUN={limit})")
+    _call_budget.used = used + 1
 
 
 # This is deliberately shared by the planner and explanation stages. The
@@ -56,7 +85,9 @@ class LLMConfig:
         if mode not in {"auto", "required", "offline"}:
             raise ValueError(f"지원하지 않는 llm mode: {mode}")
         endpoint = os.getenv("LLM_API_URL", "").strip() or None
-        api_key = os.getenv("LLM_API_KEY", "").strip() or None
+        # OPENAI_API_KEY 는 OpenAI 관용 이름이라 폴백으로 인식한다(#25).
+        api_key = (os.getenv("LLM_API_KEY", "").strip()
+                   or os.getenv("OPENAI_API_KEY", "").strip() or None)
         model = os.getenv("LLM_MODEL", "").strip()
         try:
             timeout_s = float(os.getenv("LLM_TIMEOUT_SECONDS", "20"))
@@ -127,6 +158,7 @@ class OpenAICompatibleJsonClient:
     def generate_json(self, system_prompt: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.config.available:
             raise LLMRuntimeError("사용 가능한 LLM endpoint가 없습니다.")
+        _charge_call()  # 요청당 호출 상한 — 초과 시 호출부가 폴백
         body = {
             "model": self.config.model,
             "temperature": 0,
