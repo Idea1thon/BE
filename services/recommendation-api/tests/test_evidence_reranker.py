@@ -23,7 +23,7 @@ class EvidenceRerankerTests(unittest.TestCase):
 
     def test_llm_ranks_ids_only_and_invalid_list_falls_back(self):
         client = Mock()
-        client.generate_json.return_value = {'ordered_ids': list(self.sources)}
+        client.generate_json.return_value = {'ordered_ids': ['E02', 'E01', 'E03']}
         selected, meta = select_sources(self.query, self.sources, client)
         self.assertEqual(meta['mode'], 'llm')
         for response in ({'ordered_ids': ['invented']}, {'ordered_ids': ['context_notes:0'] * 3}, {}):
@@ -33,6 +33,52 @@ class EvidenceRerankerTests(unittest.TestCase):
             self.assertEqual(next(iter(selected)), 'context_notes:1')
         client.generate_json.side_effect = LLMRuntimeError('budget')
         self.assertEqual(select_sources(self.query, self.sources, client)[1]['mode'], 'lexical')
+
+    def test_partial_ranking_keeps_valid_order_and_reports_repairs(self):
+        client = Mock()
+        # E01 is the lexically strongest passage; choose E02 first instead.
+        client.generate_json.return_value = {'ordered_ids': ['E02', 'E02', 'bogus', None]}
+        selected, meta = select_sources(self.query, self.sources, client)
+        self.assertEqual(list(selected)[:2], ['context_notes:0', 'context_notes:1'])
+        self.assertEqual(meta['mode'], 'llm_partial')
+        self.assertEqual(meta['diagnostics']['accepted_count'], 1)
+        self.assertEqual(meta['diagnostics']['duplicate_count'], 1)
+        self.assertEqual(meta['diagnostics']['unknown_count'], 1)
+        self.assertEqual(meta['diagnostics']['invalid_type_count'], 1)
+        self.assertEqual(meta['diagnostics']['backfilled_count'], 2)
+        payload = client.generate_json.call_args.args[1]
+        self.assertEqual(payload['top_k'], 3)
+        self.assertEqual([row['id'] for row in payload['sources']], ['E01', 'E02', 'E03'])
+
+    def test_top_k_selection_does_not_require_all_48_ids(self):
+        sources = {f'long-source-{i}': {'bucket': 'context_notes', 'text': '근거'} for i in range(60)}
+        client = Mock()
+        client.generate_json.return_value = {'ordered_ids': [f'E{i:02d}' for i in range(48, 32, -1)]}
+        selected, meta = select_sources(self.query, sources, client)
+        self.assertEqual(list(selected), [f'long-source-{i}' for i in range(47, 31, -1)])
+        self.assertEqual(meta['mode'], 'llm')
+        self.assertEqual(meta['diagnostics']['backfilled_count'], 0)
+        self.assertEqual(client.generate_json.call_args.args[1]['top_k'], 16)
+
+    def test_non_object_reply_falls_back_with_format_reason(self):
+        client = Mock()
+        for reply in (None, [], {'ordered_ids': None}):
+            client.generate_json.return_value = reply
+            _, meta = select_sources(self.query, self.sources, client)
+            self.assertEqual(meta['mode'], 'lexical')
+            self.assertEqual(meta['diagnostics']['failure_reason'], 'invalid_format')
+
+    def test_partial_ranking_keeps_mandatory_facts_outside_shortlist(self):
+        sources = {str(i): {'bucket': 'context_notes', 'text': '직장인 점심'} for i in range(60)}
+        sources.update({'fact': {'bucket': 'evidence', 'text': '사실'},
+                        'warning': {'bucket': 'counter_evidence', 'text': '경고'},
+                        'retrieval-late': {'bucket': 'context_notes', 'text': '조회'}})
+        client = Mock()
+        client.generate_json.return_value = {'ordered_ids': ['E02']}
+        selected, meta = select_sources(self.query, sources, client)
+        self.assertEqual(next(iter(selected)), '1')
+        self.assertEqual(meta['mode'], 'llm_partial')
+        self.assertTrue({'fact', 'warning', 'retrieval-late'}.issubset(selected))
 
     def test_counter_and_missing_sources_survive_context_limit(self):
         sources = {str(i): {'bucket': 'context_notes', 'text': '직장인 점심'} for i in range(60)}
