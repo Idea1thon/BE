@@ -161,6 +161,11 @@ ON CONFLICT (dataset, grain, spatial_code, period) DO UPDATE SET
     print("적재…")
     total = copy_into(stage, _rows())
     print(f"\ncontext.population_snapshot: {total} 행 upsert")
+
+    # as_of 상수가 바뀌어 재적재하면 구 파티션이 남아 서빙 조회에서 수치·as_of가
+    # 어긋난다(recommendation/pipeline.py DbSource.population). as_of 파티션 외에는 삭제.
+    keep = ", ".join(f"('{d}', '{p}')" for d, _, _, _, p in SPECS)
+    run_sql(f"DELETE FROM context.population_snapshot WHERE (dataset, period) NOT IN ({keep})")
     check()
     return 0
 
