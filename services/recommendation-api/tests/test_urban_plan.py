@@ -114,6 +114,38 @@ class ContextTests(unittest.TestCase):
         assoc_ev = [e for e in ctx.evidence if e["metric_name"] == "자치구_정비사업조합"]
         self.assertTrue(assoc_ev[0]["grain_is_proxy"])
 
+    def test_f41_dissolved_associations_surfaced_in_assoc_note(self):
+        # 강남(11680)·송파(11710) 모두 해산·청산 조합을 착공이후에 포함 — note에 분리 표기돼야 함(F41).
+        for sgg in ("11680", "11710"):
+            ctx = self._ctx(host_code=None, sgg=sgg)
+            assoc_notes = [n for n in ctx.context_notes if "정비사업조합" in n]
+            self.assertTrue(assoc_notes)
+            self.assertIn("해산·청산", assoc_notes[0], sgg)
+
+    def test_f42_sub_threshold_projects_not_listed_prominently(self):
+        # 겹침 <5% 사업만 있는 상권 → 사업장명 전면 서술 없이 건수만.
+        low = next((code for code, lst in self.plan.by_trdar.items()
+                    if lst and all((p.overlap_ratio or 0) < urban_plan.MIN_OVERLAP_RATIO for p in lst)), None)
+        if low is None:
+            self.skipTest("겹침 <5%만 있는 상권 없음")
+        ctx = self._ctx(host_code=low)
+        fc51 = [n for n in ctx.context_notes if n.rstrip().endswith("(FC-51)")][0]
+        self.assertIn("건수만", fc51)
+
+    def test_f45_fc52_has_structured_evidence(self):
+        # 대규모 개발 유형이 걸린 상권을 찾아 FC-52 evidence 확인.
+        host = next((code for code, lst in self.plan.by_trdar.items()
+                     if any(p.category_major in ("재정비촉진사업", "역세권사업", "국토부사업") for p in lst)), None)
+        self.assertIsNotNone(host)
+        ctx = self._ctx(host_code=host)
+        fc52_ev = [e for e in ctx.evidence if e["feature_id"] == "FC-52"]
+        self.assertTrue(fc52_ev)
+        self.assertEqual(fc52_ev[0]["update_cycle"], "snapshot")
+
+    def test_f46_planned_subway_gap_in_missing(self):
+        ctx = self._ctx(host_code=self.host)
+        self.assertTrue(any("계획 도시철도" in m["reason"] for m in ctx.missing if m["feature"] == "FC-52"))
+
 
 class PipelineWiringTests(unittest.TestCase):
     REQ = dict(sido="서울특별시", sigungu="송파구", dong="잠실동",
@@ -160,7 +192,8 @@ class DbSourcePlanParityTests(unittest.TestCase):
         self.assertTrue(common)
 
         def plan_ev(c):
-            return sorted((e["feature_id"], e["metric_name"], e["value"]) for e in c["evidence"] if e.get("feature_id") in ("FC-51", "FC-52"))
+            return sorted((e["feature_id"], e["metric_name"], e["value"], e["observed_end_period"], e["update_cycle"])
+                          for e in c["evidence"] if e.get("feature_id") in ("FC-51", "FC-52"))
 
         def plan_notes(c):
             return sorted(n for n in c["context_notes"] if n.rstrip().endswith("(FC-51)") or n.rstrip().endswith("(FC-52)") or "(FC-51 보조)" in n)
