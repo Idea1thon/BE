@@ -98,9 +98,11 @@ class LLMConfig:
         except ValueError:
             timeout_s = 20.0
         try:
-            max_output_tokens = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "1200"))
+            # 추론 모델은 이 한도 안에서 추론 토큰을 먼저 소비한다. 설명 카드 JSON
+            # (후보 배열 verbatim 복사)은 최대 ~2k 토큰이라 여유를 둔다.
+            max_output_tokens = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "6000"))
         except ValueError:
-            max_output_tokens = 1200
+            max_output_tokens = 6000
         try:
             max_response_bytes = int(os.getenv("LLM_MAX_RESPONSE_BYTES", "2000000"))
         except ValueError:
@@ -228,7 +230,12 @@ class OpenAICompatibleJsonClient:
 
         try:
             response_json = json.loads(raw)
-            content = response_json["choices"][0]["message"]["content"]
+            choice = response_json["choices"][0]
+            content = choice["message"]["content"]
         except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
             raise LLMRuntimeError(f"LLM 응답 형식 오류: {exc}") from exc
+        # 추론 모델은 max_completion_tokens 안에서 추론 토큰을 먼저 쓰므로, 한도가
+        # 낮으면 content 없이 잘린다(finish_reason=length). "JSON 아님" 대신 명확히.
+        if choice.get("finish_reason") == "length" and not str(content or "").strip():
+            raise LLMRuntimeError("LLM 응답이 max_completion_tokens 한도에서 잘림 (LLM_MAX_OUTPUT_TOKENS 상향 필요)")
         return _extract_json(content)
