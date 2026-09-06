@@ -91,6 +91,40 @@ class ServingDbCacheTest(unittest.TestCase):
             serving_db.query("SELECT 1")
         self.assertEqual(self._data_calls(), ["SELECT 1", "SELECT 1"])
 
+    def test_entry_expires_after_ttl_even_if_stamp_unchanged(self) -> None:
+        """부분 적재 실패로 완료 스탬프가 그대로여도, 엔트리는 삽입 후 TTL 이
+        지나면 만료돼 재조회된다 (ziholee P2-1)."""
+        clock = [1000.0]
+        with patch.object(serving_db.time, "monotonic", lambda: clock[0]), \
+             patch.object(serving_db, "_cache_ttl", lambda: 300.0):
+            serving_db.query("SELECT 1")          # 삽입 @1000
+            clock[0] = 1200.0
+            serving_db.query("SELECT 1")          # 200s < 300 → 적중
+            clock[0] = 1400.0
+            serving_db.query("SELECT 1")          # 400s ≥ 300 → 만료 → 재조회
+        self.assertEqual(self._data_calls(), ["SELECT 1", "SELECT 1"])
+
+    def test_inflight_result_not_stored_across_clear(self) -> None:
+        """조회 도중 clear_cache() 가 끼면(동일 스탬프 강제 초기화 포함) 그 결과를
+        캐시에 다시 넣지 않는다 (ziholee P2-2)."""
+        serving_db.query("SEED")  # 스탬프 워밍업
+        base = serving_db._raw_query
+        n = {"c": 0}
+
+        def racing(sql):
+            if sql != serving_db._STAMP_SQL:
+                n["c"] += 1
+                if n["c"] == 1:
+                    serving_db.clear_cache()  # 조회 결과 저장 직전에 초기화
+            return base(sql)
+
+        with patch.object(serving_db, "_raw_query", side_effect=racing):
+            serving_db.query("RACED")   # gen 이 어긋나므로 저장 스킵
+            serving_db.query("RACED")   # 캐시에 없어 재조회
+        self.assertEqual(n["c"], 2)
+        with serving_db._CACHE_LOCK:
+            self.assertEqual(len(serving_db._CACHE), 1)  # 2번째 RACED 만 저장됨
+
     def test_stamp_failure_bypasses_cache(self) -> None:
         serving_db.clear_cache()
 
