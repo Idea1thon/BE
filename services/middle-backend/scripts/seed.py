@@ -46,10 +46,39 @@ def _guarded_password() -> str:
     return password
 
 # F11: branch.region_code에는 시군구 코드만 들어간다.
+# 서울 25개 자치구 전부. 행정표준코드 시군구 5자리이며 `GET /regions` 가 code 순으로
+# 정렬하므로 드롭다운도 행정구역 표준 순서(종로구→강동구)로 나온다.
+#
+# 행정동은 두 곳만 둔다. 추천 파이프라인은 서울 전역을 읽지만 우리가 검증한 조합은
+# 이 둘뿐이고, 데이터가 없는 동을 목록에 올리면 심사자가 후보 0건을 보게 된다.
+# FE 는 동을 강제하지 않는다(`행정동 (선택)`) — 구만 골라도 검색된다.
 REGIONS = [
     ("11", None, RegionLevel.SIDO, "서울특별시"),
-    ("11680", "11", RegionLevel.SIGUNGU, "강남구"),
+    ("11110", "11", RegionLevel.SIGUNGU, "종로구"),
+    ("11140", "11", RegionLevel.SIGUNGU, "중구"),
+    ("11170", "11", RegionLevel.SIGUNGU, "용산구"),
+    ("11200", "11", RegionLevel.SIGUNGU, "성동구"),
+    ("11215", "11", RegionLevel.SIGUNGU, "광진구"),
+    ("11230", "11", RegionLevel.SIGUNGU, "동대문구"),
+    ("11260", "11", RegionLevel.SIGUNGU, "중랑구"),
+    ("11290", "11", RegionLevel.SIGUNGU, "성북구"),
+    ("11305", "11", RegionLevel.SIGUNGU, "강북구"),
+    ("11320", "11", RegionLevel.SIGUNGU, "도봉구"),
+    ("11350", "11", RegionLevel.SIGUNGU, "노원구"),
+    ("11380", "11", RegionLevel.SIGUNGU, "은평구"),
+    ("11410", "11", RegionLevel.SIGUNGU, "서대문구"),
     ("11440", "11", RegionLevel.SIGUNGU, "마포구"),
+    ("11470", "11", RegionLevel.SIGUNGU, "양천구"),
+    ("11500", "11", RegionLevel.SIGUNGU, "강서구"),
+    ("11530", "11", RegionLevel.SIGUNGU, "구로구"),
+    ("11545", "11", RegionLevel.SIGUNGU, "금천구"),
+    ("11560", "11", RegionLevel.SIGUNGU, "영등포구"),
+    ("11590", "11", RegionLevel.SIGUNGU, "동작구"),
+    ("11620", "11", RegionLevel.SIGUNGU, "관악구"),
+    ("11650", "11", RegionLevel.SIGUNGU, "서초구"),
+    ("11680", "11", RegionLevel.SIGUNGU, "강남구"),
+    ("11710", "11", RegionLevel.SIGUNGU, "송파구"),
+    ("11740", "11", RegionLevel.SIGUNGU, "강동구"),
     ("1168010100", "11680", RegionLevel.DONG, "역삼1동"),
     ("1144012000", "11440", RegionLevel.DONG, "서교동"),
 ]

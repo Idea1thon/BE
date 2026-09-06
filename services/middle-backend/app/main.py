@@ -11,18 +11,21 @@ from fastapi.openapi.utils import get_openapi
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.errors import register_error_handlers
-from app.services import recommendation_client
+from app.services import recommendation_client, siren_client
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
-    """추천 서비스 HTTP 커넥션을 앱 수명에 맞춘다.
+    """외부 서비스 HTTP 커넥션을 앱 수명에 맞춘다.
 
     폴링은 몇 초 간격으로 반복되는 호출이라 매번 클라이언트를 열고 닫으면
     TCP 핸드셰이크 비용이 그대로 쌓인다. 하나를 재사용하고 종료 시 닫는다.
+    사이렌 클라이언트는 아직 호출부가 없어 대개 열리지 않는다 — close_client()
+    는 그 경우 아무 일도 하지 않는다. 연동될 때 닫는 것을 잊지 않으려고 미리 둔다.
     """
     yield
     await recommendation_client.close_client()
+    await siren_client.close_client()
 
 
 app = FastAPI(

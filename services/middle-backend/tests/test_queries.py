@@ -6,6 +6,8 @@ import datetime as dt
 
 import pytest
 
+from app.models.enums import RegionLevel
+
 OWNER1 = {"email": "owner1@example.com", "password": "devpass1234"}
 OWNER2 = {"email": "owner2@example.com", "password": "devpass1234"}
 HQ = {"email": "hq@example.com", "password": "devpass1234"}
@@ -120,11 +122,24 @@ async def test_regions_returns_sido_when_no_parent(client):
 
 
 async def test_regions_returns_children_for_parent_code(client):
+    """서울 하위는 자치구 전부. 기대값을 시드에서 끌어온다.
+
+    이름을 여기에 적어 두면 시드에 구를 하나 더할 때마다 관계없는 테스트가
+    깨진다. 확인하려는 것은 "parent_code 의 자식만, 코드 순으로 온다" 이지
+    자치구 목록 자체가 아니다.
+    """
+    from scripts.seed import REGIONS
+
+    expected = [
+        (code, name)
+        for code, parent, level, name in REGIONS
+        if parent == "11" and level is RegionLevel.SIGUNGU
+    ]
     headers = await _auth(client, HQ)
     res = await client.get("/api/v1/regions?parent_code=11", headers=headers)
     assert res.status_code == 200
     items = res.json()["items"]
-    assert {i["name"] for i in items} == {"강남구", "마포구"}
+    assert [(i["code"], i["name"]) for i in items] == sorted(expected)
     assert all(i["level"] == "SIGUNGU" for i in items)
 
 

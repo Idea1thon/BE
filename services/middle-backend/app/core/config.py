@@ -61,6 +61,17 @@ class Settings(BaseSettings):
             + self.recommendation_timeout_margin_seconds
         )
 
+    # 위험도 사이렌 서비스 (services/siren). 서버 간 호출 전용이다.
+    #
+    # 상대 api.py 에는 토큰 검사가 없다. 공개 네트워크에 노출하면 누구나 부를 수
+    # 있으므로 compose 내부 네트워크에만 둔다. 토큰이 붙는 날을 대비해
+    # INTERNAL_API_TOKEN 이 있으면 헤더로 실어 보낸다(지금은 무시된다).
+    #
+    # 추천과 달리 순수 계산 동기 호출이라 타임아웃이 짧아도 된다. 그래도 12개월치
+    # 보고서를 한 번에 보내므로 기본 60초를 둔다.
+    siren_api_url: str = "http://localhost:8002"
+    siren_request_timeout_seconds: float = 60.0
+
     # CORS — FE(Vite dev server)가 브라우저에서 호출한다.
     # 쉼표로 구분된 문자열 또는 JSON 배열을 받는다. 와일드카드는 허용하지 않는다.
     # NoDecode: pydantic-settings가 환경변수를 JSON으로 먼저 파싱하지 않게 한다
