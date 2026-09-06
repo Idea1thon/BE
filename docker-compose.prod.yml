@@ -58,6 +58,9 @@ services:
       RECOMMENDATION_INCLUDE_POI: "false"
       RECOMMENDATION_INCLUDE_POI_CONTEXT: "false"
       RECOMMENDATION_INCLUDE_NEWS: "true"
+      # 서빙 캐시 TTL(초). 스탬프 재확인 주기 + 엔트리 최대 수명 (PR #27).
+      # 데모처럼 원천이 고정된 구간에서는 늘려서 캐시 적중을 유지한다.
+      SERVING_CACHE_TTL_SECONDS: ${SERVING_CACHE_TTL_SECONDS:-300}
       RECOMMENDATION_API_OUT_ROOT: /app/output/recommendation_api_runs
       LLM_API_URL: ${LLM_API_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
