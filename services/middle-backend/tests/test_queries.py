@@ -143,6 +143,29 @@ async def test_regions_returns_children_for_parent_code(client):
     assert all(i["level"] == "SIGUNGU" for i in items)
 
 
+async def test_regions_expose_all_seoul_dong(client):
+    """마이그레이션 0005 로 25개 자치구 전부가 행정동 목록을 갖는다.
+
+    이전에는 강남·마포만 시드돼 다른 구를 고르면 동 선택이 비었다.
+    """
+    headers = await _auth(client, HQ)
+    gu = (await client.get("/api/v1/regions?parent_code=11", headers=headers)).json()["items"]
+    assert len(gu) == 25
+
+    total = 0
+    for item in gu:
+        dongs = (await client.get(
+            f"/api/v1/regions?parent_code={item['code']}", headers=headers
+        )).json()["items"]
+        assert dongs, f"{item['name']} 행정동이 비어 있음"
+        assert all(d["level"] == "DONG" and d["code"].startswith(item["code"]) for d in dongs)
+        total += len(dongs)
+    assert total == 425
+
+    songpa = (await client.get("/api/v1/regions?parent_code=11710", headers=headers)).json()["items"]
+    assert ("11710670", "잠실2동") in {(d["code"], d["name"]) for d in songpa}
+
+
 async def test_regions_unknown_parent_returns_empty(client):
     headers = await _auth(client, HQ)
     res = await client.get("/api/v1/regions?parent_code=99999", headers=headers)
