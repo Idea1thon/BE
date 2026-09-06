@@ -17,7 +17,7 @@
       "fixture_franchise_id": "demo-fr-01", "name": "데모 한식음식점 논현역점",
       "address": "서울특별시 강남구 강남대로 506 (논현동)", "region_code": "11680",
       "business_category_code": "CS100001", "scenario": "healthy", "synthetic": true,
-      "location": {"trade_area_code": "3120185", "admin_dong_code": "11680521", "x_5181": 202079.24, "y_5181": 445335.3},
+      "location": {"gu_code": "11680", "trade_area_code": "3120185", "admin_dong_code": "11680521", "x_5181": 202079.24, "y_5181": 445335.3},
       "source_match": {"host_area_id": "commercial_area:3120185", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -25,7 +25,7 @@
       "fixture_franchise_id": "demo-fr-02", "name": "데모 한식음식점 가로수길점",
       "address": "서울특별시 강남구 가로수길 10 (신사동)", "region_code": "11680",
       "business_category_code": "CS100001", "scenario": "healthy", "synthetic": true,
-      "location": {"trade_area_code": "3120186", "admin_dong_code": "11680510", "x_5181": 202073.25, "y_5181": 446563.91},
+      "location": {"gu_code": "11680", "trade_area_code": "3120186", "admin_dong_code": "11680510", "x_5181": 202073.25, "y_5181": 446563.91},
       "source_match": {"host_area_id": "commercial_area:3120186", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -33,7 +33,7 @@
       "fixture_franchise_id": "demo-fr-03", "name": "데모 중식음식점 논현역점",
       "address": "서울특별시 강남구 강남대로 514 (논현동)", "region_code": "11680",
       "business_category_code": "CS100002", "scenario": "healthy", "synthetic": true,
-      "location": {"trade_area_code": "3120185", "admin_dong_code": "11680521", "x_5181": 202052.78, "y_5181": 445410.89},
+      "location": {"gu_code": "11680", "trade_area_code": "3120185", "admin_dong_code": "11680521", "x_5181": 202052.78, "y_5181": 445410.89},
       "source_match": {"host_area_id": "commercial_area:3120185", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -41,7 +41,7 @@
       "fixture_franchise_id": "demo-fr-04", "name": "데모 중식음식점 건대입구역(건대)점",
       "address": "서울특별시 광진구 군자로 1 (화양동)", "region_code": "11215",
       "business_category_code": "CS100002", "scenario": "healthy", "synthetic": true,
-      "location": {"trade_area_code": "3120053", "admin_dong_code": "11215710", "x_5181": 206369.99, "y_5181": 449357.89},
+      "location": {"gu_code": "11215", "trade_area_code": "3120053", "admin_dong_code": "11215710", "x_5181": 206369.99, "y_5181": 449357.89},
       "source_match": {"host_area_id": "commercial_area:3120053", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -49,7 +49,7 @@
       "fixture_franchise_id": "demo-fr-05", "name": "데모 일식음식점 건대입구역(건대)점",
       "address": "서울특별시 광진구 군자로 3 (화양동)", "region_code": "11215",
       "business_category_code": "CS100003", "scenario": "healthy", "synthetic": true,
-      "location": {"trade_area_code": "3120053", "admin_dong_code": "11215710", "x_5181": 206353.42, "y_5181": 449372.55},
+      "location": {"gu_code": "11215", "trade_area_code": "3120053", "admin_dong_code": "11215710", "x_5181": 206353.42, "y_5181": 449372.55},
       "source_match": {"host_area_id": "commercial_area:3120053", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -57,7 +57,7 @@
       "fixture_franchise_id": "demo-fr-06", "name": "데모 일식음식점 어린이대공원역점",
       "address": "서울특별시 광진구 광나루로 356 (화양동)", "region_code": "11215",
       "business_category_code": "CS100003", "scenario": "slow_margin_squeeze", "synthetic": true,
-      "location": {"trade_area_code": "3120054", "admin_dong_code": "11215710", "x_5181": 206133.69, "y_5181": 449824.0},
+      "location": {"gu_code": "11215", "trade_area_code": "3120054", "admin_dong_code": "11215710", "x_5181": 206133.69, "y_5181": 449824.0},
       "source_match": {"host_area_id": "commercial_area:3120054", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -65,7 +65,7 @@
       "fixture_franchise_id": "demo-fr-01", "name": "데모 양식음식점 DMC(디지털미디어시티)점",
       "address": "서울특별시 마포구 성암로 255 (상암동)", "region_code": "11440",
       "business_category_code": "CS100004", "scenario": "slow_margin_squeeze", "synthetic": true,
-      "location": {"trade_area_code": "3120098", "admin_dong_code": "11440740", "x_5181": 190412.06, "y_5181": 453379.03},
+      "location": {"gu_code": "11440", "trade_area_code": "3120098", "admin_dong_code": "11440740", "x_5181": 190412.06, "y_5181": 453379.03},
       "source_match": {"host_area_id": "commercial_area:3120098", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -73,7 +73,7 @@
       "fixture_franchise_id": "demo-fr-02", "name": "데모 양식음식점 합정역점",
       "address": "서울특별시 마포구 독막로 11 (합정동)", "region_code": "11440",
       "business_category_code": "CS100004", "scenario": "slow_margin_squeeze", "synthetic": true,
-      "location": {"trade_area_code": "3120101", "admin_dong_code": "11440680", "x_5181": 192469.66, "y_5181": 449929.22},
+      "location": {"gu_code": "11440", "trade_area_code": "3120101", "admin_dong_code": "11440680", "x_5181": 192469.66, "y_5181": 449929.22},
       "source_match": {"host_area_id": "commercial_area:3120101", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -81,7 +81,7 @@
       "fixture_franchise_id": "demo-fr-03", "name": "데모 제과점 명동 남대문 북창동 다동 무교동 관광특구점",
       "address": "서울특별시 중구 남대문로 11 (남대문로4가)", "region_code": "11140",
       "business_category_code": "CS100005", "scenario": "slow_margin_squeeze", "synthetic": true,
-      "location": {"trade_area_code": "3001492", "admin_dong_code": "11140520", "x_5181": 197974.52, "y_5181": 451274.52},
+      "location": {"gu_code": "11140", "trade_area_code": "3001492", "admin_dong_code": "11140520", "x_5181": 197974.52, "y_5181": 451274.52},
       "source_match": {"host_area_id": "commercial_area:3001492", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -89,7 +89,7 @@
       "fixture_franchise_id": "demo-fr-04", "name": "데모 패스트푸드점 DMC(디지털미디어시티)점",
       "address": "서울특별시 마포구 월드컵북로 456 (상암동)", "region_code": "11440",
       "business_category_code": "CS100006", "scenario": "sales_decline", "synthetic": true,
-      "location": {"trade_area_code": "3120098", "admin_dong_code": "11440740", "x_5181": 189737.98, "y_5181": 453676.47},
+      "location": {"gu_code": "11440", "trade_area_code": "3120098", "admin_dong_code": "11440740", "x_5181": 189737.98, "y_5181": 453676.47},
       "source_match": {"host_area_id": "commercial_area:3120098", "address_column": "road_address", "area_join_type": "근접", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -97,7 +97,7 @@
       "fixture_franchise_id": "demo-fr-05", "name": "데모 패스트푸드점 남부터미널역점",
       "address": "서울특별시 서초구 남부순환로 2449 (서초동)", "region_code": "11650",
       "business_category_code": "CS100006", "scenario": "sales_decline", "synthetic": true,
-      "location": {"trade_area_code": "3120175", "admin_dong_code": "11650510", "x_5181": 201615.41, "y_5181": 442563.13},
+      "location": {"gu_code": "11650", "trade_area_code": "3120175", "admin_dong_code": "11650510", "x_5181": 201615.41, "y_5181": 442563.13},
       "source_match": {"host_area_id": "commercial_area:3120175", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -105,7 +105,7 @@
       "fixture_franchise_id": "demo-fr-06", "name": "데모 치킨전문점 국회의사당역(국회의사당)점",
       "address": "서울특별시 영등포구 국회대로62길 23 (여의도동)", "region_code": "11560",
       "business_category_code": "CS100007", "scenario": "sales_decline", "synthetic": true,
-      "location": {"trade_area_code": "3120148", "admin_dong_code": "11560540", "x_5181": 192713.2, "y_5181": 447457.01},
+      "location": {"gu_code": "11560", "trade_area_code": "3120148", "admin_dong_code": "11560540", "x_5181": 192713.2, "y_5181": 447457.01},
       "source_match": {"host_area_id": "commercial_area:3120148", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -113,7 +113,7 @@
       "fixture_franchise_id": "demo-fr-01", "name": "데모 분식전문점 사당역(사당)점",
       "address": "서울특별시 관악구 과천대로 921 (남현동)", "region_code": "11650",
       "business_category_code": "CS100008", "scenario": "delivery_trap", "synthetic": true,
-      "location": {"trade_area_code": "3120160", "admin_dong_code": "11620630", "x_5181": 198431.52, "y_5181": 441462.56},
+      "location": {"gu_code": "11650", "trade_area_code": "3120160", "admin_dong_code": "11620630", "x_5181": 198431.52, "y_5181": 441462.56},
       "source_match": {"host_area_id": "commercial_area:3120160", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -121,7 +121,7 @@
       "fixture_franchise_id": "demo-fr-02", "name": "데모 분식전문점 방배동카페골목점",
       "address": "서울특별시 서초구 동광로11길 109 (방배동)", "region_code": "11650",
       "business_category_code": "CS100008", "scenario": "delivery_trap", "synthetic": true,
-      "location": {"trade_area_code": "3120162", "admin_dong_code": "11650590", "x_5181": 198660.41, "y_5181": 444063.41},
+      "location": {"gu_code": "11650", "trade_area_code": "3120162", "admin_dong_code": "11650590", "x_5181": 198660.41, "y_5181": 444063.41},
       "source_match": {"host_area_id": "commercial_area:3120162", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -129,7 +129,7 @@
       "fixture_franchise_id": "demo-fr-03", "name": "데모 호프-간이주점 왕십리역(왕십리)점",
       "address": "서울특별시 성동구 고산자로 207 (행당동)", "region_code": "11200",
       "business_category_code": "CS100009", "scenario": "delivery_trap", "synthetic": true,
-      "location": {"trade_area_code": "3120049", "admin_dong_code": "11200560", "x_5181": 202979.79, "y_5181": 451016.27},
+      "location": {"gu_code": "11200", "trade_area_code": "3120049", "admin_dong_code": "11200560", "x_5181": 202979.79, "y_5181": 451016.27},
       "source_match": {"host_area_id": "commercial_area:3120049", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -137,7 +137,7 @@
       "fixture_franchise_id": "demo-fr-04", "name": "데모 호프-간이주점 뚝섬역점",
       "address": "서울특별시 성동구 상원1길 12 (성수동1가)", "region_code": "11200",
       "business_category_code": "CS100009", "scenario": "debt_spiral", "synthetic": true,
-      "location": {"trade_area_code": "3120051", "admin_dong_code": "11200660", "x_5181": 204315.99, "y_5181": 449525.99},
+      "location": {"gu_code": "11200", "trade_area_code": "3120051", "admin_dong_code": "11200660", "x_5181": 204315.99, "y_5181": 449525.99},
       "source_match": {"host_area_id": "commercial_area:3120051", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -145,7 +145,7 @@
       "fixture_franchise_id": "demo-fr-05", "name": "데모 커피-음료 왕십리역(왕십리)점",
       "address": "서울특별시 성동구 고산자로 211 (행당동)", "region_code": "11200",
       "business_category_code": "CS100010", "scenario": "debt_spiral", "synthetic": true,
-      "location": {"trade_area_code": "3120049", "admin_dong_code": "11200560", "x_5181": 202978.96, "y_5181": 451042.63},
+      "location": {"gu_code": "11200", "trade_area_code": "3120049", "admin_dong_code": "11200560", "x_5181": 202978.96, "y_5181": 451042.63},
       "source_match": {"host_area_id": "commercial_area:3120049", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -153,7 +153,7 @@
       "fixture_franchise_id": "demo-fr-06", "name": "데모 커피-음료 잠실새내역(신천)점",
       "address": "서울특별시 송파구 백제고분로 83 (잠실동)", "region_code": "11710",
       "business_category_code": "CS100010", "scenario": "debt_spiral", "synthetic": true,
-      "location": {"trade_area_code": "3120225", "admin_dong_code": "11710650", "x_5181": 207015.57, "y_5181": 445558.3},
+      "location": {"gu_code": "11710", "trade_area_code": "3120225", "admin_dong_code": "11710650", "x_5181": 207015.57, "y_5181": 445558.3},
       "source_match": {"host_area_id": "commercial_area:3120225", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -161,7 +161,7 @@
       "fixture_franchise_id": "demo-fr-01", "name": "데모 한식음식점 잠실새내역(신천)점",
       "address": "서울특별시 송파구 백제고분로11길 35 (잠실동)", "region_code": "11710",
       "business_category_code": "CS100001", "scenario": "sparse", "synthetic": true,
-      "location": {"trade_area_code": "3120225", "admin_dong_code": "11710650", "x_5181": 207371.43, "y_5181": 445445.29},
+      "location": {"gu_code": "11710", "trade_area_code": "3120225", "admin_dong_code": "11710650", "x_5181": 207371.43, "y_5181": 445445.29},
       "source_match": {"host_area_id": "commercial_area:3120225", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     },
     {
@@ -169,7 +169,7 @@
       "fixture_franchise_id": "demo-fr-02", "name": "데모 중식음식점 잠실새내역(신천)점",
       "address": "서울특별시 송파구 백제고분로11길 9 (잠실동)", "region_code": "11710",
       "business_category_code": "CS100002", "scenario": "sparse", "synthetic": true,
-      "location": {"trade_area_code": "3120225", "admin_dong_code": "11710650", "x_5181": 207107.34, "y_5181": 445395.53},
+      "location": {"gu_code": "11710", "trade_area_code": "3120225", "admin_dong_code": "11710650", "x_5181": 207107.34, "y_5181": 445395.53},
       "source_match": {"host_area_id": "commercial_area:3120225", "address_column": "road_address", "area_join_type": "내부", "store_quarter_rows": 21, "sales_quarter_rows": 21}
     }
   ]
