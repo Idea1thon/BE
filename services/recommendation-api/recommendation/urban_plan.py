@@ -28,6 +28,12 @@ _DIR = "data/도시계획사업"
 _OVERLAP_FILE = "도시계획사업_상권겹침.csv"
 _ASSOC_FILE = "정비사업조합_목록.csv"
 
+# 제2차 서울 도시철도망 구축계획(2020-11-17). 자치구 grain — 미개통·정거장 위치 미확정.
+_SUBWAY_DIR = "data/도시철도역사"
+_SUBWAY_SGG_FILE = "도시철도망계획_자치구.csv"
+_SUBWAY_LINE_FILE = "도시철도망계획_노선.csv"
+_SUBWAY_PLAN_PERIOD = "2020-11-17"  # 관보 고시일
+
 # 겹침_상권비율(%) 이 값 이상이면 "이 상권의 개발 이슈"로 전면 서술, 미만은 건수만.
 MIN_OVERLAP_RATIO = 5.0
 
@@ -106,16 +112,71 @@ class PlanProject:
 
 
 @dataclass
+class PlannedSubwayLine:
+    name: str
+    line_type: str        # 신설 | 연장 (운행개선은 제외)
+    endpoints: str        # "기점~종점"
+    length_km: float | None
+    sigungus: list[str]   # 경유 자치구
+    status: str           # 상태_2026
+    period: str           # 계획기간
+
+
+@dataclass
 class PlanData:
     by_trdar: dict[str, list[PlanProject]] = field(default_factory=dict)      # 상권_코드 → [PlanProject]
     by_sigungu: dict[str, list[PlanProject]] = field(default_factory=dict)    # 자치구_코드 → [PlanProject] (정비사업조합)
+    subway_by_sigungu: dict[str, list[str]] = field(default_factory=dict)     # 자치구명 → [계획 노선명(신설/연장만)]
+    subway_lines: dict[str, PlannedSubwayLine] = field(default_factory=dict)  # 노선명 → 상세
     observed_at: str = ""
     source_paths: dict[str, str] = field(default_factory=dict)
     coverage: dict[str, Any] = field(default_factory=dict)
 
 
+def _load_subway_plan(root: Path) -> tuple[dict[str, list[str]], dict[str, PlannedSubwayLine]]:
+    """제2차 서울 도시철도망 구축계획 — 자치구별 계획 노선(신설·연장만, 운행개선 제외)."""
+    by_sgg: dict[str, list[str]] = {}
+    lines: dict[str, PlannedSubwayLine] = {}
+    try:
+        line_rows = _read_csv(root / _SUBWAY_DIR / _SUBWAY_LINE_FILE)
+    except (OSError, RuntimeError):
+        return by_sgg, lines
+    for r in line_rows:
+        name = str(r.get("노선명", "")).strip()
+        ltype = str(r.get("노선유형", "")).strip()
+        if not name or ltype not in ("신설", "연장"):
+            continue
+        lines[name] = PlannedSubwayLine(
+            name=name, line_type=ltype,
+            endpoints=f"{str(r.get('기점', '')).strip()}~{str(r.get('종점', '')).strip()}",
+            length_km=_num(r.get("규모_km")),
+            sigungus=[s.strip() for s in str(r.get("경유_자치구", "")).split(";") if s.strip()],
+            status=str(r.get("상태_2026", "")).strip() or "계획(미개통·정거장 위치 미확정)",
+            period=str(r.get("계획기간", "")).strip(),
+        )
+    try:
+        sgg_rows = _read_csv(root / _SUBWAY_DIR / _SUBWAY_SGG_FILE)
+    except (OSError, RuntimeError):
+        sgg_rows = []
+    for r in sgg_rows:
+        sgg = str(r.get("자치구", "")).strip()
+        if not sgg:
+            continue
+        planned: list[str] = []
+        for entry in str(r.get("전체_계획노선_목록", "")).split(";"):
+            entry = entry.strip()
+            if not entry or "(운행개선)" in entry:  # 운행개선(급행·직결)은 신역세권 아님 → 제외
+                continue
+            planned.append(entry)
+        if planned:
+            by_sgg[sgg] = sorted(dict.fromkeys(planned))  # 중복 제거·결정론
+    return by_sgg, lines
+
+
 def _assemble(urban_rows: list[dict[str, str]], assoc_rows: list[dict[str, str]],
-              *, observed_at: str = "", source_paths: dict[str, str] | None = None) -> PlanData:
+              *, observed_at: str = "", source_paths: dict[str, str] | None = None,
+              subway_by_sigungu: dict[str, list[str]] | None = None,
+              subway_lines: dict[str, PlannedSubwayLine] | None = None) -> PlanData:
     by_trdar: dict[str, list[PlanProject]] = {}
     for r in urban_rows:
         code = str(r.get("상권_코드", "")).strip()
@@ -153,16 +214,23 @@ def _assemble(urban_rows: list[dict[str, str]], assoc_rows: list[dict[str, str]]
             source="redevelopment_association",
         ))
     return PlanData(
-        by_trdar=by_trdar, by_sigungu=by_sigungu, observed_at=observed_at,
-        source_paths=source_paths or {
+        by_trdar=by_trdar, by_sigungu=by_sigungu,
+        subway_by_sigungu=subway_by_sigungu or {}, subway_lines=subway_lines or {},
+        observed_at=observed_at,
+        source_paths={
             "urban_overlap": f"{_DIR}/{_OVERLAP_FILE}",
             "redev_association": f"{_DIR}/{_ASSOC_FILE}",
+            "subway_plan_line": f"{_SUBWAY_DIR}/{_SUBWAY_LINE_FILE}",
+            "subway_plan_sigungu": f"{_SUBWAY_DIR}/{_SUBWAY_SGG_FILE}",
+            **(source_paths or {}),
         },
         coverage={
             "urban_trdar": len(by_trdar),
             "urban_projects": sum(len(v) for v in by_trdar.values()),
             "redev_sigungu": len(by_sigungu),
             "redev_projects": sum(len(v) for v in by_sigungu.values()),
+            "subway_plan_sigungu": len(subway_by_sigungu or {}),
+            "subway_plan_lines": len(subway_lines or {}),
         },
     )
 
@@ -172,11 +240,16 @@ def load_from_files(root: Path) -> PlanData:
     assoc = _read_csv(root / _DIR / _ASSOC_FILE)
     created = {str(r["생성일"]).strip() for r in urban if str(r.get("생성일", "")).strip()}
     observed = max(created) if created else ""  # F44: 행 순서 무관, 최신 생성일
-    return _assemble(urban, assoc, observed_at=observed)
+    subway_sgg, subway_lines = _load_subway_plan(root)
+    return _assemble(urban, assoc, observed_at=observed,
+                     subway_by_sigungu=subway_sgg, subway_lines=subway_lines)
 
 
-def load_from_db(query) -> PlanData | None:
-    """query: DbSource._query. context.plan_snapshot 에서 조립한다. 미적재 시 None."""
+def load_from_db(query, root: Path) -> PlanData | None:
+    """query: DbSource._query. context.plan_snapshot 에서 조립한다. 미적재 시 None.
+
+    계획 도시철도(`도시철도망계획_*`)는 DB에 없어 `root` 아래 파일에서 읽는다.
+    """
     rows = query(
         "SELECT plan_type, spatial_unit_type, spatial_unit_code, project_name, project_category, "
         "progress_stage, overlap_ratio, observed_at, source_attributes "
@@ -199,9 +272,9 @@ def load_from_db(query) -> PlanData | None:
             assoc_rows.append(attrs)
     # F44: 행 순서에 의존하지 않고 가장 최근 생성일을 스냅샷 기준으로.
     observed = max(created) if created else ""
+    subway_sgg, subway_lines = _load_subway_plan(root)
     return _assemble(urban_rows, assoc_rows, observed_at=observed,
-                     source_paths={"urban_overlap": f"{_DIR}/{_OVERLAP_FILE}",
-                                   "redev_association": f"{_DIR}/{_ASSOC_FILE}"})
+                     subway_by_sigungu=subway_sgg, subway_lines=subway_lines)
 
 
 @dataclass
@@ -315,10 +388,40 @@ def context_for_candidate(
             spatial_grain="상권", grain_is_proxy=False, observed_end_period=obs,
             source_path=plan.source_paths["urban_overlap"],
             interpretation=f"상권 겹침 도시계획사업 중 대규모 개발 대분류({', '.join(major_hit)}) {len(maj_projects)}건",
-            limitation="사업 대분류 스냅샷이며 정거장·구역 경계·개통일 미확정. '예정역'·'확정' 표현 금지. 계획 도시철도(자치구)는 미연결. fit_tier 판정·정렬 미반영",
+            limitation="사업 대분류 스냅샷이며 정거장·구역 경계·개통일 미확정. '예정역'·'확정' 표현 금지. fit_tier 판정·정렬 미반영",
         ))
-    # F46: FC-52 계획 도시철도 부분은 아직 미연결임을 런타임에 명시.
-    ctx.missing.append({"feature": "FC-52", "reason": "계획 도시철도(도시철도망계획_자치구.csv, 자치구 grain) 부분 미연결 — 후속 과제"})
+
+    # ---- FC-52: 계획 도시철도 (제2차 서울 도시철도망 구축계획, 자치구 grain) ----
+    planned_lines = plan.subway_by_sigungu.get(sigungu_name or "", [])
+    if planned_lines:
+        def _fmt(entry: str) -> str:
+            lo = plan.subway_lines.get(_line_key(entry))
+            if not lo:
+                return entry  # "노선명(구분)" 원문
+            length = f", {lo.length_km:g}km" if lo.length_km else ""
+            return f"{lo.name}({lo.line_type}, {lo.endpoints}{length})"
+        detail = "; ".join(_fmt(ln) for ln in planned_lines)
+        ctx.context_notes.append(
+            f"{sigungu_name} 계획 도시철도 {len(planned_lines)}개 노선: {detail} — "
+            f"**제2차 서울 도시철도망 구축계획({_SUBWAY_PLAN_PERIOD}) 자치구 grain**. 2020년 계획이며 "
+            f"미개통·정거장 위치·개통일 미확정. 운행개선(급행·직결)은 신역세권이 아니라 제외됨. "
+            f"이 후보 지점이 노선·정거장에서 가깝다는 뜻이 아니다. '예정역'·'확정' 표현 금지, 판정·정렬 미반영 (FC-52 계획도시철도)"
+        )
+        if "FC-52" not in ctx.dimension_features:
+            ctx.dimension_features.append("FC-52")
+        ctx.grain_notes.setdefault("FC-52-subway", "자치구 grain · 제2차 서울 도시철도망 구축계획(2020) 신설·연장 노선(운행개선 제외) · 정거장 미확정 · context_notes 버킷")
+        ctx.evidence.append(_ev(
+            "FC-52", "자치구_계획도시철도_노선수", len(planned_lines), "개",
+            spatial_grain="자치구", grain_is_proxy=True, observed_end_period=_SUBWAY_PLAN_PERIOD,
+            source_path=plan.source_paths["subway_plan_sigungu"],
+            interpretation=f"{sigungu_name} 경유 계획 도시철도 신설·연장 {len(planned_lines)}개 노선: {', '.join(planned_lines)}",
+            limitation="2020년 관보 계획 · 자치구 grain · 미개통 · 정거장 위치·개통일 미확정 · 운행개선 제외. 후보 지점의 역세권 편입을 뜻하지 않음. '예정역'·'확정' 금지. fit_tier 판정·정렬 미반영",
+            proxy_note="자치구 grain(정거장 위치 미확정)",
+        ))
+    elif plan.subway_by_sigungu:
+        ctx.missing.append({"feature": "FC-52", "reason": f"{sigungu_name or sigungu_code}는 제2차 서울 도시철도망 구축계획(2020)에 신설·연장 계획 노선 없음"})
+    else:
+        ctx.missing.append({"feature": "FC-52", "reason": "계획 도시철도(도시철도망계획_*.csv) 데이터 미로드"})
 
     # ---- FC-51 보조: 자치구 정비사업조합 (좌표 없음 → 자치구 대리) ----
     assoc = list(plan.by_sigungu.get(sigungu_code or "", []))
@@ -349,6 +452,11 @@ def context_for_candidate(
     if not projects and not assoc:
         ctx.missing.append({"feature": "FC-51", "reason": f"이 상권·자치구({sigungu_name or sigungu_code})와 매칭되는 도시계획·정비사업 없음"})
     return ctx
+
+
+def _line_key(entry: str) -> str:
+    """'난곡선(신설)' → '난곡선' (노선 상세 dict 조회 키)."""
+    return entry.split("(", 1)[0].strip()
 
 
 def _count_by(items, key):

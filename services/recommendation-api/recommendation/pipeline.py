@@ -2476,7 +2476,7 @@ class DbSource:
     def urban_plan(self):
         # context.plan_snapshot(urban_project_overlap + redevelopment_association)에서 조립.
         # 미적재 시 None → 파일 소스 폴백/ missing 처리 (#29).
-        return urban_plan.load_from_db(self._query)
+        return urban_plan.load_from_db(self._query, ROOT)
 
     def retrieve_requests(self, requests, selected_region, industry_code, quarter):
         # RAG 검색 SQL 은 지역·차원·업종별로 갈라져 종류가 매우 많고(수백 지역 ×
