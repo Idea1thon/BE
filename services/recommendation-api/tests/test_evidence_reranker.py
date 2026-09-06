@@ -53,12 +53,12 @@ class EvidenceRerankerTests(unittest.TestCase):
     def test_top_k_selection_does_not_require_all_48_ids(self):
         sources = {f'long-source-{i}': {'bucket': 'context_notes', 'text': '직장인 점심 근거'} for i in range(60)}
         client = Mock()
-        client.generate_json.return_value = {'ordered_ids': [f'E{i:02d}' for i in range(48, 32, -1)]}
+        client.generate_json.return_value = {'ordered_ids': [f'E{i:02d}' for i in range(48, 16, -1)]}
         selected, meta = select_sources(self.query, sources, client)
-        self.assertEqual(list(selected), [f'long-source-{i}' for i in range(47, 31, -1)])
+        self.assertEqual(list(selected), [f'long-source-{i}' for i in range(47, 15, -1)])
         self.assertEqual(meta['mode'], 'llm')
         self.assertEqual(meta['diagnostics']['backfilled_count'], 0)
-        self.assertEqual(client.generate_json.call_args.args[1]['top_k'], 16)
+        self.assertEqual(client.generate_json.call_args.args[1]['top_k'], 32)
 
     def test_non_object_reply_falls_back_with_format_reason(self):
         client = Mock()
@@ -126,8 +126,68 @@ class EvidenceRerankerTests(unittest.TestCase):
             'summary': {'bucket': 'summary', 'text': '요약'},
         }, client)
         self.assertEqual(list(selected), ['summary'])
-        self.assertEqual(meta['shortlist_count'], 0)
+        self.assertEqual(meta['exploration_count'], 1)
         client.generate_json.assert_not_called()
+
+    def test_topic_is_soft_and_unclassified_question_term_gets_budget_coverage(self):
+        query = {'normalized_text': '직장인 수요와 지하철 접근성을 비교해줘',
+                 'question_contract': {'topic_ids': ['jobs']}}
+        sources = {f'jobs-{i}': {'bucket': 'evidence', 'text': '{"metric_name":"총_직장_인구_수", "interpretation":"직장인 수요"}'} for i in range(60)}
+        sources['transit'] = {'bucket': 'evidence', 'text': '{"metric_name":"지하철 접근성", "value":300}'}
+        selected, meta = select_sources(query, sources)
+        self.assertIn('transit', selected)
+        self.assertEqual(len(selected), 32)
+        self.assertIn('transit', meta['coverage_ids'])
+
+    def test_requested_topic_representative_survives_without_literal_query_word(self):
+        query = {'normalized_text': '임대료와 직장인 수요 비교',
+                 'question_contract': {'topic_ids': ['rent', 'jobs']}}
+        sources = {f'rent-{i}': {'bucket': 'evidence', 'text': '{"metric_name":"R-ONE_임대가격지수", "interpretation":"임대료 비교"}'} for i in range(60)}
+        sources['jobs'] = {'bucket': 'evidence', 'text': '{"metric_name":"총_직장_인구_수"}'}
+        selected, _ = select_sources(query, sources)
+        self.assertIn('jobs', selected)
+        self.assertEqual(len(selected), 32)
+        client = Mock()
+        client.generate_json.return_value = {'ordered_ids': [f'E{i:02d}' for i in range(1, 33)]}
+        selected, _ = select_sources(query, sources, client)
+        self.assertIn('jobs', selected)
+        self.assertTrue(any('총_직장_인구_수' in source['text'] for source in client.generate_json.call_args.args[1]['sources']))
+        self.assertEqual(len(selected), 32)
+
+    def test_model_shortlist_and_final_budget_preserve_unclassified_term(self):
+        query = {'normalized_text': '직장인 수요와 지하철 접근성 비교',
+                 'question_contract': {'topic_ids': ['jobs']}}
+        sources = {f'jobs-{i}': {'bucket': 'context_notes', 'text': '직장인 수요'} for i in range(60)}
+        sources['transit'] = {'bucket': 'evidence', 'text': '{"metric_name":"지하철 접근성"}'}
+        client = Mock()
+        client.generate_json.return_value = {'ordered_ids': [f'E{i:02d}' for i in range(1, 33)]}
+        selected, meta = select_sources(query, sources, client)
+        payload = client.generate_json.call_args.args[1]
+        self.assertTrue(any('지하철' in source['text'] for source in payload['sources']))
+        self.assertIn('transit', selected)
+        self.assertEqual(len(selected), 32)
+
+    def test_explicit_excluded_only_topic_does_not_return_but_warning_survives(self):
+        query = {'normalized_text': '임대료 말고 직장인과 지하철',
+                 'question_contract': {'topic_ids': ['jobs'], 'excluded_topics': ['rent']}}
+        sources = {'rent': {'bucket': 'evidence', 'text': '{"metric_name":"R-ONE_임대가격지수"}'},
+                   'warning': {'bucket': 'counter_evidence', 'text': '임대료 미확인'},
+                   'transit': {'bucket': 'context_notes', 'text': '지하철 접근성'}}
+        selected, _ = select_sources(query, sources, Mock())
+        self.assertNotIn('rent', selected)
+        self.assertIn('warning', selected)
+        self.assertIn('transit', selected)
+
+    def test_zero_lexical_exploration_requires_model_selection_and_is_bounded(self):
+        query = {'normalized_text': '점심 손님', 'question_contract': {'topic_ids': []}}
+        sources = {f's-{i}': {'bucket': 'evidence', 'text': '{"metric_name":"metric' + str(i) + '"}'} for i in range(20)}
+        self.assertEqual(select_sources(query, sources)[0], {})
+        client = Mock()
+        client.generate_json.return_value = {'ordered_ids': ['E02']}
+        selected, meta = select_sources(query, sources, client)
+        self.assertEqual(list(selected), ['s-1'])
+        self.assertEqual(meta['exploration_count'], 8)
+        self.assertLessEqual(len(client.generate_json.call_args.args[1]['sources']), 8)
 
     def test_reordering_preserves_citation_target(self):
         selected, _ = select_sources(self.query, self.sources)

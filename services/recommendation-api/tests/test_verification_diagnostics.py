@@ -13,6 +13,8 @@ class VerificationDiagnosticsTests(unittest.TestCase):
     def setUp(self):
         self.candidate = {
             'candidate_id': 'test', 'fit_tier': '조건부 검토',
+            'industry_code': 'CS100010',
+            'location': {'overlapping_units': {'admin_dong': ['11710610']}},
             'reasons': ['버스정류장 3개'], 'counter_evidence': [],
             'context_notes': [], 'missing_features': [], 'evidence': [],
         }

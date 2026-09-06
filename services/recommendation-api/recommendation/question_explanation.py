@@ -1,8 +1,6 @@
 """Bounded server rendering of scoped SQL observations, separate from LLM claims."""
 from __future__ import annotations
 
-from .evidence_reranker import source_topic_ids
-
 _DIMENSIONS = {
     'rent': ('rent', '임대가격지수', 'R-ONE 임대 통계'),
     'vacancy': ('vacancy', '공실률', 'R-ONE 공실 통계'),
@@ -64,7 +62,7 @@ def finish_question_card(card: dict, candidate: dict, selected: dict,
     blocked_refs = {item['evidence_id'] for topic in ambiguous for item in grouped[topic]}
     relevant = {ref: source for ref, source in selected.items()
                 if source['bucket'] in {'evidence', 'reasons', 'context_notes'}
-                and source_topic_ids(source) & topics and ref not in blocked_refs}
+                and ref not in blocked_refs}
     for bucket in ('reasons', 'context_notes'):
         result[bucket] = []
         for index, claim in enumerate(card.get(bucket) or []):

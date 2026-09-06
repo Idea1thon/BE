@@ -520,11 +520,9 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         source_catalogs[str(candidate.get("candidate_id"))] = sources
         # Retain the full catalog for audit, but another candidate's SQL region
         # must not enter this candidate's prompt or verifier.
-        eligible = sources
-        if contract.get('topic_ids'):
-            scoped_ids = {item['evidence_id'] for item in retrieval_evidence if matches_candidate(item, candidate)}
-            eligible = {ref: source for ref, source in sources.items()
-                        if not ref.startswith('retrieval-') or ref in scoped_ids}
+        scoped_ids = {item['evidence_id'] for item in retrieval_evidence if matches_candidate(item, candidate)}
+        eligible = {ref: source for ref, source in sources.items()
+                    if not ref.startswith('retrieval-') or ref in scoped_ids}
         selected, ranking = select_sources(query_context, eligible, client)
         ranking['catalog_source_count'] = len(sources)
         relevance[str(candidate.get("candidate_id"))] = ranking
