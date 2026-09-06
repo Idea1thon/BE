@@ -80,7 +80,10 @@ class LLMConfig:
     endpoint: str | None = None
     api_key: str | None = None
     model: str = ""
-    timeout_s: float = 20.0
+    # gpt-5.x 급 추론 모델은 응답까지 20초를 자주 넘긴다. 초과 시 해당 후보가
+    # template 로 강등되므로 여유를 둔다. 요청 전체 상한은 run_pipeline 의
+    # RECOMMENDATION_REQUEST_TIMEOUT_SECONDS 가 따로 잡는다(초과 시 202+폴링).
+    timeout_s: float = 45.0
     max_output_tokens: int = 1200
     max_response_bytes: int = 2_000_000
 
@@ -94,9 +97,9 @@ class LLMConfig:
         api_key = os.getenv("LLM_API_KEY", "").strip() or None
         model = os.getenv("LLM_MODEL", "").strip()
         try:
-            timeout_s = float(os.getenv("LLM_TIMEOUT_SECONDS", "20"))
+            timeout_s = float(os.getenv("LLM_TIMEOUT_SECONDS", "45"))
         except ValueError:
-            timeout_s = 20.0
+            timeout_s = 45.0
         try:
             # 추론 모델은 이 한도 안에서 추론 토큰을 먼저 소비한다. 설명 카드 JSON
             # (후보 배열 verbatim 복사)은 최대 ~2k 토큰이라 여유를 둔다.
