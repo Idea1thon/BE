@@ -68,6 +68,52 @@ class FranchiseRatesTest(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(ValidationError):
                 self.result(annual(**changes))
 
+    def test_contract_v11_derives_risk_level_and_declares_owners(self):
+        result = RiskSirenResponse.model_validate(analyze(complete_payload()))
+        body = result.model_dump()
+        self.assertEqual(body["contract_version"], "risk-siren-contract-v1.1")
+        self.assertEqual(body["risk"]["risk_level"], "NORMAL")
+        self.assertEqual(body["alert"]["risk_level"], "NORMAL")
+        self.assertEqual(body["alert"]["dispatch_owner"], "middle_backend")
+        self.assertEqual(body["financial_products"]["owner"], "middle_backend")
+        self.assertEqual(body["financial_products"]["status"], "grade_only")
+
+    def test_annual_closure_provenance_is_separate_from_scored_signals(self):
+        result = self.result(annual())
+        provenance = result["data_provenance"]
+        self.assertTrue(provenance["contains_synthetic"])
+        self.assertEqual(
+            provenance["annual_franchise_closure"],
+            {"source": "synthetic_test", "synthetic": True},
+        )
+
+    def test_branch_only_partial_policy_suppresses_alert(self):
+        payload = complete_payload(margin_start=0.05, margin_end=-0.22, loan_end=3_000_000)
+        payload["market_data"] = None
+        payload["options"]["grade_policy"] = "branch_only_provisional"
+        result = analyze(payload)
+        self.assertEqual(result["risk"]["calculation_status"], "partial")
+        self.assertEqual(result["risk"]["grade_policy"], "branch_only_provisional")
+        self.assertEqual(result["risk"]["risk_level"], "DANGER")
+        self.assertFalse(result["alert"]["should_fire"])
+        self.assertEqual(result["alert"]["suppressed_reason"], "grade_policy=branch_only_provisional")
+
+    def test_hq_does_not_count_provisional_grade_as_calculated(self):
+        payload = complete_payload(margin_start=0.05, margin_end=-0.22, loan_end=3_000_000)
+        payload["market_data"] = None
+        payload["options"]["grade_policy"] = "branch_only_provisional"
+        result = analyze(payload)
+        summary = summarize({
+            "request_id": "hq-provisional",
+            "franchise_id": "fr-001",
+            "as_of": "2026-03-31",
+            "branch_results": [result],
+        })
+        self.assertEqual(summary["calculated_count"], 0)
+        self.assertIsNone(summary["danger_ratio_pct"])
+        self.assertIsNone(summary["average_score"])
+        self.assertEqual(summary["alert_candidate_count"], 0)
+
 
 class HqBoundaryTest(unittest.TestCase):
     def request(self):
@@ -97,5 +143,13 @@ class HqBoundaryTest(unittest.TestCase):
         req = self.request()
         req["branch_results"][0]["alert"]["should_fire"] = True
         output = HqSummaryResponse.model_validate(summarize(req)).model_dump()
-        self.assertNotIn("unread_alert_count", output)
+        self.assertIsNone(output["unread_alert_count"])
+        self.assertEqual(output["alert_candidate_count"], 1)
         self.assertEqual(output["branch_count"], 1)
+
+    def test_hq_rejects_non_strict_result_marked_calculated(self):
+        req = self.request()
+        req["branch_results"][0]["risk"]["grade_policy"] = "branch_only_provisional"
+        req["branch_results"][0]["risk"]["calculation_status"] = "calculated"
+        with self.assertRaises(ValueError):
+            summarize(req)

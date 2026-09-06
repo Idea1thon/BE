@@ -1,7 +1,9 @@
 """Non-finite external numbers must fail before producing scores or alerts."""
 
 import json
+import os
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -67,3 +69,32 @@ class FiniteInputHttpTest(unittest.TestCase):
         self.assertEqual(error["type"], "greater_than")
         self.assertEqual(error["input"], -1.5)
         self.assertEqual(error["ctx"], {"gt": 0.0})
+
+    def test_configured_internal_token_is_required(self):
+        with patch.dict(os.environ, {"SIREN_INTERNAL_API_TOKEN": "token-1"}, clear=False):
+            self.assertEqual(
+                self.client.post("/internal/risk-sirens/analyze", json=complete_payload()).status_code,
+                401,
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/internal/risk-sirens/analyze",
+                    json=complete_payload(),
+                    headers={"X-Internal-Token": "wrong"},
+                ).status_code,
+                401,
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/internal/risk-sirens/analyze",
+                    json=complete_payload(),
+                    headers={"X-Internal-Token": "token-1"},
+                ).status_code,
+                200,
+            )
+
+    def test_production_without_internal_token_fails_closed(self):
+        with patch.dict(os.environ, {"ENVIRONMENT": "production"}, clear=False):
+            os.environ.pop("SIREN_INTERNAL_API_TOKEN", None)
+            response = self.client.post("/internal/risk-sirens/analyze", json=complete_payload())
+        self.assertEqual(response.status_code, 503)

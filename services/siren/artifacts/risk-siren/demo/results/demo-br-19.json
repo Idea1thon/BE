@@ -12,7 +12,7 @@
   "risk": {
     "score": null,
     "grade": null,
-    "score_version": "risk-siren-v1.2-provisional",
+    "score_version": "risk-siren-v1.2",
     "calculation_status": "partial",
     "policy_status": "provisional",
     "composite_basis": [

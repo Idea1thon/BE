@@ -1,14 +1,8 @@
-"""위험도 분석(사이렌) 연동. DB 조회 → 요청 조립 → 호출 → 결과 변환.
+"""위험도 분석(사이렌) 연동.
 
-`POST /reports` 가 제출 직후 이 흐름을 부른다. 사이렌은 순수 계산이라 외부를
-부르지 않고 동기로 답한다 — 202+폴링 계층을 우리가 얹지 않는다.
-
-위치(`trade_area_code`·`x_5181`·`y_5181`)는 0004 에서 `branch` 컬럼이 됐다.
-값이 없는 점포는 분석하지 않는다. 좌표를 지어내면 다른 상권의 위험도가 그 점포
-것으로 표시된다.
-
-시장 데이터는 `market_context` 가 (시군구, 업종) 으로 찾는다. 없으면 넘기지
-않고, 상대는 종합 점수·등급이 null 인 부분 결과를 준다. 실패가 아니다.
+새 경로는 ID-only trigger 를 보내고, 시장·좌표·보고서 매핑은 siren
+orchestrator 가 담당한다. 아래의 ``analyze_report`` 는 기존 직접 payload
+호출자와 테스트를 위한 호환 경로로 유지한다.
 """
 
 from __future__ import annotations
@@ -16,7 +10,6 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import decimal
-import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -33,21 +26,20 @@ from app.models import (
     ReportInputItem,
     UserAccount,
 )
-from app.models.enums import ReportStatus, UserType
-from app.services import market_context, siren_client
+from app.models.enums import UserType
+from app.services import siren_client
 from app.services.siren_mapper import (
     AnalysisValues,
     LocationInputs,
     SirenMappingError,
     build_analyze_request,
+    build_analysis_trigger,
     build_location,
     build_monthly_report,
     notification_message,
     should_notify,
     to_analysis_values,
 )
-
-logger = logging.getLogger("app.siren")
 
 # 사이렌이 보는 최장 구간은 SR-02.branch 의 최근 3개월 · 직전 3개월 · 그 이전
 # 3개월(9개월)이다. 연속 적자(SR-05)는 더 길 수 있어 12개월을 보낸다.
@@ -65,6 +57,32 @@ class SirenAnalysis:
     @property
     def raw_risk(self) -> dict[str, Any]:
         return self.response.get("risk") or {}
+
+
+def build_report_analysis_trigger(
+    report: OperationReport, *, franchise_id: int, branch_id: int
+) -> dict[str, Any]:
+    """Build the thin trigger sent to the orchestrator-facing siren API."""
+
+    return build_analysis_trigger(
+        request_id=str(report.analysis_request_id or uuid.uuid4()),
+        report_id=report.id,
+        franchise_id=franchise_id,
+        branch_id=branch_id,
+        as_of=_month_end(report.report_month),
+    )
+
+
+async def request_report_analysis(
+    report: OperationReport, *, franchise_id: int, branch_id: int
+) -> SirenAnalysis:
+    """Call siren with identifiers only; siren owns source-data composition."""
+
+    payload = build_report_analysis_trigger(
+        report, franchise_id=franchise_id, branch_id=branch_id
+    )
+    response = await siren_client.analyze(payload)
+    return SirenAnalysis(response=response, values=to_analysis_values(response))
 
 
 def _month_end(month: dt.date) -> dt.date:
@@ -115,46 +133,26 @@ async def _load_items(
     return out
 
 
-def location_inputs_for(branch: Branch) -> LocationInputs | None:
-    """점포에서 사이렌 위치 입력을 만든다. 값이 없으면 None — 분석하지 않는다."""
-    if not branch.trade_area_code or branch.x_5181 is None or branch.y_5181 is None:
-        return None
-    return LocationInputs(
-        trade_area_code=branch.trade_area_code,
-        x_5181=float(branch.x_5181),
-        y_5181=float(branch.y_5181),
-    )
-
-
 async def analyze_report(
     session: AsyncSession,
     report: OperationReport,
     *,
-    location_inputs: LocationInputs | None = None,
+    location_inputs: LocationInputs,
     market_data: dict[str, Any] | None = None,
 ) -> SirenAnalysis:
     """보고서 1건을 기준으로 사이렌을 호출한다.
 
-    `location_inputs`·`market_data` 를 넘기지 않으면 점포와 스냅샷에서 조달한다.
-    테스트에서 특정 조합을 강제하려고 인자로 열어 뒀다.
+    `location_inputs` 는 호출부가 넣는다. `branch` 에 없는 값이라 여기서
+    만들어낼 수 없고, 만들어내면 좌표가 틀린 상권의 위험도를 그 점포 것으로
+    표시하게 된다.
 
     `market_data` 가 없으면 상대는 시장 층을 `missing` 으로 두고 종합 점수·등급이
-    null 인 partial 결과를 준다. 실패가 아니다.
+    null 인 partial 결과를 준다. 실패가 아니므로 결과 저장 시에도 partial 상태를
+    보존한다.
     """
     branch = await session.get(Branch, report.branch_id)
     if branch is None:  # FK 가 보장하지만 조회 실패를 조용히 넘기지 않는다.
         raise SirenMappingError(f"점포를 찾을 수 없습니다: branch_id={report.branch_id}")
-
-    if location_inputs is None:
-        location_inputs = location_inputs_for(branch)
-    if location_inputs is None:
-        raise SirenMappingError(
-            "점포에 상권 코드·좌표가 없어 위험도 분석을 요청할 수 없습니다"
-        )
-    if market_data is None:
-        market_data = market_context.market_data_for(
-            branch.region_code, branch.business_category_code
-        )
 
     history = await _load_history(session, branch.id, report.report_month)
     items_by_report = await _load_items(session, [row.id for row in history])
@@ -187,11 +185,11 @@ async def analyze_report(
 
 
 def build_analysis_row(report_id: int, analysis: SirenAnalysis) -> ReportAnalysis:
-    """`report_analysis` 행을 만든다. 현행 스키마로 저장 불가면 실패한다.
+    """`report_analysis` 행을 만든다. partial 결과도 null을 보존해 저장한다.
 
     막힌 이유를 그대로 올린다. 잘라 넣거나 0 으로 채우는 선택은 데이터를 조용히
-    왜곡하므로 여기서 하지 않는다 — 스키마를 바꿀지 사이렌 계약을 바꿀지는
-    사람이 정할 일이다.
+    왜곡하므로 여기서 하지 않는다. 실제 저장 불가 사유는 버전 초과나
+    점수·등급 구간 모순처럼 계약 위반인 경우뿐이다.
     """
     values = analysis.values
     if not values.storable:
@@ -215,77 +213,49 @@ def build_analysis_row(report_id: int, analysis: SirenAnalysis) -> ReportAnalysi
     )
 
 
-async def _notify(
-    session: AsyncSession, report: OperationReport, branch: Branch, analysis: SirenAnalysis
+async def persist_alert_notifications(
+    session: AsyncSession,
+    report: OperationReport,
+    branch: Branch,
+    analysis: SirenAnalysis,
 ) -> int:
-    """경고가 발생하면 점주와 같은 프랜차이즈 본사에게 알림을 만든다.
+    """Persist in-app alert rows while leaving external delivery disabled.
 
-    사이렌 CONTRACT.md 상 알림 생성·발송·읽음 관리는 Backend 책임이다. 상대는
-    `alert.should_fire` 로 "이 내용으로 알림을 만들라" 는 신호만 준다.
-
-    등급이 아니라 `should_fire` 를 따른다. 시장 자료가 없어 종합 등급이 미확정
-    이어도 확인된 점포 수익성 위험이면 참이 되는데(alert_policy
-    `confirmed-branch-v1`), 등급만 보면 그 경고를 놓친다.
-
-    이메일 발송은 아직 구현하지 않았다. `email_status` 는 기본값 PENDING 으로
-    남아 사후에 보낼 대상을 찾을 수 있다.
+    The Siren service only decides whether an alert should fire. The
+    middle-backend owns recipients and stores pending notification rows; web
+    push and email delivery are intentionally handled by a later integration.
+    The recipient check makes retries idempotent for a report.
     """
     if not should_notify(analysis.response):
         return 0
 
-    message = notification_message(analysis.response, branch_name=branch.name)
-    recipients = [branch.owner_user_id]
-    hq_ids = (
-        await session.execute(
-            select(UserAccount.id).where(
-                UserAccount.franchise_id == branch.franchise_id,
-                UserAccount.user_type == UserType.HQ,
+    existing = set(
+        (
+            await session.execute(
+                select(Notification.recipient_user_id).where(
+                    Notification.report_id == report.id
+                )
             )
         )
-    ).scalars().all()
-    recipients.extend(i for i in hq_ids if i != branch.owner_user_id)
-
-    for user_id in recipients:
+        .scalars()
+        .all()
+    )
+    recipient_ids = {branch.owner_user_id}
+    recipient_ids.update(
+        (
+            await session.execute(
+                select(UserAccount.id).where(
+                    UserAccount.franchise_id == branch.franchise_id,
+                    UserAccount.user_type == UserType.HQ,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    message = notification_message(analysis.response, branch_name=branch.name)
+    for user_id in sorted(recipient_ids - existing):
         session.add(
             Notification(recipient_user_id=user_id, report_id=report.id, message=message)
         )
-    return len(recipients)
-
-
-async def run_analysis(session: AsyncSession, report: OperationReport) -> SirenAnalysis | None:
-    """제출 직후 위험도 분석. 보고서 상태를 확정한다.
-
-    **분석 실패로 보고서 제출을 되돌리지 않는다.** 점주는 이미 값을 냈고, 그
-    사실은 분석 성공 여부와 무관하다. 실패는 `status=FAILED` 와 `analysis_error`
-    로 보고서에 남고 REQ 상 재시도 대상이 된다.
-    """
-    branch = await session.get(Branch, report.branch_id)
-    try:
-        analysis = await analyze_report(session, report)
-        row = build_analysis_row(report.id, analysis)
-    except (SirenMappingError, ApiError) as exc:
-        logger.warning("위험도 분석 실패 report_id=%s error=%s", report.id, exc)
-        report.status = ReportStatus.FAILED
-        # 사용자에게 그대로 보이는 문자열이다. 내부 스택이나 상대 본문을 넣지 않는다.
-        report.analysis_error = str(getattr(exc, "message", None) or exc)[:500]
-        await session.commit()
-        return None
-    except Exception:  # noqa: BLE001
-        # 보고서는 이 함수에 오기 전에 이미 커밋됐다. 여기서 예외가 그대로 올라가면
-        # 제출 API 가 500 을 내고 행은 ANALYZING 에 남는다 — 재시도 대상으로도
-        # 잡히지 않고 점주 화면에서 영원히 "분석 중" 이다. 원인이 무엇이든 상태는
-        # 확정한다.
-        logger.exception("위험도 분석 중 예상 밖 오류 report_id=%s", report.id)
-        report.status = ReportStatus.FAILED
-        # 예외 문자열에 상대 본문이나 스택이 섞일 수 있어 그대로 노출하지 않는다.
-        report.analysis_error = "위험도 분석 중 오류가 발생했습니다"
-        await session.commit()
-        return None
-
-    await session.merge(row)
-    report.status = ReportStatus.COMPLETED
-    report.analysis_error = None
-    if branch is not None:
-        await _notify(session, report, branch, analysis)
-    await session.commit()
-    return analysis
+    return len(recipient_ids - existing)

@@ -35,6 +35,8 @@ SIMILAR_INDUSTRY = {
     "CS100010": ["CS100005"],
 }
 COMPETITION_RADIUS_M = 250.0
+ROOT = Path(__file__).resolve().parents[3]
+CLOSURE_FIXTURE = ROOT / "artifacts" / "risk-siren" / "demo" / "franchise_closure_year.synthetic.json"
 
 
 def _month_at(t: int) -> tuple[int, int]:
@@ -112,11 +114,41 @@ def _completed_quarter(as_of: date) -> str:
     return f"{prev // 4}Q{prev % 4 + 1}"
 
 
-def make_request(branch: dict, generated: dict, as_of: date) -> dict:
+def _load_franchise_closures() -> dict[str, dict]:
+    """Load the optional local annual franchise fixture for demo requests.
+
+    The committed fixture was also used by the numeric FMP test harness
+    (101..106), while the demo baseline uses demo-fr-01..06. Normalize only
+    those local fixture identifiers; no production source is touched here.
+    """
+
+    if not CLOSURE_FIXTURE.exists():
+        return {}
+    payload = json.loads(CLOSURE_FIXTURE.read_text(encoding="utf-8"))
+    records = payload.get("records", [])
+    latest: dict[str, dict] = {}
+    for record in records:
+        raw_id = str(record.get("franchise_id", ""))
+        normalized_id = raw_id
+        if raw_id.isdigit() and 101 <= int(raw_id) <= 106:
+            normalized_id = f"demo-fr-{int(raw_id) - 100:02d}"
+        normalized_record = {**record, "franchise_id": normalized_id}
+        current = latest.get(normalized_id)
+        if current is None or int(record["year"]) > int(current["year"]):
+            latest[normalized_id] = normalized_record
+    return latest
+
+
+def make_request(
+    branch: dict,
+    generated: dict,
+    as_of: date,
+    franchise_closures: dict[str, dict] | None = None,
+) -> dict:
     reports = [r for r in generated["branch_reports"] if r["month"] <= f"{as_of.year:04d}-{as_of.month:02d}"]
     last_q = _completed_quarter(as_of)
     keep_q = lambda rows: [q for q in rows if q["quarter"] <= last_q]  # noqa: E731
-    return {
+    request = {
         "request_id": f"demo-{branch['branch_id']}-{as_of.isoformat()}",
         "franchise_id": branch["franchise_id"],
         "branch_id": branch["branch_id"],
@@ -143,6 +175,10 @@ def make_request(branch: dict, generated: dict, as_of: date) -> dict:
         "reviews": generated["reviews"],
         "options": {"llm_mode": "explanation_only", "send_notifications": False},
     }
+    closure = (franchise_closures or {}).get(branch["franchise_id"])
+    if closure is not None and int(closure["year"]) < as_of.year:
+        request["franchise_closure"] = closure
+    return request
 
 
 def main() -> None:
@@ -164,6 +200,7 @@ def main() -> None:
         baseline_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2), encoding="utf-8")
 
     final_as_of = _month_end(*_month_at(MONTHS - 1))
+    franchise_closures = _load_franchise_closures()
     final_results: list[dict] = []
     summary_rows: list[tuple] = []
 
@@ -174,7 +211,7 @@ def main() -> None:
         )
 
         # 최종 스냅샷
-        req = make_request(branch, generated, final_as_of)
+        req = make_request(branch, generated, final_as_of, franchise_closures)
         (OUT_DIR / "requests" / f"{branch['branch_id']}.json").write_text(
             json.dumps(req, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -190,7 +227,7 @@ def main() -> None:
         for t in range(5, MONTHS):
             y, m = _month_at(t)
             as_of = _month_end(y, m)
-            r = analyze(make_request(branch, generated, as_of))
+            r = analyze(make_request(branch, generated, as_of, franchise_closures))
             timeline.append({
                 "as_of": as_of.isoformat(),
                 "score": r["risk"]["score"],

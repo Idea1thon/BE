@@ -23,7 +23,10 @@ from .reports import MonthlyMetrics, mean_ratio, sum_field, window_ending
 class RiskPolicy:
     """Provisional policy values — require approval before operational use."""
 
-    version: str = "risk-siren-v1.2-provisional"
+    # Keep the persisted version within middle-backend's existing
+    # report_analysis.rule_version VARCHAR(20) until a schema migration is
+    # explicitly approved. Do not truncate this value at the storage boundary.
+    version: str = "risk-siren-v1.2"
 
     # composite weights (sum per layer = 1.0)
     market_closure_weight: float = 0.45
@@ -41,6 +44,9 @@ class RiskPolicy:
     market_sales_decline_reference_pct: float = 15.0  # QoQ / YoY decline
     competition_reference_count: float = 8.0          # weighted new competitors in 3m
     branch_sales_decline_reference_pct: float = 25.0  # 3m vs prior 3m decline
+    # 최근 3개월 추세를 기본으로 보되, 직전 3개월 추세도 보조 반영한다.
+    branch_sales_recent_decay_weight: float = 0.70
+    branch_sales_previous_decay_weight: float = 0.30
     profit_margin_decline_reference_pt: float = 10.0  # points of operating-margin drop
     labor_ratio_reference: float = 0.35
     coupon_ratio_reference: float = 0.08
@@ -110,6 +116,26 @@ def calculate_market_closure(
     source = market.closure_source or market.source
     if not quarters:
         return {"score": None, "status": "missing", "source": source}
+
+    incomplete = [
+        q
+        for q in quarters
+        if q.active_count_end is None
+        or q.new_openings is None
+        or q.closures is None
+    ]
+    if incomplete:
+        missing_quarters = [q.quarter for q in incomplete]
+        return {
+            "score": None,
+            "status": "missing",
+            "source": source,
+            "reason": (
+                "개업·폐업·영업중 점포 수가 누락된 분기가 있어 폐업률을 계산하지 않았습니다: "
+                + ", ".join(missing_quarters)
+            ),
+            "missing_quarters": missing_quarters,
+        }
 
     by_index = {_quarter_index(q.quarter): q for q in quarters}
     latest = quarters[-1]
@@ -327,8 +353,9 @@ def calculate_branch_sales(
             score = current
         else:
             score = round(
-                0.7 * current
-                + 0.3 * _decline_score(previous_change, policy.branch_sales_decline_reference_pct),
+                policy.branch_sales_recent_decay_weight * current
+                + policy.branch_sales_previous_decay_weight
+                * _decline_score(previous_change, policy.branch_sales_decline_reference_pct),
                 4,
             )
 
@@ -344,6 +371,11 @@ def calculate_branch_sales(
         "previous_3m_total_krw": previous_total,
         "recent_3m_change_pct": recent_change,
         "previous_3m_change_pct": previous_change,
+        "decay_weight": {
+            "recent_3m": policy.branch_sales_recent_decay_weight,
+            "previous_3m": policy.branch_sales_previous_decay_weight,
+        },
+        "score_basis": "recent_3m_vs_previous_3m_with_previous_3m_decay",
         "recent_period_missing_months": recent_missing,
         "previous_period_missing_months": previous_missing,
         "status": status,

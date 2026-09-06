@@ -82,6 +82,8 @@ class Franchise(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
+    fixture_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    synthetic: Mapped[bool] = mapped_column(Boolean, server_default="false")
     created_at: Mapped[dt.datetime] = mapped_column(_TS, server_default=func.now())
 
 
@@ -140,12 +142,15 @@ class Branch(Base):
     business_category_code: Mapped[str] = mapped_column(
         String(20), ForeignKey("business_category.code")
     )
-    # 사이렌 BranchLocation 이 필수로 요구하는 값들(0004). 전부 nullable 이다 —
-    # 좌표를 지어내면 다른 상권의 위험도가 이 점포 것으로 표시된다. 값이 없는
-    # 점포는 분석 대상에서 빠진다.
-    trade_area_code: Mapped[str | None] = mapped_column(String(20))
-    x_5181: Mapped[decimal.Decimal | None] = mapped_column(Numeric(12, 2))
-    y_5181: Mapped[decimal.Decimal | None] = mapped_column(Numeric(12, 2))
+    trade_area_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    x_5181: Mapped[decimal.Decimal | None] = mapped_column(
+        Numeric(12, 2), nullable=True
+    )
+    y_5181: Mapped[decimal.Decimal | None] = mapped_column(
+        Numeric(12, 2), nullable=True
+    )
+    fixture_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    synthetic: Mapped[bool] = mapped_column(Boolean, server_default="false")
     created_at: Mapped[dt.datetime] = mapped_column(_TS, server_default=func.now())
 
     owner: Mapped[UserAccount] = relationship(
@@ -185,6 +190,9 @@ class OperationReport(Base):
         _enum(InputSource, "input_source"), server_default="MANUAL"
     )
     net_sales: Mapped[decimal.Decimal | None] = mapped_column(Numeric(14, 0))
+    fixture_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    synthetic: Mapped[bool] = mapped_column(Boolean, server_default="false")
     analysis_request_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     analysis_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(_TS, server_default=func.now())
@@ -209,8 +217,6 @@ class ReportAnalysis(Base):
         CheckConstraint(
             "risk_score BETWEEN 0 AND 100", name="report_analysis_risk_score_check"
         ),
-        # 점수와 등급은 함께 있거나 함께 없다. 한쪽만 있으면 목록 정렬(risk_level)과
-        # 상세(risk_score)가 서로 다른 말을 하게 된다.
         CheckConstraint(
             "(risk_score IS NULL) = (risk_level IS NULL)",
             name="ck_analysis_score_grade_together",
@@ -220,17 +226,25 @@ class ReportAnalysis(Base):
     report_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("operation_report.id", ondelete="CASCADE"), primary_key=True
     )
-    # 사이렌은 시장·가맹점 층 중 하나라도 불완전하면 종합 점수·등급을 의도적으로
-    # null 로 준다. 데이터 부족을 안전으로 표시하지 않으려는 설계라 그대로 받는다(0004).
-    risk_score: Mapped[int | None] = mapped_column(SmallInteger)
-    risk_level: Mapped[RiskLevel | None] = mapped_column(_enum(RiskLevel, "risk_level"))
+    # 시장·리뷰 자료가 없으면 Siren은 score/grade를 null로 보존한 partial
+    # 결과를 반환한다. 이를 FAILED로 바꾸거나 정상으로 대체하지 않는다.
+    risk_score: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    risk_level: Mapped[RiskLevel | None] = mapped_column(
+        _enum(RiskLevel, "risk_level"), nullable=True
+    )
+    # Existing rows use the documented list shape; the siren v1 response writes
+    # its components dict. JSONB is intentionally tolerant during this contract
+    # transition so historical reports remain readable.
     factors: Mapped[list] = mapped_column(JSONB)
     risk_periods: Mapped[list] = mapped_column(JSONB)
     recommendations: Mapped[list] = mapped_column(JSONB)
-    # 상대 score_version 이 "risk-siren-v1.2-provisional"(27자)라 VARCHAR(20) 을 넘는다.
     rule_version: Mapped[str] = mapped_column(String(60))
-    alert_policy_version: Mapped[str | None] = mapped_column(String(60))
-    calculation_status: Mapped[str] = mapped_column(String(20), server_default="calculated")
+    alert_policy_version: Mapped[str | None] = mapped_column(
+        String(60), nullable=True
+    )
+    calculation_status: Mapped[str] = mapped_column(
+        String(20), server_default="calculated"
+    )
     calculated_at: Mapped[dt.datetime] = mapped_column(_TS)
 
 

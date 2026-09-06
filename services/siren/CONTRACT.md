@@ -1,12 +1,61 @@
 # 사이렌 Backend 연동 계약 보완
 
+계약 표면 버전은 `risk-siren-contract-v1.1`이며, 점수 산식 버전인
+`risk-siren-v1.2`와 별도로 관리한다. 운영 대상 구현과 테스트 기준 경로는
+`services/siren`이다.
+
 ## 책임
 
-Backend가 인증된 사용자 범위로 점포·보고서를 조회하고 사이렌에 전달한다. 사이렌은 계산 결과를 반환하며, 보고서 상태 전이·결과 저장·알림 생성과 발송·금융상품 조회는 Backend 책임이다. 이 변경은 호출·DB 저장 연동 자체를 구현하지 않는다.
+middle-backend는 인증·테넌트 경계를 확인한 뒤 점포·보고서 ID만 사이렌에 전달한다.
+사이렌 orchestrator는 IDEATON에 통합된 운영보고서·합성 폐업 집계·리뷰와 위치/상권
+저장소를 읽어 canonical 요청으로 매핑하고, 결정론적 pipeline을 실행한다.
+middle-backend는 결과 상태·결과 저장을 담당한다. 실제 알림 발송은 계속 disabled다.
+
+ID-only 호출 경로는 다음과 같다.
+
+```text
+POST /internal/risk-sirens/analyze-trigger
+{
+  "request_id": "uuid",
+  "report_id": "100",
+  "franchise_id": "1",
+  "branch_id": "10",
+  "as_of": "2026-09-30",
+  "options": {"llm_mode": "explanation_only", "send_notifications": false}
+}
+```
+
+사이렌 프로세스에는 통합 원천인 `IDEATON_DATABASE_URL` 또는 공통
+`SIREN_DATABASE_URL`/`DATABASE_URL`을 읽기 전용으로 설정한다. 기존 분리 배포가
+필요하면 `SIREN_FMP_DATABASE_URL`과 `SIREN_IDEATON_DATABASE_URL`을 각각 지정할 수
+있지만, FMP URL은 필수가 아니다. 본사 연간 폐업 집계가 승인된 테이블·뷰에 있을 때만
+`SIREN_FRANCHISE_CLOSURE_TABLE=public.franchise_closure_year`처럼
+단순한 스키마·테이블명을 추가한다. 테이블이 없거나 설정하지 않으면 해당 신호는
+`missing`이며 폐업 0건으로 대체하지 않는다. 현재 저장소의 FMP 기본 스키마에는 이
+집계 테이블이 없던 배포는 0004 migration으로 통합 DB에 추가해야 계산된다.
+운영보고서는 `operation_report.status='COMPLETED'`인 행만 분석 대상으로 삼으며,
+작성 중·분석 중·실패 행은 매출 시계열에 포함하지 않는다.
+리뷰는 `SIREN_REVIEW_TABLE`(기본 `public.siren_review`)에서 읽으며, 테이블이 없거나
+점포 행이 없으면 `review_signal.status=missing`으로 둔다. 리뷰 원문·평점·감성 라벨의
+출처와 기준일 이후 행 제외는 Provider가 보장하고, 리뷰가 없는 점포를 0점 위험으로
+해석하지 않는다.
+기존 full canonical payload의 `/internal/risk-sirens/analyze` 경로는 호환용으로 유지한다.
+
+middle-backend의 `SIREN_ANALYSIS_ENABLED` 기본값은 `false`다. 운영 DB에 0004
+Siren migration을 적용하고 source DB·Siren API 연결을 검증한 뒤 활성화한다.
+partial 결과는 `report_analysis`에 score/grade null과 `calculation_status=partial`을
+보존하며, 점수·등급을 지어내지 않는다. 계약 위반이나 저장 불가능한 rule version만
+FAILED로 남긴다.
 
 본사 요약은 요청 franchise_id와 각 결과의 branch.franchise_id가 일치해야 한다. branch_id가 없거나 동일 점포 결과가 중복되면 422로 거부한다. 이 입력 검증은 Backend의 인증·권한 검사를 대체하지 않는다.
 
-`unread_alert_count`는 본사 요약 응답에서 제거했다. 위험 이벤트 발생 여부는 미읽음 알림 개수가 아니다. Backend는 실제 Notification 수신자 및 읽음 상태로 계산한다. 데모 hq_summary.json은 여러 본사를 섞은 한 결과 대신 `summaries` 배열에 본사별 응답을 저장한다.
+본사 요약에는 `risk_level_distribution`과 `alert_candidate_count`를 추가한다.
+`alert_candidate_count`는 이번 요청의 `branch_results` 중
+`alert.should_fire=true`인 개수이며 미읽음 개수가 아니다.
+`unread_alert_count`는 읽음 상태를 보유하지 않는 사이렌이 계산하지 않으므로
+호환성을 위해 항상 `null`로 반환한다. 실제 읽음 수는 Backend Notification 저장소가
+계산한다. 데모 hq_summary.json은 여러 본사를 섞은 한 결과 대신 `summaries` 배열에
+본사별 응답을 저장한다.
 
 ## 연간 가맹점 폐업 통계
 
@@ -49,11 +98,20 @@ Backend가 인증된 사용자 범위로 점포·보고서를 조회하고 사�
 - 연속 적자는 as_of 월부터 한 달씩 역순으로 확인한다. 중간 월 누락 또는 흑자/손익0에서 중단하며, 기준 월 자료가 없으면 현재 연속 적자는 0이다. 이는 누락 기간이 안전하다는 의미가 아니다. 기존 missing/partial 표시는 유지한다.
 - 본사 요약은 집계에 사용하는 중첩 객체를 검증한다. null 객체, 점수 범위 밖 값·불리언, 잘못된 등급 및 상태/점수 모순은 422다. 비집계 필드는 무시한다.
 - 각 branch.as_of는 요청 as_of와 정확히 같아야 한다. 미래·과거 결과를 섞지 않으며, 누락·잘못된 날짜도422다. Backend는 동일 기준일의 결과 묶음을 전달해야 한다.
-- 적자 계산 동작 변경을 구분하기 위해 score_version은 risk-siren-v1.1-provisional로 갱신했다. 이벤트 중복 방지 키에도 이 버전이 반영된다. alert_policy_version은 confirmed-branch-v1이다.
+- 적자 계산 동작 변경을 구분하기 위해 score_version은 risk-siren-v1.2로 유지한다. 현행 `report_analysis.rule_version VARCHAR(20)`에 저장할 수 있는 길이다. 이벤트 중복 방지 키에도 이 버전이 반영된다. alert_policy_version은 confirmed-branch-v1이다.
+
+## 계약 응답 필드와 부분 계산 정책
+
+- `risk.risk_level`은 `grade`에서만 파생한다: `정상→NORMAL`, `주의→CAUTION`, `위험→DANGER`, 미계산은 `null`이다.
+- `alert`에는 `risk_level`, `dispatch_owner="middle_backend"`, `suppressed_reason`를 포함한다. 실제 발송은 계속 `disabled`이며 사이렌은 알림 본문을 생성하거나 발송하지 않는다.
+- `financial_products`는 `owner="middle_backend"`, `status="grade_only"`, `recommended_grade`, `recommended_risk_level`, 빈 `items`만 반환한다. 상품 조회·선정은 이 서비스의 책임이 아니다.
+- `options.grade_policy` 기본값은 `strict`다. `renormalized_partial`과 `branch_only_provisional`은 누락 신호를 0점으로 대체하지 않고 잠정 점수를 만들며, 이 모드에서는 `alert.should_fire=false`로 강제한다.
+- `strict` 모드에서 종합 등급이 아직 없더라도 계산 완료된 점포층 또는 수익성 신호와 근거가 위험 하한을 넘으면 `alert.trigger`를 가진 점포 경고 후보를 만들 수 있다. 이 후보는 종합 등급과 분리해 표시해야 한다.
+- FMP 운영보고서 매핑에서 필수 입력 필드가 빠진 월은 0원으로 채우지 않고 제외한다. 결과에는 `missing_data`와 `uncertainty`가 남는다.
 
 ## 비용 위험 점수 및 숫자 입력 검증 보완 (v1.2)
 
 - SR-05는 영업이익률·이익률 악화·연속 적자의 핵심 신호 수를 분모로 유지한다. 인건비율·쿠폰비율·이자 상승 위험이 추가돼도 평균 분모를 늘리지 않으며, 기존 위험을 희석하지 않고 가산한다.
 - 최근 3개월 비용만 증가하고 나머지 자료·가용성이 같다면 수익성 위험 점수와 경고가 감소하지 않는다. 추가 비용 위험이 없는 입력은 기존 계산을 유지한다. 추가 위험이 있는 입력은 이전보다 점수가 높아질 수 있다.
-- 기존 0.55/0.45 결합 계수, 위험 하한, 신호 기준값과 0~100 범위는 유지한다. 산식 동작 변경은 `score_version=risk-siren-v1.2-provisional`로 구분하고, 이벤트 중복 방지 키에도 반영한다. 정책은 계속 provisional이다.
+- 기존 0.55/0.45 결합 계수, 위험 하한, 신호 기준값과 0~100 범위는 유지한다. 산식 동작 변경은 `score_version=risk-siren-v1.2`로 구분하고, 이벤트 중복 방지 키에도 반영한다. 현재 middle-backend의 `rule_version VARCHAR(20)`에 맞춘 값이며, 향후 버전 문자열을 확장할 때는 별도 schema migration과 함께 변경한다. 정책은 계속 provisional이다.
 - 입력 수치의 NaN·Infinity·-Infinity를 거부한다. 문자열 형태 및 JSON 숫자 `1e309`도 HTTP 422로 반환하며, 오류의 비유한 입력값은 JSON에서 표현 가능한 문자열로 표시한다.

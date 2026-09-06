@@ -67,7 +67,8 @@ async def test_analysis_row_is_saved_with_the_siren_values(client, seeded):
         assert row.rule_version == "risk-siren-v1.2-provisional"
         assert row.alert_policy_version == "confirmed-branch-v1"
         assert row.calculation_status == "calculated"
-        assert row.factors == SIREN_CALCULATED["components"]
+        # 역할별 projection과 원본 components를 함께 보존하는 envelope다.
+        assert row.factors["components"] == SIREN_CALCULATED["components"]
 
 
 async def test_report_status_becomes_completed(client, seeded):

@@ -13,6 +13,12 @@ from __future__ import annotations
 from typing import Any
 
 
+def _percent(value: object) -> str | None:
+    if not isinstance(value, (int, float)):
+        return None
+    return f"{float(value):.1f}%"
+
+
 def build_explanation(result: dict[str, Any], mode: str) -> dict[str, Any]:
     if mode == "disabled":
         return {"text": None, "evidence_ids": [], "model": None}
@@ -20,7 +26,71 @@ def build_explanation(result: dict[str, Any], mode: str) -> dict[str, Any]:
     evidence_ids = [item["evidence_id"] for item in result.get("evidence", [])]
     risk = result["risk"]
     review = result.get("review_signal", {})
+    components = result.get("components", {})
     lines: list[str] = []
+
+    score = risk.get("score")
+    grade = risk.get("grade")
+    if isinstance(score, (int, float)) and grade:
+        lines.append(f"종합 위험도는 {float(score):.1f}점으로 '{grade}' 등급입니다.")
+
+    branch_sales = (components.get("sales_decline") or {}).get("branch") or {}
+    recent_change = _percent(branch_sales.get("recent_3m_change_pct"))
+    previous_change = _percent(branch_sales.get("previous_3m_change_pct"))
+    weights = branch_sales.get("decay_weight") or {}
+    if recent_change is not None:
+        if previous_change is not None:
+            recent_weight = float(weights.get("recent_3m", 0.70)) * 100
+            previous_weight = float(weights.get("previous_3m", 0.30)) * 100
+            lines.append(
+                "가맹점 매출은 최근 3개월 기준 "
+                f"{recent_change}, 직전 3개월 기준 {previous_change}이며, "
+                f"최근 구간 {recent_weight:.0f}%·직전 구간 {previous_weight:.0f}% 가중으로 반영했습니다."
+            )
+        else:
+            lines.append(f"가맹점 매출은 최근 3개월 기준 {recent_change} 변화가 확인되었습니다.")
+
+    profitability = components.get("profitability") or {}
+    recent_margin = _percent(profitability.get("operating_margin_recent_3m_pct"))
+    margin_decline_value = profitability.get("operating_margin_decline_pt")
+    margin_decline = (
+        f"{float(margin_decline_value):.1f}"
+        if isinstance(margin_decline_value, (int, float))
+        else None
+    )
+    if recent_margin is not None:
+        margin_text = f"최근 3개월 영업이익률은 {recent_margin}"
+        if margin_decline is not None:
+            margin_text += f", 직전 구간 대비 {margin_decline}포인트 변화입니다"
+        lines.append(margin_text + ".")
+
+    market_closure = components.get("closure") or {}
+    market_rate = _percent(
+        market_closure.get(market_closure.get("score_basis"))
+        if market_closure.get("score_basis")
+        else None
+    )
+    if market_rate is not None:
+        basis_label = {
+            "quarter_rate": "최근 분기",
+            "rolling_2q_rate": "최근 2분기",
+            "rolling_4q_rate": "최근 4분기",
+        }.get(market_closure.get("score_basis"), "선택된 기간")
+        lines.append(
+            f"상권 폐업률은 {basis_label} 기준 {market_rate}입니다."
+        )
+
+    franchise_closure = result.get("franchise_closure") or {}
+    if franchise_closure.get("status") == "calculated":
+        operating_rate = _percent(franchise_closure.get("operating_base_rate_pct"))
+        previous_rate = _percent(franchise_closure.get("previous_year_base_rate_pct"))
+        if operating_rate is not None and previous_rate is not None:
+            lines.append(
+                "브랜드 연간 폐업률은 영업 모집단 기준 "
+                f"{operating_rate}, 전년 말 모집단 기준 {previous_rate}입니다."
+            )
+    elif franchise_closure.get("status") in {"missing", "not_calculable"}:
+        lines.append("브랜드 연간 폐업 통계는 현재 연결된 원천에 없어 별도 폐업률로 산출하지 않았습니다.")
 
     if risk["calculation_status"] != "calculated":
         lines.append(

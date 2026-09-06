@@ -148,11 +148,10 @@ def build_monthly_report(
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class LocationInputs:
-    """사이렌이 필수로 요구하는데 `branch` 테이블에 없는 값들.
+    """레거시 full-payload 호출용 위치 입력.
 
-    `trade_area_code`·`x_5181`·`y_5181` 는 `BranchLocation` 에서 필수다
-    (`services/siren/models.py`). 우리 점포는 주소 문자열만 갖고 있어서 호출부가
-    바깥에서 넣어 줘야 한다. 조달 경로는 아직 사람이 정하지 않았다.
+    새 ID-only 경로에서는 siren의 IDEATON provider가 이 값을 조회하므로
+    middle-backend가 만들 필요가 없다.
     """
 
     trade_area_code: str
@@ -227,6 +226,31 @@ def build_analyze_request(
     return payload
 
 
+def build_analysis_trigger(
+    *,
+    request_id: str,
+    report_id: int,
+    franchise_id: int,
+    branch_id: int,
+    as_of: dt.date,
+) -> dict[str, Any]:
+    """Build the ID-only request consumed by the siren orchestrator.
+
+    The middle backend owns authorization and report lifecycle, but it does not
+    read or assemble IDEATON market data. The siren service resolves both source
+    stores from these identifiers.
+    """
+
+    return {
+        "request_id": request_id,
+        "report_id": str(report_id),
+        "franchise_id": str(franchise_id),
+        "branch_id": str(branch_id),
+        "as_of": as_of.isoformat(),
+        "options": {"llm_mode": "explanation_only", "send_notifications": False},
+    }
+
+
 # --------------------------------------------------------------------------- #
 # 4. 응답 → report_analysis 컬럼값
 # --------------------------------------------------------------------------- #
@@ -296,9 +320,10 @@ def to_analysis_values(
 ) -> AnalysisValues:
     """`analyze()` 응답 → `report_analysis` 컬럼값.
 
-    `factors` 에 `components` 를 그대로 넣는다. DB_SCHEMA 4-9 가 factors 를
-    "4요소별 값·가중치·기여도" 로 정의했고 사이렌 `components` 가 정확히
-    closure·sales_decline·competition·profitability 4요소다.
+    `factors` 는 기존 components를 유지하면서 owner/HQ projection을 함께 담는
+    envelope다. 별도 migration 없이 기존 JSONB 한 컬럼에서 역할별 화면 계약을
+    보존하기 위한 과도기 형태다. 기존 행(components dict 또는 list)은 아래
+    `select_analysis_view()`가 호환 처리한다.
     """
     risk = response.get("risk") or {}
     score = risk.get("score")
@@ -342,11 +367,19 @@ def to_analysis_values(
 
     projections = response.get("projections") or {}
     owner_projection = projections.get("branch_owner") or {}
+    hq_projection = projections.get("franchise_hq") or {}
+    components = response.get("components") or {}
+
+    projection_envelope = {
+        "components": components,
+        "owner_view": owner_projection,
+        "hq_view": hq_projection,
+    }
 
     return AnalysisValues(
         risk_score=risk_score,
         risk_level=risk_level,
-        factors=response.get("components") or {},
+        factors=projection_envelope,
         # 사이렌 응답에 당월·3·6·12개월 위험도(REQ-SRN-02)에 해당하는 필드가 없다.
         # 없는 값을 만들지 않고 빈 배열로 둔다. NOT NULL 은 만족한다.
         risk_periods=[],
@@ -357,6 +390,87 @@ def to_analysis_values(
         calculation_status=status,
         blockers=blockers,
     )
+
+
+def select_analysis_view(
+    factors: object,
+    *,
+    audience: str,
+    risk_score: int | None,
+    risk_level: RiskLevel | None,
+    risk_periods: list[Any],
+    recommendations: list[Any],
+    rule_version: str,
+    calculated_at: dt.datetime,
+) -> dict[str, Any]:
+    """Return only the projection allowed for ``OWNER`` or ``HQ``.
+
+    New rows contain the projection envelope produced above. Historical rows do
+    not, so a conservative compatibility view is generated from the persisted
+    score/grade and component JSON without inventing evidence or alerts.
+    """
+
+    if audience not in {"branch_owner", "franchise_hq"}:
+        raise SirenMappingError(f"알 수 없는 분석 audience: {audience!r}")
+
+    stored = factors if isinstance(factors, dict) else {}
+    components = stored.get("components") if "components" in stored else stored
+    if not isinstance(components, dict):
+        components = {}
+    projection_key = "owner_view" if audience == "branch_owner" else "hq_view"
+    projection = stored.get(projection_key)
+    if not isinstance(projection, dict):
+        projection = {}
+
+    status = projection.get("calculation_status")
+    if status not in {"calculated", "partial"}:
+        status = "calculated" if risk_score is not None and risk_level is not None else "partial"
+
+    if audience == "branch_owner":
+        legacy_factors = factors if isinstance(factors, list) else components
+        return {
+            "audience": audience,
+            "risk_score": risk_score,
+            "risk_level": risk_level.value if isinstance(risk_level, RiskLevel) else risk_level,
+            "calculation_status": status,
+            "components": projection.get("components", components),
+            "factors": projection.get("components", legacy_factors),
+            "evidence": projection.get("evidence", []),
+            "missing_data": projection.get("missing_data", []),
+            "uncertainty": projection.get("uncertainty", []),
+            "alert": projection.get("alert", {"should_fire": False, "dispatch_status": "disabled"}),
+            "recommended_actions": projection.get("recommended_actions", recommendations),
+            "financial_products": projection.get("financial_products", {"status": "catalog_match_pending", "items": []}),
+            "explanation": projection.get("explanation", {}),
+            "data_provenance": projection.get("data_provenance", {}),
+            "franchise_closure": projection.get("franchise_closure", {}),
+            "risk_periods": risk_periods,
+            "recommendations": recommendations,
+            "rule_version": rule_version,
+            "calculated_at": calculated_at,
+        }
+
+    component_status = projection.get("component_status", {})
+    return {
+        "audience": audience,
+        "risk_score": risk_score,
+        "risk_level": risk_level.value if isinstance(risk_level, RiskLevel) else risk_level,
+        "calculation_status": status,
+        "components": None,
+        "factors": component_status,
+        "component_status": component_status,
+        "profitability": projection.get(
+            "profitability", {"consecutive_negative_months": 0}
+        ),
+        "alert": projection.get("alert", {"should_fire": False, "dispatch_status": "disabled"}),
+        "review_watchlist_flag": bool(projection.get("review_watchlist_flag", False)),
+        "data_provenance": projection.get("data_provenance", {}),
+        "franchise_closure": projection.get("franchise_closure", {}),
+        "risk_periods": [],
+        "recommendations": [],
+        "rule_version": rule_version,
+        "calculated_at": calculated_at,
+    }
 
 
 # --------------------------------------------------------------------------- #

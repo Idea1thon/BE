@@ -36,6 +36,10 @@ if not TEST_DB.endswith("_test"):
 TEST_DB_URL = f"postgresql+asyncpg://localhost:5432/{TEST_DB}"
 os.environ["DATABASE_URL"] = TEST_DB_URL
 os.environ["DB_USE_NULL_POOL"] = "true"
+# The report endpoint deliberately keeps Siren opt-in in deployed environments.
+# Integration tests opt in so the background task and persistence contract are
+# exercised instead of asserting only the initial ANALYZING state.
+os.environ["SIREN_ANALYSIS_ENABLED"] = "true"
 
 
 def _run(cmd: list[str], **kwargs) -> None:

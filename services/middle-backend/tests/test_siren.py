@@ -25,6 +25,7 @@ from app.services.siren_mapper import (
     build_location,
     build_monthly_report,
     notification_message,
+    select_analysis_view,
     should_notify,
     LEVEL_SCORE_RANGE,
     to_analysis_values,
@@ -256,7 +257,7 @@ def test_calculated_result_maps_to_our_columns():
     values = to_analysis_values(CALCULATED)
     assert values.risk_score == 74  # 74.1944 → SMALLINT (버림)
     assert values.risk_level is RiskLevel.DANGER
-    assert values.factors == CALCULATED["components"]
+    assert values.factors["components"] == CALCULATED["components"]
     assert values.calculation_status == "calculated"
 
 
@@ -340,6 +341,45 @@ def test_risk_periods_and_recommendations_are_empty_not_invented():
     values = to_analysis_values(CALCULATED)
     assert values.risk_periods == []
     assert values.recommendations == []
+
+
+def test_owner_and_hq_views_are_role_scoped():
+    factors = {
+        "components": {"profitability": {"score": 90}},
+        "owner_view": {
+            "components": {"profitability": {"score": 90}},
+            "evidence": [{"evidence_id": "ev-1"}],
+            "missing_data": [],
+            "uncertainty": [],
+            "alert": {"should_fire": True, "dispatch_status": "disabled"},
+            "recommended_actions": ["임차료 검토"],
+            "calculation_status": "calculated",
+        },
+        "hq_view": {
+            "component_status": {"profitability": "calculated"},
+            "profitability": {"consecutive_negative_months": 2},
+            "review_watchlist_flag": True,
+            "alert": {"should_fire": True, "dispatch_status": "disabled"},
+            "calculation_status": "calculated",
+        },
+    }
+    common = dict(
+        risk_score=90,
+        risk_level=RiskLevel.DANGER,
+        risk_periods=[],
+        recommendations=[],
+        rule_version="v1",
+        calculated_at=dt.datetime.now(dt.UTC),
+    )
+    owner = select_analysis_view(factors, audience="branch_owner", **common)
+    hq = select_analysis_view(factors, audience="franchise_hq", **common)
+    assert owner["audience"] == "branch_owner"
+    assert owner["evidence"] == [{"evidence_id": "ev-1"}]
+    assert owner["recommended_actions"] == ["임차료 검토"]
+    assert hq["audience"] == "franchise_hq"
+    assert hq["component_status"] == {"profitability": "calculated"}
+    assert hq["review_watchlist_flag"] is True
+    assert "evidence" not in hq
 
 
 # --------------------------------------------------------------------------- #
