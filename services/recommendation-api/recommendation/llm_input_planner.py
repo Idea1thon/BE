@@ -255,17 +255,109 @@ def _default_plan(industry_code: str | None, conditions: dict[str, Any], prefere
     ]
 
 
-def _normalize_remote_conditions(raw: Any, baseline: dict[str, Any]) -> dict[str, Any]:
-    """Accept only LLM values that match facts parsed from the user text.
+def _quoted_number(token: str) -> Decimal | None:
+    """Normalize a bounded Arabic or Sino-Korean numeral; reject mixed forms."""
+    if re.fullmatch(r"[0-9][0-9,]*(?:\.[0-9]+)?(?:억|만)?", token):
+        multiplier = {"억": 100_000_000, "만": 10_000}.get(token[-1], 1)
+        raw = token[:-1] if multiplier != 1 else token
+        if len(raw.replace(",", "").replace(".", "")) > MAX_NUMERIC_DIGITS:
+            return None
+        return Decimal(raw.replace(",", "")) * multiplier
+    if not re.fullmatch(r"[일이삼사오육칠팔구십백천만억]+", token) or len(token) > 30:
+        return None
+    digits = {char: index for index, char in enumerate("일이삼사오육칠팔구", 1)}
+    total = section = digit = 0
+    last_small, last_large = 10000, 1_000_000_000
+    for char in token:
+        if char in digits:
+            if digit:
+                return None
+            digit = digits[char]
+        elif char in "십백천":
+            unit = {"십": 10, "백": 100, "천": 1000}[char]
+            if unit >= last_small:
+                return None
+            section += (digit or 1) * unit
+            digit, last_small = 0, unit
+        else:
+            unit = {"만": 10000, "억": 100_000_000}[char]
+            if unit >= last_large:
+                return None
+            total += (section + digit or 1) * unit
+            section = digit = 0
+            last_small, last_large = 10000, unit
+    return Decimal(total + section + digit)
 
-    The LLM may normalize a value (for example ``20평`` to m²), but it may
-    not introduce a new budget, area, customer group, or operating mode. The
-    deterministic parser is the source of truth for recommendation filters.
+
+def _grounded_numeric_conditions(text: str) -> dict[str, int | float]:
+    """Read explicit bounded clauses only, preserving ambiguity as unresolved.
+
+    Quotes are checked against the full input too: trimming a negation or a
+    competing value from the quote cannot turn it into a new hard condition.
+    """
+    number = r"(?:[0-9][0-9,]*(?:\.[0-9]+)?(?:억|만)?|[일이삼사오육칠팔구십백천만억]+)"
+    pattern = re.compile(
+        rf"(?P<label>월세|임대료|보증금|전세금|매장\s*면적|면적)"
+        rf"(?:은|는|이|가)?\s*(?:(?:매달|월)\s*)?"
+        rf"(?P<number>{number})\s*(?P<unit>원|평|㎡|m2|제곱미터)\s*"
+        r"(?P<bound>이하|이내|까지|이상|부터)(?![가-힣])", re.IGNORECASE,
+    )
+    found: dict[str, list[int | float]] = {}
+    for match in pattern.finditer(text):
+        # Do not infer a positive requirement from negated/conditional clauses.
+        end = re.search(r"[.!?;\n]|,(?![0-9])", text[match.end():])
+        tail = text[match.end():match.end() + end.start()] if end else text[match.end():]
+        if re.search(r"아니|말고|제외|취소|않|아닌|대신|라면|이면", tail):
+            continue
+        amount = _quoted_number(match["number"])
+        if amount is None or amount <= 0 or amount > Decimal("1e15"):
+            continue
+        is_max = match["bound"] in {"이하", "이내", "까지"}
+        label, unit = match["label"], match["unit"].lower()
+        if label in {"월세", "임대료", "보증금", "전세금"}:
+            if unit != "원" or not is_max or amount != amount.to_integral_value():
+                continue
+            key = "monthly_rent_max_krw" if label in {"월세", "임대료"} else "deposit_max_krw"
+            value = int(amount)
+        else:
+            if unit == "원":
+                continue
+            key = "store_area_max_m2" if is_max else "store_area_min_m2"
+            value = round(float(amount * (Decimal("3.3058") if unit == "평" else 1)), 2)
+        found.setdefault(key, []).append(value)
+    return {key: values[0] for key, values in found.items() if len(values) == 1}
+
+
+def _normalize_remote_conditions(raw: Any, baseline: dict[str, Any], user_text: str = "") -> dict[str, Any]:
+    """Accept baseline values or numeric values verified from exact source quotes.
+
+    The server owns normalization, units and bound direction. Existing parsed
+    values retain precedence and ungrounded remote values remain ignored.
     """
     conditions = dict(baseline)
     if not isinstance(raw, dict):
         return conditions
+    grounded = _grounded_numeric_conditions(user_text)
     for key, value in raw.items():
+        if isinstance(value, dict):
+            source = value.get("source_text")
+            proposed = value.get("value")
+            verified = None
+            if isinstance(source, str) and source.strip() and source in user_text:
+                verified = _grounded_numeric_conditions(source).get(key)
+            if (key in grounded and verified == grounded[key]
+                    and isinstance(proposed, (int, float)) and not isinstance(proposed, bool)
+                    and proposed == verified and math.isfinite(proposed)
+                    and baseline.get(key) is None):
+                conditions[key] = verified
+                reason = ({
+                    "monthly_rent_max_krw": "monthly_rent_max_krw: 개별 매물 월세 데이터 없음",
+                    "deposit_max_krw": "deposit_max_krw: 개별 매물 보증금 데이터 없음",
+                }.get(key, "store_area_m2: 개별 매물 면적 데이터 없음"))
+                conditions["unsupported_conditions"] = _dedupe([
+                    *conditions.get("unsupported_conditions", []), reason,
+                ])
+            value = proposed
         if key not in ALLOWED_CONDITION_KEYS or value is None:
             continue
         if key in {"monthly_rent_max_krw", "deposit_max_krw"}:
@@ -427,7 +519,7 @@ def plan_input(
 추가 역할: 사용자 자연어의 업종·특별조건을 구조화하고, 읽기 전용 분석 계획 초안을 만드는 입력 계약 분석기다.
 선택 지역은 절대 변경하지 말고, 자유 텍스트에 실제로 표현된 값만 반환하라.
 업종은 CS100001~CS100010 중에서만 고르며, 업종을 확정할 수 없으면 후보를 억지로 하나로 만들지 말고 확인 질문을 반환하라.
-숫자는 원화 또는 m²로 정규화할 수 있다. 원문에 없는 값은 조건 필드로 확정하지 말고, 필요하면 별도 분석 가설로 표시하라.
+숫자는 원화 또는 m²로 정규화할 수 있다. 월세·임대료·보증금·면적 조건은 {{"value": 정규화한 숫자, "source_text": "조건 종류·값·단위·상하한을 포함한 사용자 원문 그대로"}} 형태로 반환하라. 서버가 인용과 단위 및 상하한을 검증한다. 부정·조건부 표현이나 모호한 값은 확정하지 말라. 원문에 없는 값은 조건 필드로 확정하지 말고, 필요하면 별도 분석 가설로 표시하라.
 사용자가 "지하철역에서 장사하고 싶다", "직장인이 많은 곳", "경쟁이 덜한 곳"처럼 말하면 이를 conditions에 끼워 넣지 말고 preferences에 의도·선호 계약으로 보존하라. preferences는 location_preferences, demand_preferences, time_preferences, competition_preferences, business_preferences, comparison_requests 배열을 사용한다. 각 항목에는 type, source_text, strength를 넣고, 역·아파트·버스정류장·POI 근접 선호는 anchor_type으로 표현하라. 선호 방향은 prefer/avoid/require 중 하나로 표현하되, 원문에 없는 구체적 거리·수치·사실은 만들지 말라.
 필요한 근거를 조회해야 하면 retrieval_requests에 search_region_evidence 도구 요청을 넣어라. SQL, 테이블명, 지역명, 업종 코드, 분기를 직접 넣지 말고 dimensions(sales/stores/flow/change)와 조회 이유만 지정하라. 도구 요청은 사용자 의도에 필요한 경우에만 만들고, 서버가 허용 목록을 벗어난 요청을 폐기한다.
 매물·공실·성공확률·미래 결과는 관측 사실이 아니라면 추정·가설·시나리오로 명시하라.
@@ -479,16 +571,12 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
                 candidates = []
             elif not candidates:
                 candidates = fallback_candidates
-        conditions = _normalize_remote_conditions(remote.get("conditions"), baseline_conditions)
+        conditions = _normalize_remote_conditions(remote.get("conditions"), baseline_conditions, text)
         preferences = _valid_preferences(remote.get("preferences"), baseline_preferences)
         retrieval_requests = validate_retrieval_requests(remote.get("retrieval_requests"))
-        # These two fields affect pipeline control flow and fit_tier. They
-        # must come only from the deterministic parser; an LLM response is
-        # never allowed to inject a confirmation stop or an unsupported
-        # condition. Remote conditions are still value-matched against the
-        # deterministic baseline by _normalize_remote_conditions above.
+        # Control-flow warnings come from server-verified conditions, never
+        # from the LLM's free-form unsupported_conditions or questions.
         questions = []
-        conditions["unsupported_conditions"] = list(baseline_conditions["unsupported_conditions"])
         plan = _valid_plan(remote.get("analysis_plan"), fallback_plan)
         inference_hypotheses = _valid_inference_hypotheses(remote.get("inference_hypotheses"))
         parse_confidence = str(remote.get("parse_confidence") or ("high" if len(candidates) == 1 else "low"))
