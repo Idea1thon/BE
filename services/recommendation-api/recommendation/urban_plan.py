@@ -170,11 +170,8 @@ def _assemble(urban_rows: list[dict[str, str]], assoc_rows: list[dict[str, str]]
 def load_from_files(root: Path) -> PlanData:
     urban = _read_csv(root / _DIR / _OVERLAP_FILE)
     assoc = _read_csv(root / _DIR / _ASSOC_FILE)
-    observed = ""
-    for r in urban:
-        if r.get("생성일"):
-            observed = str(r["생성일"]).strip()
-            break
+    created = {str(r["생성일"]).strip() for r in urban if str(r.get("생성일", "")).strip()}
+    observed = max(created) if created else ""  # F44: 행 순서 무관, 최신 생성일
     return _assemble(urban, assoc, observed_at=observed)
 
 
@@ -191,14 +188,17 @@ def load_from_db(query) -> PlanData | None:
 
     urban_rows: list[dict[str, str]] = []
     assoc_rows: list[dict[str, str]] = []
-    observed = ""
+    created: set[str] = set()
     for r in rows:
         attrs = json.loads(r["source_attributes"]) if r.get("source_attributes") else {}
         if r["plan_type"] == "urban_project_overlap":
             urban_rows.append(attrs)
-            observed = observed or str(attrs.get("생성일", "")).strip()
+            if str(attrs.get("생성일", "")).strip():
+                created.add(str(attrs["생성일"]).strip())
         else:
             assoc_rows.append(attrs)
+    # F44: 행 순서에 의존하지 않고 가장 최근 생성일을 스냅샷 기준으로.
+    observed = max(created) if created else ""
     return _assemble(urban_rows, assoc_rows, observed_at=observed,
                      source_paths={"urban_overlap": f"{_DIR}/{_OVERLAP_FILE}",
                                    "redev_association": f"{_DIR}/{_ASSOC_FILE}"})
@@ -260,21 +260,25 @@ def context_for_candidate(
     if projects:
         prominent = [p for p in projects if (p.overlap_ratio or 0) >= min_overlap_ratio]
         brk = _stage_breakdown(projects)
-        top = prominent[:4] or projects[:2]
+        # F42: 겹침 ≥ 임계값 사업만 전면 서술. 미만은 건수만(스펙 §0-10).
+        top = prominent[:4]
         top_txt = "; ".join(
             f"{p.name or p.category}({p.category}·{p.stage_group}"
             + (f", 겹침{round(p.overlap_ratio, 1)}%" if p.overlap_ratio is not None else "")
             + ")"
             for p in top
         )
+        # F41: 해산·청산 등 stage_note를 전체 projects에서 수집해 노출(top 밖이어도).
+        dissolved = sum(1 for p in projects if p.stage_note and "해산" in (p.stage_note + p.stage_raw))
         note_extra = ""
-        notes = [p.stage_note for p in top if p.stage_note]
+        notes = [p.stage_note for p in projects if p.stage_note]
         if notes:
             note_extra = " · " + " / ".join(dict.fromkeys(notes))
+        list_txt = f"{top_txt}. " if top_txt else f"(겹침≥{min_overlap_ratio:g}% 사업 없음 — 건수만). "
         ctx.context_notes.append(
             f"이 상권과 겹치는 공식 도시계획·정비사업 {len(projects)}건 "
             f"(겹침≥{min_overlap_ratio:g}% {len(prominent)}건 · 단계: 계획 {brk['계획']}·추진 {brk['추진']}·착공이후 {brk['착공이후']}) — "
-            f"{top_txt}{note_extra}. "
+            f"{list_txt}{note_extra}"
             f"UQ120 폴리곤 PIP 스냅샷({obs}), 발표일 시계열 아님. '예정'·'확정' 단정 금지 — 현재 추진단계 그룹만. 판정·정렬 미반영 (FC-51)"
         )
         ctx.dimension_features.append("FC-51")
@@ -283,8 +287,9 @@ def context_for_candidate(
             "FC-51", "상권겹침_도시계획정비사업", len(projects), "건",
             spatial_grain="상권", grain_is_proxy=False, observed_end_period=obs,
             source_path=plan.source_paths["urban_overlap"],
-            interpretation=f"상권 겹침 도시계획·정비사업 {len(projects)}건 (겹침≥{min_overlap_ratio:g}% {len(prominent)}건) — 단계 계획 {brk['계획']}·추진 {brk['추진']}·착공이후 {brk['착공이후']}",
-            limitation="추진단계 스냅샷이며 사건일 시계열 아님. 겹침비율은 상권 폴리곤 대비 사업 폴리곤 면적 비율. '예정'·'확정' 단정 금지. fit_tier 판정·정렬 미반영",
+            interpretation=f"상권 겹침 도시계획·정비사업 {len(projects)}건 (겹침≥{min_overlap_ratio:g}% {len(prominent)}건) — 단계 계획 {brk['계획']}·추진 {brk['추진']}·착공이후 {brk['착공이후']}"
+            + (f", 그 중 해산·청산 {dissolved}건" if dissolved else ""),
+            limitation="추진단계 스냅샷이며 사건일 시계열 아님. 겹침비율은 상권 폴리곤 대비 사업 폴리곤 면적 비율. 조합 해산·청산은 준공/무산 구분 불가. '예정'·'확정' 단정 금지. fit_tier 판정·정렬 미반영",
         ))
         ctx.freshness["urban_plan"] = {
             "observed_end_period": obs, "periods_behind_latest": 0,
@@ -297,20 +302,35 @@ def context_for_candidate(
     major_hit = sorted({p.category_major for p in projects if p.category_major in
                         ("재정비촉진사업", "역세권사업", "국토부사업")})
     if major_hit:
+        maj_projects = [p for p in projects if p.category_major in major_hit]
         ctx.context_notes.append(
-            f"대규모 개발 유형 사업 포함: {', '.join(major_hit)} — 상권 겹침 도시계획사업 중 대분류 기준. "
+            f"대규모 개발 유형 사업 포함: {', '.join(major_hit)} ({len(maj_projects)}건) — 상권 겹침 도시계획사업 중 대분류 기준. "
             f"정거장·구역 경계·개통 미확정, '예정역'·'확정' 표현 금지. 판정·정렬 미반영 (FC-52)"
         )
         ctx.dimension_features.append("FC-52")
         ctx.grain_notes["FC-52"] = "상권 grain · 도시계획사업 대분류(재정비촉진·역세권·국토부) · context_notes 버킷"
+        # F45: FC-52도 구조화 evidence를 남긴다.
+        ctx.evidence.append(_ev(
+            "FC-52", "상권겹침_대규모개발유형", len(maj_projects), "건",
+            spatial_grain="상권", grain_is_proxy=False, observed_end_period=obs,
+            source_path=plan.source_paths["urban_overlap"],
+            interpretation=f"상권 겹침 도시계획사업 중 대규모 개발 대분류({', '.join(major_hit)}) {len(maj_projects)}건",
+            limitation="사업 대분류 스냅샷이며 정거장·구역 경계·개통일 미확정. '예정역'·'확정' 표현 금지. 계획 도시철도(자치구)는 미연결. fit_tier 판정·정렬 미반영",
+        ))
+    # F46: FC-52 계획 도시철도 부분은 아직 미연결임을 런타임에 명시.
+    ctx.missing.append({"feature": "FC-52", "reason": "계획 도시철도(도시철도망계획_자치구.csv, 자치구 grain) 부분 미연결 — 후속 과제"})
 
     # ---- FC-51 보조: 자치구 정비사업조합 (좌표 없음 → 자치구 대리) ----
     assoc = list(plan.by_sigungu.get(sigungu_code or "", []))
     if assoc:
         brk = _stage_breakdown(assoc)
         kinds = ", ".join(f"{k} {v}" for k, v in _count_by(assoc, lambda p: p.category).items() if v)
+        # F41: 해산·청산 조합 수를 착공이후 안에서 분리 표기.
+        assoc_dissolved = sum(1 for p in assoc if p.stage_note and "해산" in (p.stage_note + p.stage_raw))
+        dissolved_txt = (f" — 착공이후 {brk['착공이후']}건 중 {assoc_dissolved}건은 조합 해산·청산(준공/무산 구분 불가, 사업 완료 단정 불가)"
+                         if assoc_dissolved else "")
         ctx.context_notes.append(
-            f"{sigungu_name or sigungu_code} 정비사업조합 {len(assoc)}건 (단계: 계획 {brk['계획']}·추진 {brk['추진']}·착공이후 {brk['착공이후']}; {kinds}) — "
+            f"{sigungu_name or sigungu_code} 정비사업조합 {len(assoc)}건 (단계: 계획 {brk['계획']}·추진 {brk['추진']}·착공이후 {brk['착공이후']}; {kinds}){dissolved_txt} — "
             f"**자치구 grain 대리**(정비사업 정보몽땅 목록, 좌표 없어 상권 매칭 불가). 이 후보 상권의 사업이라는 보장 없음. 판정·정렬 미반영 (FC-51 보조)"
         )
         if "FC-51" not in ctx.dimension_features:
@@ -320,8 +340,9 @@ def context_for_candidate(
             "FC-51", "자치구_정비사업조합", len(assoc), "건",
             spatial_grain="자치구", grain_is_proxy=True, observed_end_period=obs,
             source_path=plan.source_paths["redev_association"],
-            interpretation=f"{sigungu_name or sigungu_code} 정비사업조합 {len(assoc)}건 — 단계 계획 {brk['계획']}·추진 {brk['추진']}·착공이후 {brk['착공이후']}",
-            limitation="좌표 없어 자치구 단위로만 집계 — 이 후보 상권의 사업이라는 보장 없음. 대표지번 지오코딩은 후속 과제. fit_tier 판정·정렬 미반영",
+            interpretation=f"{sigungu_name or sigungu_code} 정비사업조합 {len(assoc)}건 — 단계 계획 {brk['계획']}·추진 {brk['추진']}·착공이후 {brk['착공이후']}"
+            + (f" (착공이후 중 해산·청산 {assoc_dissolved}건)" if assoc_dissolved else ""),
+            limitation="좌표 없어 자치구 단위로만 집계 — 이 후보 상권의 사업이라는 보장 없음. 조합 해산·청산은 준공/무산 구분 불가. 대표지번 지오코딩은 후속 과제. fit_tier 판정·정렬 미반영",
             proxy_note="자치구 grain 대리(좌표 없음)",
         ))
 

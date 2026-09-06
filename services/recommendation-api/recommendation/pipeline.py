@@ -2664,7 +2664,8 @@ def run_pipeline(
     pop = src.population(flow_dong)  # 인구 3종(상주·직장·외국인). DbSource는 None(파일 소스 우선, #28)
     try:
         plan = src.urban_plan()  # 도시계획·정비사업 추진단계(#29). None이면 미연결 처리
-    except (PipelineError, LLMRuntimeError):
+    except (PipelineError, LLMRuntimeError, OSError, RuntimeError):
+        # 원천 CSV·plan_snapshot 미가용 시 #29 근거 없이 진행(라운드 6 F43).
         plan = None
     flow_dong_total_seoul = sorted(
         v for row in flow_dong.values()

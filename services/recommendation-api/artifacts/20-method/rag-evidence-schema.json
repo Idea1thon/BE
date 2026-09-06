@@ -360,7 +360,7 @@
     },
     "reasons": {"type": "array", "items": {"type": "string"}, "description": "fit_tier 판정·정렬에 반영되는 긍정 근거. FC 신호 등급표(regional-characteristics-profile.md §9-1)의 '범주 신호'·'약한 배경 신호'만 허용하며, '약한 배경 신호'는 단독으로 추천을 승격시키지 못하고 data_confidence를 하향한다. '신호 없음' FC는 넣지 않는다."},
     "counter_evidence": {"type": "array", "items": {"type": "string"}, "description": "fit_tier 판정에 반영되는 반대 근거. FC 신호 등급표의 '범주 신호'(FC-10 등급·FC-11 라벨)·하드조건 미충족·핵심 데이터 결측만 허용한다. '신호 없음' FC의 낮은 분위를 반대 근거로 쓰지 않는다."},
-    "context_notes": {"type": "array", "items": {"type": "string"}, "description": "fit_tier 판정·정렬에 반영하지 않는 중립 지역 서술. FC 신호 등급표의 '신호 없음(서술만)' FC(FC-01·02·05·06a·06b·30·40·41·51·53), '미신뢰 업종 전체 상수' FC-42·FC-51-news와 '모멘텀(품질 아님)' FC(FC-32·12)의 관측값을 여기에 둔다. FC-42는 최신 원계열·최근 3개월 평균·계절 국면·미검증 급등 여부만 기록한다. FC-51-news는 빅카인즈 보도량이며 공식 도시계획사업·성공 outcome이 아니다. feature-evidential-value.md §9."},
+    "context_notes": {"type": "array", "items": {"type": "string"}, "description": "fit_tier 판정·정렬에 반영하지 않는 중립 지역 서술. FC 신호 등급표의 '신호 없음(서술만)' FC(FC-01·02·03·04·05·06a·06b·30·40·41·51·52·53), '미신뢰 업종 전체 상수' FC-42·FC-51-news와 '모멘텀(품질 아님)' FC(FC-32·12)의 관측값을 여기에 둔다. FC-42는 최신 원계열·최근 3개월 평균·계절 국면·미검증 급등 여부만 기록한다. FC-51-news는 빅카인즈 보도량이며 공식 도시계획사업·성공 outcome이 아니다. 2026-09-06 #29: FC-51(상권 겹침 도시계획·정비사업)·FC-52(대규모 개발 대분류)는 추진단계 3그룹(계획/추진/착공이후) 스냅샷이며 '예정'·'확정' 단정 금지, 정비사업조합은 자치구 grain 대리(grain_is_proxy). feature-evidential-value.md §9."},
     "missing_features": {
       "type": "array",
       "items": {
