@@ -61,7 +61,11 @@ def _index_diffs(sync_connection):
 
 # ORM 이 DB 보다 적게 알면 autogenerate 가 "지우자"고 제안한다. 그 제안이 그대로
 # revision 이 되면 마이그레이션이 만든 제약이 조용히 사라진다.
-_DROP_OPS = ("remove_index", "remove_fk", "remove_constraint")
+#
+# `remove_table` 도 함께 본다. `0005_siren_operational_storage` 가 만드는 사이렌
+# 원천·리뷰 테이블은 ORM 에 모델이 없어서, 필터가 없으면 autogenerate 가 세 테이블을
+# DropTable 로 제안한다. 그 revision 이 병합되면 사이렌 원천 데이터가 사라진다.
+_DROP_OPS = ("remove_index", "remove_fk", "remove_constraint", "remove_table")
 
 
 async def test_autogenerate_does_not_drop_migration_constraints(database):

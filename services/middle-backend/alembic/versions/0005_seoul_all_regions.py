@@ -501,7 +501,16 @@ def upgrade() -> None:
                 "parent_code = EXCLUDED.parent_code, level = EXCLUDED.level"
             )
     keep = "', '".join(c for c, _, _ in DONG)
-    op.execute(f"DELETE FROM region WHERE level = 'DONG' AND code NOT IN ('{keep}')")
+    # 구버전 10자리 코드 행을 지운다. 단, `branch.region_code` 가 참조하는 행은
+    # 남긴다. `branch.region_code` FK 에 ON DELETE 절이 없어(0001) 참조된 행을
+    # 지우려 하면 마이그레이션 전체가 FK 위반으로 죽고, CASCADE 였다면 점포가
+    # 조용히 사라진다. 둘 다 원하지 않는다 — 참조가 남은 코드는 보존하고
+    # 데이터 정리는 별도 절차로 판단한다.
+    op.execute(
+        "DELETE FROM region r WHERE r.level = 'DONG' "
+        f"AND r.code NOT IN ('{keep}') "
+        "AND NOT EXISTS (SELECT 1 FROM branch b WHERE b.region_code = r.code)"
+    )
 
 
 def downgrade() -> None:

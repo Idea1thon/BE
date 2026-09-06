@@ -5,11 +5,28 @@
 
 asyncpg는 한 번의 execute()에 복수 문장을 허용하지 않으므로 문장 단위로 실행한다.
 분리는 작은따옴표 문자열과 -- 주석을 인식하는 스캐너로 수행한다.
+
+**이미 일부가 만들어진 DB 위에서도 실행된다.** 운영 DB를 `fmp` 에서 `ideaton`
+으로 옮겼을 때 `ideaton` 에는 `alembic_version` 이 없고 이 리비전의 객체 일부가
+이미 있었다. 그 상태에서 `upgrade` 를 걸면 `CREATE TABLE` 이 DuplicateTable 로
+죽어 배포가 멈춘다.
+
+`DDL` 문자열은 문서 DDL 그대로 두고, 실행 직전에 카탈로그를 보고 이미 있는 객체의
+생성문만 건너뛴다. PostgreSQL 에 `CREATE TYPE IF NOT EXISTS` 가 없어서 DDL 본문에
+`IF NOT EXISTS` 를 심는 방식으로는 6개 enum 을 처리할 수 없고, 문서와 다른 SQL 을
+남기면 "문서 DDL 그대로" 라는 이 리비전의 전제도 깨진다.
+
+건너뛰기는 **객체 단위**다. 테이블이 있는데 컬럼이 빠진 경우는 여기서 메우지 않는다.
+그런 표류는 조용히 덮으면 안 되므로 `COMMENT ON COLUMN` 이나 후속 리비전에서
+드러나게 둔다. 기존 행을 지우거나 바꾸는 문장은 이 리비전에 없다.
 """
 
+import re
 from collections.abc import Iterator
 
 from alembic import op
+
+from app.db.migration_guards import relation_exists, type_exists
 
 revision = "0001_initial"
 down_revision = None
@@ -227,8 +244,39 @@ def _statements(ddl: str) -> Iterator[str]:
         yield tail
 
 
+# 생성문에서 대상 이름만 뽑는다. 문서 DDL 의 형태(`CREATE TABLE region (`,
+# `CREATE INDEX idx_region_parent ON ...`)에 맞춘 최소 패턴이며, 여기에 걸리지
+# 않는 문장은 건너뛰지 않고 그대로 실행한다.
+_CREATE_TYPE = re.compile(r"\ACREATE\s+TYPE\s+([A-Za-z_][\w$]*)", re.IGNORECASE)
+_CREATE_TABLE = re.compile(r"\ACREATE\s+TABLE\s+([A-Za-z_][\w$]*)", re.IGNORECASE)
+_CREATE_INDEX = re.compile(
+    r"\ACREATE\s+(?:UNIQUE\s+)?INDEX\s+([A-Za-z_][\w$]*)", re.IGNORECASE
+)
+
+
+def _already_present(stmt: str) -> bool:
+    """이 문장이 만들려는 객체가 이미 있으면 True.
+
+    `COMMENT ON ...` 은 절대 건너뛰지 않는다. 멱등이고, 대상이 없으면 실패해서
+    스키마 표류를 드러내 주기 때문이다.
+    """
+    match = _CREATE_TYPE.match(stmt)
+    if match:
+        return type_exists(match.group(1))
+    match = _CREATE_TABLE.match(stmt)
+    if match:
+        return relation_exists(match.group(1))
+    match = _CREATE_INDEX.match(stmt)
+    if match:
+        # 인덱스도 pg_class 관계다.
+        return relation_exists(match.group(1))
+    return False
+
+
 def upgrade() -> None:
     for stmt in _statements(DDL):
+        if _already_present(stmt):
+            continue
         op.execute(stmt)
 
 

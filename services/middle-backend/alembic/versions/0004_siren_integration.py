@@ -22,10 +22,16 @@ both_calculated else None`). "데이터 부족을 안전으로 표시하지 않�
 우리는 주소 문자열만 갖고 있었다. 전부 nullable 로 두어 값이 없는 점포는 지금처럼
 분석 대상에서 빠지게 한다 — 좌표를 지어내면 다른 상권의 위험도가 그 점포 것으로
 표시된다.
+
+0001~0003 과 같은 이유로 재실행이 가능해야 한다. `op.add_column` 은 `IF NOT EXISTS`
+를 만들지 못하므로 raw `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 로 바꿨다.
+생성되는 컬럼 타입·NULL 여부·기본값은 이전과 같다. `DROP NOT NULL` 과
+`ALTER COLUMN ... TYPE` 은 원래 멱등이라 그대로 둔다.
 """
 
 from alembic import op
-import sqlalchemy as sa
+
+from app.db.migration_guards import constraint_exists
 
 revision = "0004_siren_integration"
 down_revision = "0003_integrity_constraints"
@@ -38,45 +44,48 @@ def upgrade() -> None:
     op.execute("ALTER TABLE report_analysis ALTER COLUMN risk_score DROP NOT NULL")
     op.execute("ALTER TABLE report_analysis ALTER COLUMN risk_level DROP NOT NULL")
     op.execute("ALTER TABLE report_analysis ALTER COLUMN rule_version TYPE VARCHAR(60)")
-    op.add_column(
-        "report_analysis",
-        sa.Column(
-            "calculation_status",
-            sa.String(20),
-            nullable=False,
-            server_default="calculated",
-        ),
+    op.execute(
+        "ALTER TABLE report_analysis ADD COLUMN IF NOT EXISTS "
+        "calculation_status VARCHAR(20) NOT NULL DEFAULT 'calculated'"
     )
-    op.add_column(
-        "report_analysis", sa.Column("alert_policy_version", sa.String(60), nullable=True)
+    op.execute(
+        "ALTER TABLE report_analysis ADD COLUMN IF NOT EXISTS "
+        "alert_policy_version VARCHAR(60)"
     )
     # 점수와 등급은 함께 있거나 함께 없어야 한다. 사이렌 계약(HqRisk)과 같은 규칙이다.
     # 한쪽만 있는 행은 목록 정렬(risk_level)과 상세(risk_score)가 어긋난다.
-    op.execute(
-        "ALTER TABLE report_analysis ADD CONSTRAINT ck_analysis_score_grade_together "
-        "CHECK ((risk_score IS NULL) = (risk_level IS NULL))"
-    )
+    if not constraint_exists("ck_analysis_score_grade_together"):
+        op.execute(
+            "ALTER TABLE report_analysis ADD CONSTRAINT ck_analysis_score_grade_together "
+            "CHECK ((risk_score IS NULL) = (risk_level IS NULL))"
+        )
 
     # ── branch: 사이렌이 요구하는 위치 입력
-    op.add_column("branch", sa.Column("trade_area_code", sa.String(20), nullable=True))
-    op.add_column("branch", sa.Column("x_5181", sa.Numeric(12, 2), nullable=True))
-    op.add_column("branch", sa.Column("y_5181", sa.Numeric(12, 2), nullable=True))
-    # 좌표는 두 값이 함께 있어야 의미가 있다. 하나만 있으면 잘못된 지점을 가리킨다.
     op.execute(
-        "ALTER TABLE branch ADD CONSTRAINT ck_branch_coords_together "
-        "CHECK ((x_5181 IS NULL) = (y_5181 IS NULL))"
+        "ALTER TABLE branch ADD COLUMN IF NOT EXISTS trade_area_code VARCHAR(20)"
     )
+    op.execute("ALTER TABLE branch ADD COLUMN IF NOT EXISTS x_5181 NUMERIC(12, 2)")
+    op.execute("ALTER TABLE branch ADD COLUMN IF NOT EXISTS y_5181 NUMERIC(12, 2)")
+    # 좌표는 두 값이 함께 있어야 의미가 있다. 하나만 있으면 잘못된 지점을 가리킨다.
+    if not constraint_exists("ck_branch_coords_together"):
+        op.execute(
+            "ALTER TABLE branch ADD CONSTRAINT ck_branch_coords_together "
+            "CHECK ((x_5181 IS NULL) = (y_5181 IS NULL))"
+        )
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE branch DROP CONSTRAINT ck_branch_coords_together")
-    op.drop_column("branch", "y_5181")
-    op.drop_column("branch", "x_5181")
-    op.drop_column("branch", "trade_area_code")
+    op.execute("ALTER TABLE branch DROP CONSTRAINT IF EXISTS ck_branch_coords_together")
+    op.execute("ALTER TABLE branch DROP COLUMN IF EXISTS y_5181")
+    op.execute("ALTER TABLE branch DROP COLUMN IF EXISTS x_5181")
+    op.execute("ALTER TABLE branch DROP COLUMN IF EXISTS trade_area_code")
 
-    op.execute("ALTER TABLE report_analysis DROP CONSTRAINT ck_analysis_score_grade_together")
-    op.drop_column("report_analysis", "alert_policy_version")
-    op.drop_column("report_analysis", "calculation_status")
+    op.execute(
+        "ALTER TABLE report_analysis DROP CONSTRAINT IF EXISTS "
+        "ck_analysis_score_grade_together"
+    )
+    op.execute("ALTER TABLE report_analysis DROP COLUMN IF EXISTS alert_policy_version")
+    op.execute("ALTER TABLE report_analysis DROP COLUMN IF EXISTS calculation_status")
     op.execute("ALTER TABLE report_analysis ALTER COLUMN rule_version TYPE VARCHAR(20)")
     # NOT NULL 복구는 null 행이 없을 때만 성공한다. 되돌리기 전에 정리해야 한다.
     op.execute("ALTER TABLE report_analysis ALTER COLUMN risk_level SET NOT NULL")

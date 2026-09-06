@@ -7,6 +7,8 @@ PR #5 리뷰의 [P2] 두 건을 DB에서 보장한다. 지금은 계정이 시�
 
 from alembic import op
 
+from app.db.migration_guards import constraint_exists
+
 revision = "0003_integrity_constraints"
 down_revision = "0002_notification_query_index"
 branch_labels = None
@@ -14,6 +16,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # PostgreSQL 에는 `ADD CONSTRAINT IF NOT EXISTS` 가 없다. 0001 과 같은 이유로
+    # (alembic_version 없는 부분 적용 DB) 실행 전에 카탈로그를 본다.
+
     # ── 점주와 점포의 동일 프랜차이즈 소속
     #
     # branch.franchise_id 와 owner_user_id 가 독립 FK라, franchise B 의 사용자를
@@ -21,16 +26,18 @@ def upgrade() -> None:
     # OWNER 조회는 branch.owner_user_id 를 신뢰하므로 둘이 어긋나면 권한 경계가 갈라진다.
     #
     # composite FK 의 참조 대상이 되려면 user_account 쪽에 같은 조합의 unique 가 있어야 한다.
-    op.execute(
-        "ALTER TABLE user_account "
-        "ADD CONSTRAINT uq_user_id_franchise UNIQUE (id, franchise_id)"
-    )
-    op.execute(
-        "ALTER TABLE branch "
-        "ADD CONSTRAINT fk_branch_owner_same_franchise "
-        "FOREIGN KEY (owner_user_id, franchise_id) "
-        "REFERENCES user_account (id, franchise_id)"
-    )
+    if not constraint_exists("uq_user_id_franchise"):
+        op.execute(
+            "ALTER TABLE user_account "
+            "ADD CONSTRAINT uq_user_id_franchise UNIQUE (id, franchise_id)"
+        )
+    if not constraint_exists("fk_branch_owner_same_franchise"):
+        op.execute(
+            "ALTER TABLE branch "
+            "ADD CONSTRAINT fk_branch_owner_same_franchise "
+            "FOREIGN KEY (owner_user_id, franchise_id) "
+            "REFERENCES user_account (id, franchise_id)"
+        )
 
     # ── 보고서 월은 항상 해당 월 1일
     #
@@ -39,11 +46,12 @@ def upgrade() -> None:
     #
     # date_trunc 대신 EXTRACT 를 쓴다. CHECK 는 IMMUTABLE 식만 받는데,
     # date_trunc 는 인자 타입에 따라 STABLE 로 해석될 여지가 있다.
-    op.execute(
-        "ALTER TABLE operation_report "
-        "ADD CONSTRAINT ck_report_month_first_day "
-        "CHECK (EXTRACT(DAY FROM report_month) = 1)"
-    )
+    if not constraint_exists("ck_report_month_first_day"):
+        op.execute(
+            "ALTER TABLE operation_report "
+            "ADD CONSTRAINT ck_report_month_first_day "
+            "CHECK (EXTRACT(DAY FROM report_month) = 1)"
+        )
     op.execute(
         "COMMENT ON COLUMN operation_report.report_month IS "
         "'대상 월의 1일 (REQ-OW-11). ck_report_month_first_day 로 DB가 보장한다'"
