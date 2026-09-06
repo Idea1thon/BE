@@ -26,6 +26,7 @@ from app.services.siren_mapper import (
     build_monthly_report,
     notification_message,
     should_notify,
+    LEVEL_SCORE_RANGE,
     to_analysis_values,
 )
 
@@ -249,7 +250,7 @@ def test_market_data_is_omitted_when_absent():
 # --------------------------------------------------------------------------- #
 def test_calculated_result_maps_to_our_columns():
     values = to_analysis_values(CALCULATED)
-    assert values.risk_score == 74  # 74.1944 → SMALLINT
+    assert values.risk_score == 74  # 74.1944 → SMALLINT (버림)
     assert values.risk_level is RiskLevel.DANGER
     assert values.factors == CALCULATED["components"]
     assert values.calculation_status == "calculated"
@@ -283,6 +284,37 @@ def test_rule_version_overflow_is_a_blocker_not_a_truncation():
     values = to_analysis_values(CALCULATED)
     assert values.rule_version == "risk-siren-v1.2-provisional"
     assert any("rule_version" in b for b in values.blockers)
+
+
+@pytest.mark.parametrize(
+    "score, grade, expected",
+    [
+        # ziholee PR 리뷰(P2): 반올림하면 39.9837 이 40 이 되어 '정상' 등급과 어긋난다.
+        (39.9837, "정상", 39),
+        (39.5, "정상", 39),
+        (39.9999, "정상", 39),
+        (40.0, "주의", 40),
+        (69.5, "주의", 69),
+        (69.9999, "주의", 69),
+        (70.0, "위험", 70),
+        (100.0, "위험", 100),
+        (0.0, "정상", 0),
+    ],
+)
+def test_integer_conversion_keeps_the_grade_band(score, grade, expected):
+    body = {**CALCULATED, "risk": {**CALCULATED["risk"], "score": score, "grade": grade}}
+    values = to_analysis_values(body)
+    assert values.risk_score == expected
+    low, high = LEVEL_SCORE_RANGE[values.risk_level]
+    assert low <= values.risk_score <= high
+
+
+def test_score_outside_the_grade_band_is_blocked_not_stored():
+    """상대가 경계값을 바꾸면 모순된 행이 DB 로 가지 않게 막는다."""
+    body = {**CALCULATED, "risk": {**CALCULATED["risk"], "score": 10.0, "grade": "위험"}}
+    values = to_analysis_values(body)
+    assert values.storable is False
+    assert any("구간" in b for b in values.blockers)
 
 
 def test_risk_periods_and_recommendations_are_empty_not_invented():

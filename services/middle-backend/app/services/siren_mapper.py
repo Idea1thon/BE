@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -238,6 +239,27 @@ GRADE_TO_RISK_LEVEL = {
 # DB_SCHEMA 4-9 `rule_version VARCHAR(20)`.
 RULE_VERSION_MAX_LENGTH = 20
 
+# 등급별 정수 점수 구간. 사이렌 정책(normal_upper_bound=40, caution_upper_bound=70)과
+# INTERFACE_SPEC 4장(0~39 / 40~69 / 70~100)이 같은 경계를 쓴다.
+LEVEL_SCORE_RANGE = {
+    RiskLevel.NORMAL: (0, 39),
+    RiskLevel.CAUTION: (40, 69),
+    RiskLevel.DANGER: (70, 100),
+}
+
+
+def _to_smallint(score: float) -> int:
+    """소수 점수를 **등급 구간을 유지한 채** 정수로 만든다.
+
+    반올림하면 안 된다. 39.9837 은 상대가 '정상' 으로 판정한 값인데 반올림하면
+    40 이 되어, 40 부터 주의인 우리 risk_score 기준과 어긋난다. 저장된 행이
+    스스로 모순된다(score 40 · level NORMAL). 69.5~69.999 도 같은 문제다.
+
+    구간 경계가 전부 정수라 버림은 항상 같은 구간 안에 남는다. 점수는 상대
+    clamp_score 로 0 이상이 보장되지만, 부호에 무관하도록 math.floor 를 쓴다.
+    """
+    return math.floor(score)
+
 
 @dataclass
 class AnalysisValues:
@@ -286,7 +308,7 @@ def to_analysis_values(
     if score is not None:
         # float → SMALLINT. 상대는 소수 4자리를 주고 우리 컬럼은 정수다.
         # INTERFACE_SPEC 4장이 risk_score 를 integer 0~100 으로 규정한다.
-        risk_score = int(round(float(score)))
+        risk_score = _to_smallint(float(score))
     else:
         blockers.append("risk_score 가 null 인데 report_analysis.risk_score 는 NOT NULL")
 
@@ -304,6 +326,17 @@ def to_analysis_values(
             f"rule_version 이 {len(rule_version)}자로 "
             f"VARCHAR({RULE_VERSION_MAX_LENGTH}) 초과: {rule_version}"
         )
+
+    # 점수와 등급이 서로 다른 구간을 가리키면 저장하지 않는다. 버림 규칙이
+    # 이를 보장하지만, 상대가 경계값을 바꾸면 여기서 드러나야 한다 — 모순된
+    # 행이 DB 에 들어가면 목록 정렬(risk_level)과 상세(risk_score)가 어긋난다.
+    if risk_score is not None and risk_level is not None:
+        low, high = LEVEL_SCORE_RANGE[risk_level]
+        if not low <= risk_score <= high:
+            blockers.append(
+                f"점수 {risk_score} 가 등급 {risk_level.value} 구간({low}~{high}) 밖이다 "
+                f"— 사이렌 원점수 {score}"
+            )
 
     projections = response.get("projections") or {}
     owner_projection = projections.get("branch_owner") or {}
