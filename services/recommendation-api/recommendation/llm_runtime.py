@@ -25,18 +25,22 @@ class LLMRuntimeError(RuntimeError):
     """The configured LLM endpoint could not return valid JSON."""
 
 
-# 한 번의 추천 실행에서 허용할 LLM 호출 수 상한. 초과하면 generate_json 이
+# 한 번의 추천 실행에서 허용할 LLM 호출 수 상한 (opt-in). 초과하면 generate_json 이
 # LLMRuntimeError 를 던지고, 호출부(plan_input·explain_candidates)는 기존 실패
-# 경로처럼 template/deterministic 폴백으로 전환한다. run_pipeline 이 요청마다
-# reset_call_budget() 를 호출하므로 카운터는 요청 스레드별로 격리된다.
+# 경로처럼 template/deterministic 폴백으로 전환한다. 기본값 0 = 상한 없음이며,
+# 요청당 호출 수는 1(planner) + 후보 수(explanation)라 캡을 걸 때는 그보다 크게
+# 잡아야 auto 모드에서 조용히 template 로 떨어지지 않는다. required 모드에서는
+# 캡을 무시한다(자체 비용캡을 외부 장애처럼 503 으로 보고하지 않도록).
+# run_pipeline 이 요청마다 reset_call_budget() 를 호출하므로 카운터는 요청
+# 스레드별로 격리된다.
 _call_budget = threading.local()
 
 
 def _max_calls_per_run() -> int:
     try:
-        value = int(os.getenv("LLM_MAX_CALLS_PER_RUN", "12"))
+        value = int(os.getenv("LLM_MAX_CALLS_PER_RUN", "0"))
     except ValueError:
-        return 12
+        return 0
     return value if value > 0 else 0  # 0 이하 = 상한 없음
 
 
@@ -45,10 +49,10 @@ def reset_call_budget() -> None:
     _call_budget.used = 0
 
 
-def _charge_call() -> None:
+def _charge_call(*, enforce: bool = True) -> None:
     limit = _max_calls_per_run()
     used = getattr(_call_budget, "used", 0)
-    if limit and used >= limit:
+    if enforce and limit and used >= limit:
         raise LLMRuntimeError(f"LLM 호출 예산 초과 (LLM_MAX_CALLS_PER_RUN={limit})")
     _call_budget.used = used + 1
 
@@ -85,9 +89,9 @@ class LLMConfig:
         if mode not in {"auto", "required", "offline"}:
             raise ValueError(f"지원하지 않는 llm mode: {mode}")
         endpoint = os.getenv("LLM_API_URL", "").strip() or None
-        # OPENAI_API_KEY 는 OpenAI 관용 이름이라 폴백으로 인식한다(#25).
-        api_key = (os.getenv("LLM_API_KEY", "").strip()
-                   or os.getenv("OPENAI_API_KEY", "").strip() or None)
+        # LLM_API_KEY 만 인식한다. 셸에 흔히 떠 있는 OPENAI_API_KEY 를 폴백으로
+        # 받으면 offline 로 알고 있던 환경에서 실호출·과금이 켜질 수 있어 제외.
+        api_key = os.getenv("LLM_API_KEY", "").strip() or None
         model = os.getenv("LLM_MODEL", "").strip()
         try:
             timeout_s = float(os.getenv("LLM_TIMEOUT_SECONDS", "20"))
@@ -158,7 +162,9 @@ class OpenAICompatibleJsonClient:
     def generate_json(self, system_prompt: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.config.available:
             raise LLMRuntimeError("사용 가능한 LLM endpoint가 없습니다.")
-        _charge_call()  # 요청당 호출 상한 — 초과 시 호출부가 폴백
+        # 요청당 호출 상한 — 초과 시 호출부가 폴백. required 모드에서는 캡을 강제하지
+        # 않는다(자체 비용캡을 외부 의존성 장애처럼 503 으로 보고하지 않도록).
+        _charge_call(enforce=self.config.mode != "required")
         body = {
             "model": self.config.model,
             "max_completion_tokens": self.config.max_output_tokens,
