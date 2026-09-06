@@ -64,7 +64,7 @@ class GroundedExplanationTests(unittest.TestCase):
         self.card['citations'] = {'context_notes:0': ['retrieval-example']}
         self.client.generate_json.return_value = {'verdicts': [{'claim_id': 'context_notes:0', 'supported': True}]}
         verified = verify_grounded_claims(self.candidate, self.card, sources, self.client)
-        self.assertTrue(validate_card(self.candidate, self.card, verified_claims=verified)[0])
+        self.assertTrue(validate_card(self.candidate, self.card, verified_claims=verified, source_catalog=sources)[0])
         self.card['reasons'] = self.card.pop('context_notes')
         self.card['citations'] = {'reasons:0': ['retrieval-example']}
         self.assertEqual(verify_grounded_claims(self.candidate, self.card, sources, self.client), set())

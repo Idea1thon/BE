@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from .rag_tools import build_retrieval_evidence
+from .evidence_reranker import select_sources, order_card_claims
 from .llm_runtime import (
     LLMConfig,
     LLMRuntimeError,
@@ -138,6 +139,13 @@ def explanation_sources(candidate: dict[str, Any], retrieval_evidence: list[dict
     for key in ("reasons", "counter_evidence", "context_notes", "missing_features"):
         for index, claim in enumerate(_candidate_claims(candidate, key)):
             sources[f"{key}:{index}"] = {"bucket": key, "text": claim}
+    # Include all built metrics (population, planning, rent, news, etc.), not
+    # only the four dimensions exposed by the supplementary SQL tool.
+    for index, item in enumerate(candidate.get("evidence") or []):
+        if isinstance(item, dict):
+            sources[f"candidate-evidence:{index}"] = {
+                "bucket": "context_notes", "text": json.dumps(item, ensure_ascii=False),
+            }
     for item in retrieval_evidence:
         sources[item["evidence_id"]] = {
             "bucket": "context_notes", "text": json.dumps(item, ensure_ascii=False),
@@ -205,11 +213,27 @@ def verify_grounded_claims(candidate, card, sources, client) -> set[str]:
     return accepted
 
 
-def validate_card(candidate: dict[str, Any], card: Any, *, verified_claims: set[str] | None = None) -> tuple[bool, list[str]]:
+def validate_card(candidate: dict[str, Any], card: Any, *, verified_claims: set[str] | None = None, source_catalog: dict[str, Any] | None = None) -> tuple[bool, list[str]]:
     if not isinstance(card, dict):
         return False, ["설명 카드가 JSON 객체가 아님"]
     errors: list[str] = []
     verified_claims = verified_claims or set()
+    if "citations" in card:
+        catalog = source_catalog if source_catalog is not None else explanation_sources(candidate, [])
+        citations = card["citations"]
+        if not isinstance(citations, dict):
+            errors.append("citations가 객체가 아님")
+        else:
+            for position, refs in citations.items():
+                bucket, _, index = str(position).partition(":")
+                valid_position = position == "summary"
+                if bucket in {"reasons", "counter_evidence", "context_notes", "missing_features"}:
+                    values = card.get(bucket)
+                    valid_position = isinstance(values, list) and index.isdigit() and len(index) <= 6 and int(index) < len(values)
+                if (not valid_position or not isinstance(refs, list) or not 1 <= len(refs) <= 8
+                        or any(not isinstance(ref, str) or ref not in catalog
+                               or catalog[ref]["bucket"] != bucket for ref in refs)):
+                    errors.append(f"잘못된 인용: {position}")
     allowed_keys = {
         "candidate_id", "summary", "reasons", "counter_evidence", "context_notes",
         "missing_features", "inference_hypotheses", "claim_type", "explanation_mode", "citations",
@@ -284,12 +308,14 @@ def explain_candidates(
     candidates: list[dict[str, Any]],
     llm_mode: str = "auto",
     retrieval_context: dict[str, Any] | None = None,
+    query_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     retrieval_evidence = build_retrieval_evidence(retrieval_context or {})
     config = LLMConfig.from_env(llm_mode)
     if llm_mode == "required" and not config.available:
         raise LLMRuntimeError("llm-mode=required지만 LLM_API_URL/LLM_API_KEY/LLM_MODEL 설정이 없습니다.")
     source_catalogs: dict[str, Any] = {}
+    relevance: dict[str, Any] = {}
     cards: list[dict[str, Any]] = []
     errors: list[str] = []
     llm_used = 0
@@ -304,6 +330,7 @@ def explain_candidates(
 
 추가 역할: 검증된 서울 창업 입지 후보를 설명하는 Evidence 기반 설명 카드 작성기다.
 후보 JSON과 서버가 제공한 explanation_sources만 사용해 한국어 JSON을 작성하라.
+사용자 query_context의 질문과 부정·시간대·대상 고객 조건에 직접 답하고, 정렬된 출처에서 관련 근거를 먼저 설명하라. 관련 데이터가 없으면 미확인이라고 명시하라.
 summary와 근거 문장은 자연스럽게 재서술할 수 있다. summary는 기존 등급과 미확인 조건 검토 필요성을 유지하라.
 원문과 달라진 문장은 citations에 출력 위치(summary 또는 context_notes:0 등)를 키로, explanation_sources의 참조 ID 배열을 값으로 넣어라.
 reasons/counter_evidence/context_notes/missing_features는 같은 bucket의 출처만 인용하라. 검색 근거는 context_notes에서 지역·기간·단위·출처를 명시한 배경 설명으로 활용하라.
@@ -317,18 +344,24 @@ claim_type은 descriptive 또는 associational만 허용한다."""
     for candidate in candidates:
         sources = explanation_sources(candidate, retrieval_evidence)
         source_catalogs[str(candidate.get("candidate_id"))] = sources
+        selected, ranking = select_sources(query_context or {}, sources, client)
+        relevance[str(candidate.get("candidate_id"))] = ranking
         card = None
         if client:
             try:
                 card = client.generate_json(system_prompt, {
-                    "candidate_evidence": candidate,
-                    "explanation_sources": sources,
+                    "candidate_evidence": ({"candidate_id": candidate.get("candidate_id"),
+                                            "fit_tier": candidate.get("fit_tier"),
+                                            "hypothesis_reference_ids": sorted(_candidate_reference_ids(candidate))}
+                                           if query_context else candidate),
+                    "query_context": query_context or {},
+                    "explanation_sources": selected,
                 })
-                verified = verify_grounded_claims(candidate, card, sources, client) if isinstance(card, dict) else set()
-                valid, validation_errors = validate_card(candidate, card, verified_claims=verified)
+                verified = verify_grounded_claims(candidate, card, selected, client) if isinstance(card, dict) else set()
+                valid, validation_errors = validate_card(candidate, card, verified_claims=verified, source_catalog=selected)
                 if valid:
                     card["explanation_mode"] = "llm"
-                    cards.append(card)
+                    cards.append(order_card_claims(card, selected))
                     llm_used += 1
                     continue
                 errors.extend(f"{candidate.get('candidate_id')}: {error}" for error in validation_errors)
@@ -341,7 +374,7 @@ claim_type은 descriptive 또는 associational만 허용한다."""
                 if llm_mode == "required":
                     raise
                 errors.append(f"{candidate.get('candidate_id')}: {exc}")
-        cards.append(template_card(candidate))
+        cards.append(order_card_claims(template_card(candidate), selected))
 
     if not candidates:
         mode = "template"
@@ -355,6 +388,8 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         "cards": cards,
         "retrieval_evidence": retrieval_evidence,
         "sources_by_candidate": source_catalogs,
+        "relevance_by_candidate": relevance,
+        "query_context": query_context or {},
         "explanation_mode": mode,
         "degraded": mode != "llm",
         "llm": {**config.public_metadata(), "calls_succeeded": llm_used, "candidate_count": len(candidates), "validation_or_runtime_errors": errors[:20]},
