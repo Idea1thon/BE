@@ -126,7 +126,9 @@ class VerificationDiagnosticsTests(unittest.TestCase):
 
     def test_supported_claim_can_still_be_lost_to_whole_card_validation(self):
         card = copy.deepcopy(self.card)
-        card['candidate_id'] = 'wrong'
+        # Identity/type errors now fail before semantic verification. A banned
+        # certainty phrase still demonstrates the later whole-card gate.
+        card['context_notes'][0] += ' 무조건 좋습니다.'
         result, _ = self.run_card(card, {'verdicts': [{'claim_id': 'context_notes:0', 'supported': True}]})
         d = self.diagnostic(result)
         self.assertEqual(d['fallback_reason'], 'card_validation_failed')
@@ -140,7 +142,7 @@ class VerificationDiagnosticsTests(unittest.TestCase):
         self.assertEqual(d['claims'], [])
         self.assertFalse(d['summary_reverted'])
         for reply, status, reason in [(LLMRuntimeError('unavailable'), 'runtime_error', 'generation_error'),
-                                      ([], 'invalid_card', 'card_validation_failed')]:
+                                      ([], 'invalid_card', 'draft_schema_invalid')]:
             result, _ = self.run_card(reply)
             d = self.diagnostic(result)
             self.assertEqual(d['generation_status'], status)
@@ -204,8 +206,9 @@ class VerificationDiagnosticsTests(unittest.TestCase):
         result, _ = self.run_card(card)
         d = self.diagnostic(result)
         self.assertEqual(d['verification_counts']['invalid_claim_type'], 2)
+        self.assertEqual(d['fallback_reason'], 'draft_schema_invalid')
         c = self.claim(d, 'context_notes:2')
-        self.assertEqual(c['verification'], 'invalid_citations')
+        self.assertEqual(c['verification'], 'not_checked')
         self.assertEqual(len(c['source_ids']), 8)
         self.assertTrue(all(len(ref) <= 128 for ref in c['source_ids']))
         self.assertTrue(c['source_ids_truncated'])
@@ -219,6 +222,7 @@ class VerificationDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result['cards'][0]['context_notes'], [])
         json.dumps(result, ensure_ascii=False).encode('utf-8')
         claim = self.claim(self.diagnostic(result), 'context_notes:0')
-        self.assertEqual(claim['verification'], 'unknown_source')
+        self.assertEqual(claim['verification'], 'not_checked')
+        self.assertEqual(self.diagnostic(result)['fallback_reason'], 'draft_schema_invalid')
         self.assertNotIn('\ud800', claim['text_excerpt'])
         self.assertNotIn('\udfff', claim['source_ids'][0])

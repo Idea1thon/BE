@@ -55,6 +55,7 @@ def _citation_counts(card: Any) -> tuple[int, int]:
 def build_verification_diagnostics(
     template: dict[str, Any], draft: Any, final: dict[str, Any],
     decisions: dict[str, str], *, generation_status: str, fallback_reason: str | None,
+    restored_source_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Compare original draft positions with the final, pruned and ordered card.
 
@@ -84,6 +85,9 @@ def build_verification_diagnostics(
         'draft_retrieval_citation_count': draft_retrieval,
         'final_retrieval_citation_count': final_retrieval,
         'claims': [], 'claims_truncated_count': 0,
+        'restored_claim_count': len(restored_source_ids or []),
+        'restored_claims': [],
+        'restored_claims_truncated_count': max(0, len(restored_source_ids or []) - MAX_DIAGNOSTIC_CLAIMS),
     }
     for position, text in _claims(draft):
         result['draft_claim_count'] += 1
@@ -127,4 +131,13 @@ def build_verification_diagnostics(
             'source_ids': [_safe_excerpt(ref, MAX_SOURCE_ID_CHARS) for ref in string_refs[:MAX_SOURCE_IDS]],
             'source_ids_truncated': len(string_refs) > MAX_SOURCE_IDS or any(len(ref) > MAX_SOURCE_ID_CHARS for ref in string_refs),
         })
+    # These are trusted template facts appended separately from draft claims.
+    # Report their final positions after relevance sorting without claiming that
+    # the model generated or verified them.
+    for source_id in (restored_source_ids or [])[:MAX_DIAGNOSTIC_CLAIMS]:
+        bucket, _, index = source_id.partition(':')
+        text = template[bucket][int(index)]
+        position = next((position for position, value in _claims(final)
+                         if position.startswith(bucket + ':') and value == text), None)
+        result['restored_claims'].append({'source_id': source_id, 'final_position': position})
     return result

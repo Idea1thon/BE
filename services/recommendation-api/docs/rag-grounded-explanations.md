@@ -8,7 +8,7 @@
 2. 읽기 전용 검색은 선택 지역·업종·분기를 서버가 지정한다. 결과에서 출처·지역·기간·단위가 확인되는 행만 `retrieval_evidence`로 정규화한다. 결측값을 0으로 바꾸지 않는다. 행정동 검색에는 선택 시군구 조건도 적용한다.
 3. 후보 등급·정렬은 기존 엔진에서 계산한다. 설명 모델은 서버의 `explanation_sources`를 사용하며 재서술 문장마다 `citations`를 반환한다.
 4. 서버는 각 재서술 문장이 허용된 bucket의 출처를 인용했는지, 인용 출처에 수치가 있는지 확인한다. 인용 규칙은 (a) 같은 bucket, (b) 후보 자체 지표인 `candidate-evidence:*`는 모든 관측 bucket에서, (c) `summary`는 카드의 다른 관측 bucket에서도 허용하며, `retrieval-*` 지역 검색 근거는 `context_notes`에서만 허용한다. 이어 별도 모델 호출이 단위·기간·지역·수치 대상·부정·불확실성·추가 주장의 일치 여부를 문장별로 검토하고, `supported: true` 응답이 있는 문장만 채택한다.
-5. 검토를 통과하지 못한 재서술 문장은 서버가 제거하고(재서술 summary는 템플릿 문장으로 되돌린다) 나머지 검증된 문장으로 카드를 완성한다. 남는 재서술이 없으면 카드는 사실상 템플릿과 같다. 검토 호출 자체가 실패하거나 예산을 초과하면 `auto`는 템플릿으로 돌아가고 `required`는 실패를 반환한다. 원문을 그대로 사용하는 카드는 추가 검토 호출이 없다.
+5. 생성 카드의 기본 형식(후보 ID, 요약, 관측 문자열 배열, 가설 형식)을 문장 검토 전에 검사한다. 형식 오류는 `auto`에서 템플릿으로 복귀하고 `required`에서 실패한다. 검토를 통과하지 못한 재서술 문장은 제거하고, 재서술 summary는 템플릿 문장으로 되돌린다. 정리 후 관측 목록이 모두 비면 같은 방식으로 복귀/실패한다. 일부 목록이 남으면 서버의 반대근거·결측 원문을 보존하고 복구 여부를 표시한다. 검토 호출 자체가 실패하거나 예산을 초과해도 `auto`는 템플릿으로 돌아가고 `required`는 실패를 반환한다. 원문을 그대로 사용하는 카드는 추가 검토 호출이 없다.
 
 ## 응답과 참조
 
@@ -50,14 +50,14 @@
 
 ### 설명 검증 전후 진단
 
-`explanations.verification_by_candidate[candidate_id]`는 생성 초안과 최종 설명의 차이를 반환한다. 기존 `cards`, `explanation_mode`, `degraded`, `llm.validation_or_runtime_errors`의 의미와 검증·fallback 정책은 유지한다. 검증에서 일부 재서술이 삭제돼도 최종 카드가 유효하면 `explanation_mode=llm`, 오류 목록 `[]`일 수 있으므로 문장 단위 손실은 이 진단으로 확인한다. 추가 LLM 호출은 없다.
+`explanations.verification_by_candidate[candidate_id]`는 생성 초안과 최종 설명의 차이를 반환한다. 문장 단위 손실과 복구를 이 진단으로 확인한다. 일부 재서술이 삭제돼도 나머지 목록이 유효하고 원문 경고 복구가 필요 없으면 `explanation_mode=llm`, 오류 목록 `[]`일 수 있다. 관측 목록 전체 소실은 `empty_explanation`으로 복귀하며, 원문 경고·결측을 보충한 카드는 `mixed`로 표시한다. 추가 LLM 호출은 없다.
 
 진단의 `content_status=unverified_draft`는 발췌문에 거부된 주장도 포함됨을 나타낸다. 진단을 사용자용 추천 문장, 관측 Evidence, 후속 검색 원천으로 사용하지 않는다. `supported`는 기존 검토기가 통과시켰다는 뜻이며 독립적인 사실 검증을 의미하지 않는다. 원시 응답 전체, 가설 배열, 프롬프트, 인증 정보를 별도로 수집하지 않는다.
 
 | 필드 | 의미 |
 | --- | --- |
 | `generation_status` | `not_attempted`, `generated`, `invalid_card`, `runtime_error` |
-| `final_mode`, `fallback_reason` | 최종 카드 모드와 전체 카드 복귀 사유. 사유는 `no_client`, `generation_error`, `verification_error`, `card_validation_failed` 또는 null |
+| `final_mode`, `fallback_reason` | 최종 카드 모드와 전체 카드 복귀 사유. 사유는 `no_client`, `generation_error`, `draft_schema_invalid`, `verification_error`, `empty_explanation`, `card_validation_failed` 또는 null |
 | `summary_reverted` | 생성된 문자열 요약이 템플릿과 달랐으나 최종적으로 템플릿 요약으로 돌아갔는지 여부. 처음부터 템플릿 요약을 생성한 경우 false |
 | `draft_claim_count`, `rewritten_claim_count`, `verified_claim_count` | 초안 관측 항목 수(요약 포함), 문자열 재서술 수, 의미 검토까지 통과한 재서술 수. 검토 통과 후 전체 카드 fallback이 발생할 수도 있음 |
 | `removed_claim_count` | 부분 정리로 제거된 목록 항목 수. 요약 복귀 및 전체 카드 fallback 수와 구분 |
@@ -70,8 +70,8 @@
 
 - `draft_position`: 생성 당시 위치. 예: `context_notes:2`.
 - `final_position`: 부분 삭제와 관련도 재정렬을 모두 거친 최종 카드 위치. 유지되지 않았으면 null. 같은 문장이 반복되더라도 검사 결과·인용·발생 순서로 대응한다.
-- `verification`: `verbatim`(원문 복사), `supported`, `missing_citations`, `invalid_citations`, `unknown_source`, `disallowed_source_bucket`, `unsupported_number`, `semantic_rejected`, `missing_verdict`, `invalid_verdict`, `verifier_runtime_error`, `invalid_claim_type`, `not_checked` 중 하나. 로컬 검사에서는 첫 실패 사유를 기록한다. `semantic_rejected`는 명시적 false, `missing_verdict`는 항목 누락, `invalid_verdict`는 형식 오류이며 셋을 동일한 의미 거부로 해석하지 않는다.
-- `disposition`: `kept`, `removed`, `summary_reverted`, `card_fallback`. 의미 검토에서 통과했어도 후보 ID 오류 등으로 전체 카드가 복귀하면 `card_fallback`이다.
+- `verification`: `verbatim`(원문 복사), `supported`, `missing_citations`, `invalid_citations`, `unknown_source`, `disallowed_source_bucket`, `unsupported_number`, `unsupported_period`, `semantic_rejected`, `missing_verdict`, `invalid_verdict`, `verifier_runtime_error`, `invalid_claim_type`, `not_checked` 중 하나. 로컬 검사에서는 첫 실패 사유를 기록한다. `semantic_rejected`는 명시적 false, `missing_verdict`는 항목 누락, `invalid_verdict`는 형식 오류이며 셋을 동일한 의미 거부로 해석하지 않는다.
+- `disposition`: `kept`, `removed`, `summary_reverted`, `card_fallback`. 의미 검토에서 통과했어도 최종 카드의 금지 확정 표현 등으로 전체 카드가 복귀하면 `card_fallback`이다.
 - `text_excerpt`, `text_truncated`, `text_sha256`: 원문 최대500자, 절단 여부, 전체 원문 SHA-256. 비문자열 항목은 빈 발췌·null 해시로 보고한다.
 - `source_ids`, `source_ids_truncated`: 초안의 문자열 출처 ID 최대8개, ID당 최대128자와 절단 여부. 전체 인용이 필요하면 최종 `cards.citations` 및 `sources_by_candidate`를 함께 확인한다. 절단된 ID는 조회 키로 사용하지 않는다.
 
@@ -79,6 +79,26 @@
 
 SQL 직접 인용이 최종0건이면 초안 인용과 문장별 처리를 확인한다. 초안에도0건이면 검증에서 지운 인용은 없다. 초안에 있으면 로컬 거부·의미 거부·검토 오류·카드 fallback을 구분한다. 원문 복사(`verbatim`)는 기존 정책에 따라 인용을 제거해도 문장을 유지하므로 인용 감소를 의미 검토 거부로 간주하지 않는다. 이 진단만으로 모델이 특정 출처를 선택하지 않은 이유나 검토기의 오탐 여부까지 판정할 수는 없으며, 발췌문과 출처를 대조해야 한다. 비정상 인용 위치처럼 실제 초안 항목이 없는 인용은 개수에는 포함되지만 항목 상세에는 나오지 않는다.
 
-`required`에서 검토 호출 또는 카드 검증이 실패하면 기존처럼 예외를 반환하므로 성공 응답의 후보별 진단도 반환되지 않는다. 장애 진단을 확인하려면 `auto` fallback 응답을 사용한다. 이 변경은 단계별 지연 계측, 검색 확장, 근거 축소, 검증 기준 변경을 포함하지 않는다.
+`required`에서 검토 호출 또는 카드 검증이 실패하면 기존처럼 예외를 반환하므로 성공 응답의 후보별 진단도 반환되지 않는다. 장애 진단을 확인하려면 `auto` fallback 응답을 사용한다. 단계별 지연 계측, 검색 확장, 근거 축소는 포함하지 않는다. 기간 동등 표기와 설명 복구의 변경 계약은 아래를 따른다.
 
 검증: `test_verification_diagnostics.py`는 모의 모델 응답으로 생성 없음/수용/삭제, 원문 인용 제거, 요약 복귀, 재정렬·중복 문장, 검토 장애, 전체 카드 fallback, 진단 상한을 확인한다. Azure의 실제 검증 오탐과 SQL 인용 미사용 원인은 배포 후 새 요청으로 확인해야 한다.
+
+
+### 기간 동등 표기와 설명 복구
+
+숫자 검사에서는 인용 출처 JSON 최상위 `period`/`observed_end_period`의 유효한 `YYYYQ` 또는 `YYYYMM`에 대응하는 자연어 기간을 코드로 정규화한다. 예: 출처 `20262`일 때 `2026년 2분기`, 출처 `202608`일 때 `2026년 8월`. 연도·월·분기 숫자를 일반 허용 숫자 집합에 추가하지 않는다. 원래 설명과 의미 검토 입력은 그대로 유지하므로 지표·공간·단위·한계 검사는 계속 수행한다.
+
+- 다른 연도·분기·월은 `unsupported_period`로 거부한다. 다른 출처 수치에 같은 숫자가 있어도 기간 불일치를 통과시키지 않는다.
+- 파일 경로, 일반 지표값, 중첩 JSON은 기간 코드의 근거로 사용하지 않는다. 평문 출처에 이미 같은 자연어 기간이 있으면 기존 숫자 표기를 유지한다.
+- 금액·비율은 기존 숫자 검사를 계속 통과해야 한다. 유효한 최상위 ISO 기간 `YYYY-MM`/`YYYY-MM-DD`의 자연어 월은 숫자 검사에서 원천의 `YYYY-MM` 부분으로만 치환한다. 숫자 파서의 부호 처리를 바꾸지 않으며 다른 월·잘못된 날짜는 허용하지 않는다. 자연어 일자·연간 기간의 추가 변환은 구현하지 않았다.
+- 길이가 과도한 분기·월 숫자는 정수 변환 전에 거부한다.
+
+생성 요청은 `output_contract`로 요약 문자열, 관측 문자열 배열, 최상위 인용 사전의 구조를 함께 전달한다. 호환 서버의 JSON Schema 지원을 가정하지 않으며 기존 `json_object` 호출 형식을 유지한다. 사전 검사는 비문자열·빈 문자열 배열 항목, 잘못된 후보 ID·요약·가설·claim_type을 문장 삭제 전에 감지한다. 추가 생성 재시도나 LLM 호출은 없다.
+
+검증 후 네 관측 목록(`reasons`, `counter_evidence`, `context_notes`, `missing_features`)이 모두 비면 `auto`는 신뢰 가능한 `template_card(candidate)` 전체로 돌아가고, `required`는 기존 실패 계약대로 예외를 반환한다. 요약이나 분석 가설만 남았다고 LLM 설명 성공으로 처리하지 않는다. 전체 복귀는 `final_mode=template`, `fallback_reason=empty_explanation`, `calls_succeeded=0`(해당 후보만 있는 경우), `degraded=true`로 드러난다. 템플릿 자체에 원천 근거가 없으면 새 사실을 만들지 않는다.
+
+일부 설명이 유효해도 서버가 가진 `counter_evidence`·`missing_features` 원문은 반드시 보존한다. 인용된 문장이 지지된다는 검토 결과는 원문 경고가 빠짐없이 유지됐다는 뜻이 아니므로, 원문과 다른 재서술이 있어도 정확한 원문이 없으면 보충한다. 이미 있는 원문은 중복 추가하지 않으며, 모델의 재서술과 원문이 함께 보일 수 있다. 원래 서버에 없는 미확인 항목은 새로 생성하지 않는다.
+
+부분 보충한 카드는 `explanation_mode=mixed`, 응답도 `mixed/degraded=true`로 표시한다. 유효한 모델 카드가 채택됐으므로 `calls_succeeded`에는 포함되지만 실제 HTTP 호출 수나 완전한 답변 품질을 뜻하지 않는다. 진단의 `restored_claim_count`는 부분 복구한 원문 수, `restored_claims`는 그 원문 `source_id`와 재정렬 후 `final_position`이다. 상세 최대100개와 `restored_claims_truncated_count`를 제공하며, 복구된 원문을 모델이 생성·검토했다고 표시하지 않는다. 전체 카드 fallback은 이 부분 복구 수에 포함하지 않는다.
+
+`test_grounding_periods.py`, `test_explanation_recovery.py`는 기간 동등 표기·잘못된 기간/값·빈 설명·사전 형식 검사·경고 전체 보존과 모드/진단을 검증한다. 저장된 Azure 응답으로 기간 문장3건과 실제 후보 템플릿을 로컬 재생했으며 의미 판단은 mock이다. 실제 생성 형식 안정성과 의미 검토 수용률은 재배포 후 확인해야 한다.
