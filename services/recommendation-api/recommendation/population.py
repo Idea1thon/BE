@@ -282,8 +282,30 @@ def load_population(root: Path,
 
 
 def load_crosswalk(root: Path) -> dict[str, list[tuple[str, float]]]:
-    """DB 소스도 상권↔행정동 면적가중 crosswalk는 파일에서 읽는다(작은 파생 산출물)."""
+    """파일 소스: `crosswalk_trdar_dong.csv`."""
     return _load_crosswalk(root)
+
+
+def load_crosswalk_from_db(query) -> dict[str, list[tuple[str, float]]]:
+    """DB 소스: `location.area_crosswalk` `commercial_to_admin_overlap`.
+
+    `source_ratio` = `ratio_of_trdar` (파일 `crosswalk_trdar_dong.csv`와 동일값·2,207쌍 검증).
+    미적재 시 빈 dict.
+    """
+    rows = query(
+        "SELECT split_part(source_area_id,':',2) AS trdar, "
+        "split_part(target_area_id,':',2) AS dong, source_ratio "
+        "FROM location.area_crosswalk WHERE relation_type = 'commercial_to_admin_overlap'"
+    )
+    out: dict[str, list[tuple[str, float]]] = {}
+    for r in rows:
+        trdar = (r.get("trdar") or "").strip()
+        dong = (r.get("dong") or "").strip()
+        ratio = _f(r, "source_ratio")
+        if not trdar or not dong or ratio is None:
+            continue
+        out.setdefault(trdar, []).append((dong, ratio))
+    return out
 
 
 @dataclass

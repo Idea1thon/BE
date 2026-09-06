@@ -133,14 +133,14 @@ class PlanData:
     coverage: dict[str, Any] = field(default_factory=dict)
 
 
-def _load_subway_plan(root: Path) -> tuple[dict[str, list[str]], dict[str, PlannedSubwayLine]]:
-    """제2차 서울 도시철도망 구축계획 — 자치구별 계획 노선(신설·연장만, 운행개선 제외)."""
+def _assemble_subway(line_rows: list[dict[str, str]], sgg_rows: list[dict[str, str]]
+                     ) -> tuple[dict[str, list[str]], dict[str, PlannedSubwayLine]]:
+    """이미 파싱된 행 dict → (자치구명 → 계획 노선 목록, 노선명 → 상세). 파일·DB 공통 코어.
+
+    운행개선(급행·직결)은 신역세권이 아니므로 제외한다(프로파일 §432).
+    """
     by_sgg: dict[str, list[str]] = {}
     lines: dict[str, PlannedSubwayLine] = {}
-    try:
-        line_rows = _read_csv(root / _SUBWAY_DIR / _SUBWAY_LINE_FILE)
-    except (OSError, RuntimeError):
-        return by_sgg, lines
     for r in line_rows:
         name = str(r.get("노선명", "")).strip()
         ltype = str(r.get("노선유형", "")).strip()
@@ -154,10 +154,6 @@ def _load_subway_plan(root: Path) -> tuple[dict[str, list[str]], dict[str, Plann
             status=str(r.get("상태_2026", "")).strip() or "계획(미개통·정거장 위치 미확정)",
             period=str(r.get("계획기간", "")).strip(),
         )
-    try:
-        sgg_rows = _read_csv(root / _SUBWAY_DIR / _SUBWAY_SGG_FILE)
-    except (OSError, RuntimeError):
-        sgg_rows = []
     for r in sgg_rows:
         sgg = str(r.get("자치구", "")).strip()
         if not sgg:
@@ -165,12 +161,37 @@ def _load_subway_plan(root: Path) -> tuple[dict[str, list[str]], dict[str, Plann
         planned: list[str] = []
         for entry in str(r.get("전체_계획노선_목록", "")).split(";"):
             entry = entry.strip()
-            if not entry or "(운행개선)" in entry:  # 운행개선(급행·직결)은 신역세권 아님 → 제외
+            if not entry or "(운행개선)" in entry:
                 continue
             planned.append(entry)
         if planned:
             by_sgg[sgg] = sorted(dict.fromkeys(planned))  # 중복 제거·결정론
     return by_sgg, lines
+
+
+def _load_subway_plan(root: Path) -> tuple[dict[str, list[str]], dict[str, PlannedSubwayLine]]:
+    """파일 소스: `도시철도망계획_{노선,자치구}.csv`."""
+    try:
+        line_rows = _read_csv(root / _SUBWAY_DIR / _SUBWAY_LINE_FILE)
+    except (OSError, RuntimeError):
+        return {}, {}
+    try:
+        sgg_rows = _read_csv(root / _SUBWAY_DIR / _SUBWAY_SGG_FILE)
+    except (OSError, RuntimeError):
+        sgg_rows = []
+    return _assemble_subway(line_rows, sgg_rows)
+
+
+def _load_subway_plan_from_db(query) -> tuple[dict[str, list[str]], dict[str, PlannedSubwayLine]]:
+    """DB 소스: `context.subway_network_plan`(kind·key·attributes jsonb). 미적재 시 빈 dict."""
+    import json
+    try:
+        rows = query("SELECT kind, attributes FROM context.subway_network_plan")
+    except Exception:  # noqa: BLE001 — 테이블 미적재
+        return {}, {}
+    line_rows = [json.loads(r["attributes"]) for r in rows if r.get("kind") == "line"]
+    sgg_rows = [json.loads(r["attributes"]) for r in rows if r.get("kind") == "sigungu"]
+    return _assemble_subway(line_rows, sgg_rows)
 
 
 def _assemble(urban_rows: list[dict[str, str]], assoc_rows: list[dict[str, str]],
@@ -246,17 +267,20 @@ def load_from_files(root: Path) -> PlanData:
 
 
 def load_from_db(query, root: Path) -> PlanData | None:
-    """query: DbSource._query. context.plan_snapshot 에서 조립한다. 미적재 시 None.
+    """query: DbSource._query. `context.plan_snapshot` + `context.subway_network_plan`.
 
-    계획 도시철도(`도시철도망계획_*`)는 DB에 없어 `root` 아래 파일에서 읽는다.
+    계획 도시철도는 `context.subway_network_plan` 우선, 미적재 시 `root` 아래 파일 폴백.
+    plan_snapshot·subway 둘 다 없으면 None.
     """
     rows = query(
         "SELECT plan_type, spatial_unit_type, spatial_unit_code, project_name, project_category, "
         "progress_stage, overlap_ratio, source_attributes "
         "FROM context.plan_snapshot WHERE plan_type IN ('urban_project_overlap', 'redevelopment_association')"
     )
-    # F50: plan_snapshot이 비어도 계획 도시철도(파일 기반)는 살린다. 둘 다 없을 때만 None.
-    subway_sgg, subway_lines = _load_subway_plan(root)
+    subway_sgg, subway_lines = _load_subway_plan_from_db(query)
+    if not subway_sgg:  # 미적재 → 파일 폴백
+        subway_sgg, subway_lines = _load_subway_plan(root)
+    # F50: plan_snapshot이 비어도 계획 도시철도는 살린다. 둘 다 없을 때만 None.
     if not rows and not subway_sgg:
         return None
     import json
