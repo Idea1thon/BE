@@ -19,7 +19,7 @@ HQ = {"email": "hq@example.com", "password": "devpass1234"}
 OWNER1 = {"email": "owner1@example.com", "password": "devpass1234"}
 
 GANGNAM = "11680"          # 시드의 강남구
-YEOKSAM = "1168010100"     # 시드의 역삼1동
+YEOKSAM = "11680640"       # 마이그레이션 0005 의 역삼1동 (상권분석 행정동 코드)
 SEOUL = "11"               # 시도
 
 # 상대의 RecommendationApiResponse(services/recommendation-api/api/main.py)를
