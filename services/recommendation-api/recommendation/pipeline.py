@@ -2412,9 +2412,43 @@ class DbSource:
         return {r["trdar"]: {"R_ONE_상권": r["rone"]} for r in rows if r.get("trdar")}
 
     def population(self, flow_dong=None):
-        # 인구 3종은 계단식 파일 데이터이며 DB 팩트 테이블이 아직 없다 → missing 처리.
-        # 근거를 붙이려면 --source files 사용(candidate-selection-spec.md §0-9, 00-input.md #28).
-        return None
+        # context.population_snapshot(dataset·grain·spatial_code·period·attributes jsonb)에서
+        # as_of 파티션을 읽어 파일 소스와 동일 코어(population.assemble)로 조립한다.
+        # 적재: services/recommendation-api/scripts/ingest_population.py. 미적재 시 None(missing 처리).
+        rows = self._query(
+            "SELECT dataset, grain, spatial_code, period, attributes "
+            "FROM context.population_snapshot"
+        )
+        if not rows:
+            return None
+        buckets: dict[tuple[str, str], dict[str, dict[str, str]]] = {}
+        as_of: dict[str, str] = {}
+        _as_of_key = {"resident": "resident", "worker": "worker", "foreign": "foreign_resident"}
+        for r in rows:
+            key = (r["dataset"], r["grain"])
+            buckets.setdefault(key, {})[r["spatial_code"]] = json.loads(r["attributes"])
+            as_of.setdefault(_as_of_key.get(r["dataset"], r["dataset"]), r["period"])
+        as_of.setdefault("resident", population.RESIDENT_AS_OF)
+        as_of.setdefault("worker", population.WORKER_AS_OF)
+        as_of.setdefault("foreign_resident", population.FOREIGN_LATEST_COMPLETE)
+        return population.assemble(
+            resident_trdar=buckets.get(("resident", "commercial_area"), {}),
+            resident_dong=buckets.get(("resident", "admin_dong"), {}),
+            worker_trdar=buckets.get(("worker", "commercial_area"), {}),
+            worker_dong=buckets.get(("worker", "admin_dong"), {}),
+            foreign_dong_raw={
+                code: {
+                    "장기_외국인_평균": population._f(row, "장기_외국인_평균"),
+                    "단기_외국인_평균": population._f(row, "단기_외국인_평균"),
+                    "장기_관측일수": population._f(row, "장기_관측일수"),
+                    "단기_관측일수": population._f(row, "단기_관측일수"),
+                }
+                for code, row in buckets.get(("foreign", "admin_dong"), {}).items()
+            },
+            crosswalk=population.load_crosswalk(ROOT),
+            flow_dong=flow_dong,
+            as_of=as_of,
+        )
 
     def retrieve_requests(self, requests, selected_region, industry_code, quarter):
         try:
