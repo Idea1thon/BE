@@ -18,6 +18,7 @@ API_SPEC 에 없는 신규 계약이다. 추천 서비스를 브라우저에 직
 from __future__ import annotations
 
 import uuid
+import re
 
 import jwt
 from fastapi import APIRouter, status
@@ -55,13 +56,8 @@ SERVICE_UNAVAILABLE_503 = {
 }
 
 
-async def _resolve_region(session, region_code: str) -> tuple[str, str, str | None]:
-    """지역 코드를 추천 서비스가 요구하는 (시도, 시군구, 동) 이름으로 바꾼다.
-
-    추천 서비스는 코드가 아니라 한글 이름을 받는다. F11 에 따라 branch 는
-    시군구 코드만 저장하므로 여기서도 시군구를 기준으로 삼고, 상위 시도는
-    parent_code 로 거슬러 올라가 얻는다.
-    """
+async def _resolve_region(session, region_code: str) -> tuple[str, str, str | None, str, str | None]:
+    """Resolve names and preserve authoritative district/administrative-dong codes."""
     region = (
         await session.execute(select(Region).where(Region.code == region_code))
     ).scalar_one_or_none()
@@ -72,8 +68,10 @@ async def _resolve_region(session, region_code: str) -> tuple[str, str, str | No
         sigungu = (
             await session.execute(select(Region).where(Region.code == region.parent_code))
         ).scalar_one_or_none()
-        if sigungu is None:
+        if sigungu is None or sigungu.level is not RegionLevel.SIGUNGU:
             raise validation_error("지역 계층이 올바르지 않습니다")
+        if not re.fullmatch(r"[0-9]{8}", region.code) or not region.code.startswith(sigungu.code):
+            raise validation_error("행정동 코드 체계가 올바르지 않습니다")
         dong_name: str | None = region.name
         sigungu_region = sigungu
     elif region.level is RegionLevel.SIGUNGU:
@@ -90,7 +88,10 @@ async def _resolve_region(session, region_code: str) -> tuple[str, str, str | No
     ).scalar_one_or_none()
     sido_name = sido.name if sido is not None else _SUPPORTED_SIDO
 
-    return sido_name, sigungu_region.name, dong_name
+    if not re.fullmatch(r"[0-9]{5}", sigungu_region.code):
+        raise validation_error("시군구 코드 체계가 올바르지 않습니다")
+    return (sido_name, sigungu_region.name, dong_name, sigungu_region.code,
+            region.code if region.level is RegionLevel.DONG else None)
 
 
 @router.post(
@@ -111,7 +112,7 @@ async def create_location_recommendation(
     session: SessionDep,
 ):
     """REQ 입지 추천. 로그인한 사용자면 본사·점주 모두 사용할 수 있다."""
-    sido, sigungu, dong = await _resolve_region(session, body.region_code)
+    sido, sigungu, dong, sigungu_code, admin_dong_code = await _resolve_region(session, body.region_code)
 
     if body.business_category_code is not None:
         # 미정의 업종 코드를 그대로 넘기면 추천 서비스가 422 로 답한다.
@@ -140,6 +141,8 @@ async def create_location_recommendation(
             special_condition_text=body.special_condition_text,
             limit=body.limit,
             request_id=request_id,
+            sigungu_code=sigungu_code,
+            admin_dong_code=admin_dong_code,
         )
     except RecommendationPending as pending:
         return _accepted(pending, current_user.id)

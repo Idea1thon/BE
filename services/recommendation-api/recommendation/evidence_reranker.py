@@ -1,6 +1,7 @@
 """Question-aware ordering of existing sources; never edits facts or candidate tiers."""
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 from typing import Any
@@ -21,21 +22,82 @@ def _terms(text: str) -> Counter:
     return terms
 
 
+_TOPIC_KEYWORDS = {
+    'rent': ('임대', '월세'),
+    'vacancy': ('공실',),
+    'jobs': ('직장인', '직장 인구', '직장인구', '직장_인구'),
+    'competition': ('경쟁', '점포수', '점포 수', '가맹점', '프랜차이즈'),
+    'sales': ('매출',),
+    'flow': ('유동',),
+}
+_DIMENSION_TOPICS = {
+    'rent': 'rent', 'vacancy': 'vacancy', 'workplace_population': 'jobs',
+    'total_store_count': 'competition', 'franchise_store_count': 'competition',
+    'stores': 'competition', 'sales': 'sales', 'flow': 'flow',
+}
+_METRIC_TOPICS = {
+    'R-ONE_임대가격지수': 'rent', 'R-ONE_공실률': 'vacancy',
+    '총_직장_인구_수': 'jobs', '직장인 인구': 'jobs', '유동밀도': 'flow',
+}
+_MANDATORY_BUCKETS = {'summary', 'counter_evidence', 'missing_features'}
+
+
+def source_topic_ids(source: dict[str, Any]) -> set[str]:
+    """Classify metric identity, never incidental names/notes inside JSON facts."""
+    text = source.get('text', '')
+    record = source if ('metric_name' in source or 'dimension' in source) else None
+    if record is None and isinstance(text, str):
+        try:
+            decoded = json.loads(text)
+        except (ValueError, TypeError):
+            decoded = None
+        if isinstance(decoded, dict):
+            record = decoded
+    if record is not None:
+        topics = set()
+        metric = record.get('metric_name')
+        if isinstance(metric, str):
+            if metric in _METRIC_TOPICS:
+                topics.add(_METRIC_TOPICS[metric])
+            if metric.endswith('_점포수'):
+                topics.add('competition')
+            if metric.endswith('_점포당매출'):
+                topics.add('sales')
+        dimension = record.get('dimension')
+        if isinstance(dimension, str) and dimension in _DIMENSION_TOPICS:
+            topics.add(_DIMENSION_TOPICS[dimension])
+        return topics
+    if not isinstance(text, str):
+        return set()
+    return {topic for topic, words in _TOPIC_KEYWORDS.items() if any(word in text for word in words)}
+
+
 def select_sources(query: dict[str, Any], sources: dict[str, dict[str, Any]], client=None):
     """Bound context by relevance, retaining every warning and missing-data source.
 
-    The optional model selects short IDs. Valid partial rankings survive; missing
-    entries retain lexical order. Fully unusable output falls back to lexical.
+    The optional model selects short IDs only from relevant optional sources.
+    Partial rankings retain valid IDs and fill only from the relevant shortlist.
+    Fully unusable output falls back to the same filtered lexical selection.
     No inference is promoted to evidence, and omitted sources remain in audit data.
     """
     text = query.get('normalized_text')
     if not isinstance(text, str) or not text.strip():
         return dict(sources), {'mode': 'unchanged', 'source_count': len(sources)}
     tokens = _terms(text)
+    contract = query.get('question_contract')
+    raw_topics = contract.get('topic_ids') if isinstance(contract, dict) else None
+    topics = {topic for topic in raw_topics if isinstance(topic, str)} if isinstance(raw_topics, list) else None
+    if topics == set() and not contract.get('excluded_topics'):
+        topics = None  # Unmapped questions retain the existing lexical path.
+    mandatory = [key for key, source in sources.items() if source.get('bucket') in _MANDATORY_BUCKETS]
     scored = []
     for position, (source_id, source) in enumerate(sources.items()):
-        words = _terms(source['text'])
+        if source.get('bucket') in _MANDATORY_BUCKETS:
+            continue
+        words = _terms(str(source.get('text') or ''))
         score = sum(min(count, words[term]) for term, count in tokens.items())
+        if (topics is not None and not topics.intersection(source_topic_ids(source))) or (topics is None and score <= 0):
+            continue
         scored.append((source_id, score, position))
     ranked = [row[0] for row in sorted(scored, key=lambda row: (-row[1], row[2]))]
     shortlist = ranked[:MAX_RERANK_SOURCES]
@@ -92,17 +154,13 @@ def select_sources(query: dict[str, Any], sources: dict[str, dict[str, Any]], cl
             diagnostics['failure_reason'] = diagnostics['failure_reason'] or 'runtime_error'
             error = str(exc)
     selected_ids = ranked[:TOP_SOURCES]
-    # Limit relevant context without hiding known counter-evidence or
-    # uncertainty, and without dropping any structured fact the card must be
-    # able to cite: the candidate's own evidence records and the region
-    # retrieval facts stay regardless of lexical rank.
-    selected_ids.extend(key for key in ranked if key not in selected_ids and (
-        sources[key]['bucket'] in {'summary', 'counter_evidence', 'missing_features', 'evidence'}
-        or key.startswith('retrieval-')
-    ))
+    # Mandatory safety/uncertainty sources survive independently of relevance.
+    selected_ids.extend(mandatory)
     return {key: sources[key] for key in selected_ids}, {
         'mode': mode, 'source_count': len(sources), 'selected_count': len(selected_ids),
         'selected_ids': selected_ids, 'shortlist_count': len(shortlist), 'error': error,
+        'mandatory_count': len(mandatory), 'relevant_count': len(ranked),
+        'excluded_count': len(sources) - len(selected_ids),
         'diagnostics': diagnostics,
     }
 

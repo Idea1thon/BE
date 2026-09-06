@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import Mock, patch
-from recommendation.evidence_reranker import select_sources, order_card_claims
+from recommendation.evidence_reranker import select_sources, order_card_claims, source_topic_ids
 from recommendation.llm_explanation import explain_candidates, template_card, validate_card
 from recommendation.llm_runtime import LLMConfig, LLMRuntimeError
 from recommendation.query_context import build_query_context
@@ -9,7 +9,7 @@ from recommendation.query_context import build_query_context
 class EvidenceRerankerTests(unittest.TestCase):
     def setUp(self):
         self.sources = {
-            'context_notes:0': {'bucket': 'context_notes', 'text': '지역 매출 정보'},
+            'context_notes:0': {'bucket': 'context_notes', 'text': '직장인 지역 매출 정보'},
             'context_notes:1': {'bucket': 'context_notes', 'text': '직장인 점심 시간대 수요 정보'},
             'missing_features:0': {'bucket': 'missing_features', 'text': '매물 면적 미확인'},
         }
@@ -23,7 +23,7 @@ class EvidenceRerankerTests(unittest.TestCase):
 
     def test_llm_ranks_ids_only_and_invalid_list_falls_back(self):
         client = Mock()
-        client.generate_json.return_value = {'ordered_ids': ['E02', 'E01', 'E03']}
+        client.generate_json.return_value = {'ordered_ids': ['E02', 'E01']}
         selected, meta = select_sources(self.query, self.sources, client)
         self.assertEqual(meta['mode'], 'llm')
         for response in ({'ordered_ids': ['invented']}, {'ordered_ids': ['context_notes:0'] * 3}, {}):
@@ -45,13 +45,13 @@ class EvidenceRerankerTests(unittest.TestCase):
         self.assertEqual(meta['diagnostics']['duplicate_count'], 1)
         self.assertEqual(meta['diagnostics']['unknown_count'], 1)
         self.assertEqual(meta['diagnostics']['invalid_type_count'], 1)
-        self.assertEqual(meta['diagnostics']['backfilled_count'], 2)
+        self.assertEqual(meta['diagnostics']['backfilled_count'], 1)
         payload = client.generate_json.call_args.args[1]
-        self.assertEqual(payload['top_k'], 3)
-        self.assertEqual([row['id'] for row in payload['sources']], ['E01', 'E02', 'E03'])
+        self.assertEqual(payload['top_k'], 2)
+        self.assertEqual([row['id'] for row in payload['sources']], ['E01', 'E02'])
 
     def test_top_k_selection_does_not_require_all_48_ids(self):
-        sources = {f'long-source-{i}': {'bucket': 'context_notes', 'text': '근거'} for i in range(60)}
+        sources = {f'long-source-{i}': {'bucket': 'context_notes', 'text': '직장인 점심 근거'} for i in range(60)}
         client = Mock()
         client.generate_json.return_value = {'ordered_ids': [f'E{i:02d}' for i in range(48, 32, -1)]}
         selected, meta = select_sources(self.query, sources, client)
@@ -78,7 +78,9 @@ class EvidenceRerankerTests(unittest.TestCase):
         selected, meta = select_sources(self.query, sources, client)
         self.assertEqual(next(iter(selected)), '1')
         self.assertEqual(meta['mode'], 'llm_partial')
-        self.assertTrue({'fact', 'warning', 'retrieval-late'}.issubset(selected))
+        self.assertIn('warning', selected)
+        self.assertNotIn('fact', selected)
+        self.assertNotIn('retrieval-late', selected)
 
     def test_counter_and_missing_sources_survive_context_limit(self):
         sources = {str(i): {'bucket': 'context_notes', 'text': '직장인 점심'} for i in range(60)}
@@ -89,14 +91,43 @@ class EvidenceRerankerTests(unittest.TestCase):
         self.assertIn('missing_features:0', selected)
         self.assertLess(len(selected), len(sources))
 
-    def test_evidence_and_retrieval_sources_survive_context_limit(self):
+    def test_unrelated_evidence_and_retrieval_sources_are_excluded(self):
         sources = {str(i): {'bucket': 'context_notes', 'text': '무관한 배경'} for i in range(60)}
         sources['candidate-evidence:0'] = {'bucket': 'evidence', 'text': '{"metric": "jobs"}'}
         sources['retrieval-abc'] = {'bucket': 'context_notes', 'text': '{"dimension": "sales"}'}
         selected, _ = select_sources(self.query, sources)
-        self.assertIn('candidate-evidence:0', selected)
-        self.assertIn('retrieval-abc', selected)
+        self.assertNotIn('candidate-evidence:0', selected)
+        self.assertNotIn('retrieval-abc', selected)
         self.assertLess(len(selected), len(sources))
+
+    def test_contract_filters_by_metric_instead_of_incidental_text(self):
+        sources = {
+            'rent': {'bucket': 'evidence', 'text': '{"metric_name":"R-ONE_임대가격지수", "value":105.3}'},
+            'unrelated': {'bucket': 'evidence', 'text': '{"metric_name":"계획철도", "note":"임대료 직장인"}'},
+            'retrieval-vacancy': {'bucket': 'context_notes', 'text': '{"dimension":"vacancy", "value":14.91}'},
+            'warning': {'bucket': 'counter_evidence', 'text': '관련 없는 위험도 보존'},
+        }
+        query = {'normalized_text': '임대료가 낮은 곳', 'question_contract': {'topic_ids': ['rent']}}
+        selected, meta = select_sources(query, sources)
+        self.assertEqual(set(selected), {'rent', 'warning'})
+        self.assertEqual(meta['excluded_count'], 2)
+        self.assertEqual(len(sources), 4)
+
+    def test_source_topic_ids_maps_allowlisted_metrics_and_plain_claims(self):
+        self.assertEqual(source_topic_ids({'text': '{"metric_name":"CS100010_점포수"}'}), {'competition'})
+        self.assertEqual(source_topic_ids({'text': '{"dimension":"workplace_population"}'}), {'jobs'})
+        self.assertEqual(source_topic_ids({'text': '공실률과 임대지수를 확인하세요'}), {'rent', 'vacancy'})
+        self.assertEqual(source_topic_ids({'text': '{"dimension":"unknown", "note":"공실률"}'}), set())
+
+    def test_no_relevant_sources_does_not_invoke_model_or_fill_quota(self):
+        client = Mock()
+        selected, meta = select_sources({'normalized_text': '임대료'}, {
+            'unrelated': {'bucket': 'context_notes', 'text': '철도 계획'},
+            'summary': {'bucket': 'summary', 'text': '요약'},
+        }, client)
+        self.assertEqual(list(selected), ['summary'])
+        self.assertEqual(meta['shortlist_count'], 0)
+        client.generate_json.assert_not_called()
 
     def test_reordering_preserves_citation_target(self):
         selected, _ = select_sources(self.query, self.sources)

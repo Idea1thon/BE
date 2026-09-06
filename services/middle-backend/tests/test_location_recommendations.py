@@ -101,7 +101,7 @@ async def test_returns_result_when_service_completes(client, monkeypatch):
 
 
 async def test_converts_region_code_to_korean_names(client, monkeypatch):
-    """추천 서비스는 코드가 아니라 한글 이름을 받는다. 이 변환이 연동의 핵심이다."""
+    """추천 서비스로 표시 이름과 정본 지역 코드를 함께 전달한다."""
     import json
 
     captured = _fake_service(
@@ -116,7 +116,7 @@ async def test_converts_region_code_to_korean_names(client, monkeypatch):
     )
 
     payload = json.loads(captured["request"].content)
-    assert payload["region"] == {"sido": "서울특별시", "sigungu": "강남구", "dong": None}
+    assert payload["region"] == {"sido": "서울특별시", "sigungu": "강남구", "dong": None, "sigungu_code": GANGNAM}
 
 
 async def test_dong_code_fills_dong_and_parent_sigungu(client, monkeypatch):
@@ -136,6 +136,8 @@ async def test_dong_code_fills_dong_and_parent_sigungu(client, monkeypatch):
     payload = json.loads(captured["request"].content)
     assert payload["region"]["sigungu"] == "강남구"
     assert payload["region"]["dong"] == "역삼1동"
+    assert payload["region"]["sigungu_code"] == GANGNAM
+    assert payload["region"]["admin_dong_code"] == YEOKSAM
 
 
 async def test_owner_can_also_request(client, monkeypatch):
