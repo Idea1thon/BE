@@ -9,10 +9,10 @@
 """
 from __future__ import annotations
 
-import copy
 import csv
 import hashlib
 import io
+import math
 import os
 import subprocess
 import threading
@@ -127,63 +127,110 @@ def _raw_query(sql: str) -> list[dict[str, str]]:
 
 
 # ── Seoul-wide 읽기 프로세스 캐시 ────────────────────────────────────
-# DbSource 의 질의는 대부분 서울 전체 범위이고 data_version 이 바뀌기 전까지
+# DbSource 의 질의는 대부분 서울 전체 범위이고 최신 dataset_run 이 바뀌기 전까지
 # 결과가 불변이다. 추천 요청마다 psql 서브프로세스를 새로 띄우는 비용이 크므로
 # (SSL 핸드셰이크 포함) 결과를 프로세스 메모리에 캐시한다. 자치구를 서울 전체로
 # 확대해도 요청당 DB 부하가 늘지 않게 하는 것이 목적이다.
 #
-#   SERVING_CACHE_DISABLED=1      캐시 완전 우회 (A/B·디버깅)
-#   SERVING_CACHE_TTL_SECONDS=300 data_version 재확인 주기
+#   SERVING_CACHE_DISABLED=1        캐시 완전 우회 (A/B·디버깅)
+#   SERVING_CACHE_TTL_SECONDS=300   스탬프 백스톱 재확인 주기 (1~86400 로 클램프)
+#
+# 무효화: run_pipeline 은 매 요청 describe() → data_version() 으로 최신 dataset_run
+# 행을 읽는데, 그 행이 곧바로 캐시 스탬프를 갱신한다(_refresh_stamp). 즉 캐시된
+# 팩트와 candidates.json 매니페스트가 같은 버전을 보장한다. TTL 은 describe() 를
+# 거치지 않는 경로를 위한 백스톱일 뿐이다.
+# 락 순서: _DV_LOCK → _CACHE_LOCK (역순 금지).
 _CACHE: dict[str, list[dict[str, str]]] = {}
 _CACHE_ORDER: list[str] = []
 _CACHE_MAX = 512
 _CACHE_LOCK = threading.Lock()
-_DV_STATE: dict[str, object] = {"value": None, "checked_at": 0.0}
+_DV_LOCK = threading.Lock()
+_DV_STATE: dict[str, object] = {"stamp": None, "checked_at": 0.0}
+
+_STAMP_SQL = (
+    "SELECT data_version, run_type, completed_at::text AS completed_at, notes "
+    "FROM meta.dataset_run WHERE status = 'completed' "
+    "ORDER BY completed_at DESC NULLS LAST LIMIT 1"
+)
 
 
 def _cache_enabled() -> bool:
+    load_env()
     return os.environ.get("SERVING_CACHE_DISABLED", "").strip().lower() not in {"1", "true", "yes", "on"}
 
 
 def _cache_ttl() -> float:
+    load_env()
     try:
-        return max(0.0, float(os.environ.get("SERVING_CACHE_TTL_SECONDS", "300")))
-    except ValueError:
+        ttl = float(os.environ.get("SERVING_CACHE_TTL_SECONDS", "300"))
+    except (TypeError, ValueError):
         return 300.0
+    if not math.isfinite(ttl):
+        return 300.0
+    return min(86400.0, max(1.0, ttl))
 
 
-def _latest_data_version() -> str:
-    rows = _raw_query(
-        "SELECT coalesce(max(data_version), '') AS v FROM meta.dataset_run WHERE status = 'completed'"
-    )
-    return (rows[0].get("v") if rows else "") or ""
+def _copy_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """캐시 반환용 방어 복사. COPY 결과 값은 전부 str(불변)이고 호출부는 행 dict
+    또는 리스트 레벨만 변형하므로(예: _building_rows 가 키 추가) 행 단위 얕은
+    복사로 충분하다 — deepcopy 는 11만행 규모에서 B1ms CPU 를 크게 먹는다."""
+    return [dict(r) for r in rows]
 
 
-def _cache_scope() -> str:
-    """캐시 무효화 스탬프. TTL 마다 data_version 을 재확인하고, 바뀌었으면 캐시를 비운다."""
+def _latest_stamp_row() -> dict[str, str]:
+    """meta.dataset_run 최신 완료 행. data_version() 과 동일 쿼리 —
+    캐시 스탬프와 candidates.json 매니페스트가 어긋나지 않게 한 곳에서만 정의한다."""
+    rows = _raw_query(_STAMP_SQL)
+    return rows[0] if rows else {}
+
+
+def _stamp_of(row: dict[str, str]) -> str:
+    return "::".join((
+        target(),
+        row.get("data_version", ""),
+        row.get("completed_at", ""),
+        row.get("run_type", ""),
+    ))
+
+
+def _refresh_stamp(row: dict[str, str] | None = None, *, force: bool = False) -> str | None:
+    """현재 캐시 스탬프를 반환하고, 최신 dataset_run 이 바뀌었으면 캐시를 비운다.
+
+    ``row`` 를 주면(describe() 처럼 호출부가 이미 조회한 경우) 그 행으로 즉시 갱신하고,
+    없으면 TTL 이 지났을 때만 새로 조회한다. 스탬프를 한 번도 잡지 못했고 조회도
+    실패하면 ``None`` — 호출부는 이번 요청에 한해 캐시를 건너뛴다.
+    """
     now = time.monotonic()
-    last = float(_DV_STATE["checked_at"])  # type: ignore[arg-type]
-    if _DV_STATE["value"] is None or now - last >= _cache_ttl():
-        try:
-            dv = _latest_data_version()
-        except ServingDbError:
-            dv = _DV_STATE["value"] or ""  # 조회 실패 시 기존 스탬프 유지
-        if dv != _DV_STATE["value"]:
+    with _DV_LOCK:
+        cur = _DV_STATE["stamp"]
+        due = force or row is not None or cur is None \
+            or (now - float(_DV_STATE["checked_at"])) >= _cache_ttl()
+        if not due:
+            return cur  # type: ignore[return-value]
+        if row is None:
+            try:
+                row = _latest_stamp_row()
+            except ServingDbError:
+                _DV_STATE["checked_at"] = now
+                return cur  # type: ignore[return-value]  # 실패 시 기존 스탬프 유지
+        new_stamp = _stamp_of(row)
+        _DV_STATE["checked_at"] = now
+        if new_stamp != cur:
+            _DV_STATE["stamp"] = new_stamp
             with _CACHE_LOCK:
                 _CACHE.clear()
                 _CACHE_ORDER.clear()
-            _DV_STATE["value"] = dv
-        _DV_STATE["checked_at"] = now
-    return f"{target()}::{_DV_STATE['value']}"
+        return new_stamp
 
 
 def clear_cache() -> None:
     """테스트·이식 직후 강제 무효화용."""
-    with _CACHE_LOCK:
-        _CACHE.clear()
-        _CACHE_ORDER.clear()
-    _DV_STATE["value"] = None
-    _DV_STATE["checked_at"] = 0.0
+    with _DV_LOCK:
+        _DV_STATE["stamp"] = None
+        _DV_STATE["checked_at"] = 0.0
+        with _CACHE_LOCK:
+            _CACHE.clear()
+            _CACHE_ORDER.clear()
 
 
 def query(sql: str, *, use_cache: bool = True) -> list[dict[str, str]]:
@@ -193,16 +240,20 @@ def query(sql: str, *, use_cache: bool = True) -> list[dict[str, str]]:
     ``num()``/``scalar()`` 가 결측으로 처리한다. 모든 값은 문자열이다 —
     숫자 캐스팅은 호출부가 한다.
 
-    결과는 (접속 대상 + data_version) 스탬프 기준으로 캐시된다. 캐시 적중·미스
-    모두 깊은 복사본을 돌려주므로 호출부가 반환값을 변형해도 캐시는 안전하다.
+    결과는 (접속 대상 + 최신 dataset_run) 스탬프 기준으로 캐시된다. 적중·미스
+    모두 행 단위 얕은 복사본을 돌려주므로 호출부가 반환값을 변형해도 캐시는
+    안전하다. 스탬프를 확보하지 못하면 캐시 없이 조회한다.
     """
     if not (use_cache and _cache_enabled()):
         return _raw_query(sql)
-    key = hashlib.sha1(f"{_cache_scope()}\n{sql}".encode("utf-8")).hexdigest()
+    stamp = _refresh_stamp()
+    if stamp is None:
+        return _raw_query(sql)
+    key = hashlib.sha1(f"{stamp}\n{sql}".encode("utf-8")).hexdigest()
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
     if hit is not None:
-        return copy.deepcopy(hit)
+        return _copy_rows(hit)
     rows = _raw_query(sql)
     with _CACHE_LOCK:
         if key not in _CACHE:
@@ -210,18 +261,16 @@ def query(sql: str, *, use_cache: bool = True) -> list[dict[str, str]]:
             _CACHE_ORDER.append(key)
             while len(_CACHE_ORDER) > _CACHE_MAX:
                 _CACHE.pop(_CACHE_ORDER.pop(0), None)
-    return copy.deepcopy(rows)
+    return _copy_rows(rows)
 
 
 def data_version() -> dict[str, str]:
-    """meta.dataset_run 의 최신 완료 이식 정보."""
-    rows = query(
-        "SELECT data_version, run_type, completed_at::text AS completed_at, notes "
-        "FROM meta.dataset_run WHERE status = 'completed' "
-        "ORDER BY completed_at DESC NULLS LAST LIMIT 1",
-        use_cache=False,
-    )
-    return rows[0] if rows else {}
+    """meta.dataset_run 의 최신 완료 이식 정보. 반환 직전 이 행으로 캐시 스탬프를
+    갱신한다 — run_pipeline 이 매 요청 describe() 로 호출하므로, 캐시가 매니페스트
+    버전과 어긋나는 창을 '요청 도중 이식 완료' 수준으로 좁힌다(캐시 도입 전과 동일)."""
+    row = _latest_stamp_row()
+    _refresh_stamp(row)
+    return row
 
 
 if __name__ == "__main__":

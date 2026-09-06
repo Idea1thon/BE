@@ -2056,9 +2056,9 @@ class DbSource:
         except serving_db.ServingDbError as exc:
             raise PipelineDependencyError("추천 데이터베이스 연결에 실패했습니다.") from exc
 
-    def _query(self, sql: str) -> list[dict[str, str]]:
+    def _query(self, sql: str, *, use_cache: bool = True) -> list[dict[str, str]]:
         try:
-            return self._db.query(sql)
+            return self._db.query(sql, use_cache=use_cache)
         except self._db.ServingDbError as exc:
             raise PipelineDependencyError("추천 데이터베이스 조회에 실패했습니다.") from exc
 
@@ -2371,9 +2371,13 @@ class DbSource:
         return {r["trdar"]: {"R_ONE_상권": r["rone"]} for r in rows if r.get("trdar")}
 
     def retrieve_requests(self, requests, selected_region, industry_code, quarter):
+        # RAG 검색 SQL 은 지역·차원·업종별로 갈라져 종류가 매우 많고(수백 지역 ×
+        # 4차원 × 업종) 각기 LIMIT 20 로 저렴하다. 공용 캐시에 태우면 값비싼
+        # Seoul-wide 블롭을 FIFO 로 밀어내므로 캐시를 우회한다.
         try:
             return execute_retrieval_requests(
-                self._query, requests, selected_region, industry_code, quarter,
+                lambda sql: self._query(sql, use_cache=False),
+                requests, selected_region, industry_code, quarter,
             )
         except (ValueError, self._db.ServingDbError) as exc:
             raise PipelineDependencyError("RAG 읽기 전용 검색 도구를 실행하지 못했습니다.") from exc
