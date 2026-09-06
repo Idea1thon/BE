@@ -11,6 +11,7 @@ import datetime as dt
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -28,12 +29,23 @@ class SourceNotFound(LookupError):
 def _async_database_url(value: str) -> str:
     value = value.strip()
     if value.startswith("postgresql+asyncpg://"):
-        return value
-    if value.startswith("postgresql://"):
-        return "postgresql+asyncpg://" + value.removeprefix("postgresql://")
-    if value.startswith("postgres://"):
-        return "postgresql+asyncpg://" + value.removeprefix("postgres://")
-    return value
+        async_url = value
+    elif value.startswith("postgresql://"):
+        async_url = "postgresql+asyncpg://" + value.removeprefix("postgresql://")
+    elif value.startswith("postgres://"):
+        async_url = "postgresql+asyncpg://" + value.removeprefix("postgres://")
+    else:
+        async_url = value
+
+    # PostgreSQL URLs commonly use libpq's ``sslmode`` parameter. SQLAlchemy's
+    # asyncpg dialect passes query parameters to asyncpg.connect(), which
+    # expects ``ssl`` instead and rejects ``sslmode`` as an unknown keyword.
+    parsed = urlsplit(async_url)
+    query = [
+        ("ssl" if key == "sslmode" else key, val)
+        for key, val in parse_qsl(parsed.query, keep_blank_values=True)
+    ]
+    return urlunsplit(parsed._replace(query=urlencode(query)))
 
 
 _QUALIFIED_TABLE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
@@ -131,7 +143,11 @@ class FmpProvider:
                             """
                             WITH latest_reports AS (
                                 SELECT DISTINCT ON (r.report_month)
-                                       r.id, r.report_month, r.input_source
+                                       r.id, r.report_month, r.input_source,
+                                       COALESCE(
+                                           NULLIF(to_jsonb(r)->>'synthetic', '')::boolean,
+                                           FALSE
+                                       ) AS synthetic
                                 FROM operation_report AS r
                                 WHERE r.branch_id = :branch_id
                                   AND r.status = 'COMPLETED'
@@ -139,6 +155,7 @@ class FmpProvider:
                                 ORDER BY r.report_month DESC, r.id DESC
                             )
                             SELECT r.id AS report_id, r.report_month, r.input_source,
+                                   r.synthetic,
                                    i.field_code, i.amount
                             FROM latest_reports AS r
                             LEFT JOIN report_input_item AS i ON i.report_id = r.id
@@ -161,6 +178,7 @@ class FmpProvider:
                 {
                     "month": row["report_month"],
                     "input_source": row["input_source"],
+                    "synthetic": bool(row["synthetic"]),
                     "items": {},
                 },
             )

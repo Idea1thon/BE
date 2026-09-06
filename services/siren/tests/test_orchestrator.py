@@ -6,7 +6,12 @@ from datetime import date
 from services.siren.models import RiskSirenRequest, SirenAnalyzeTrigger
 from services.siren.mappers.risk_request_mapper import build_risk_request
 from services.siren.orchestrator import RiskSirenOrchestrator
-from services.siren.providers.fmp_provider import BranchSnapshot, FmpProvider, ProviderUnavailable
+from services.siren.providers.fmp_provider import (
+    BranchSnapshot,
+    FmpProvider,
+    ProviderUnavailable,
+    _async_database_url,
+)
 from services.siren.providers.ideaton_provider import MarketSnapshot
 
 
@@ -200,6 +205,15 @@ class OrchestratorContractTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FmpProviderConfigTests(unittest.TestCase):
+    def test_libpq_sslmode_is_translated_for_asyncpg(self) -> None:
+        value = _async_database_url(
+            "postgresql://user:pass@example.test:5432/db?sslmode=require&application_name=siren"
+        )
+        self.assertTrue(value.startswith("postgresql+asyncpg://"))
+        self.assertIn("ssl=require", value)
+        self.assertIn("application_name=siren", value)
+        self.assertNotIn("sslmode", value)
+
     def test_optional_closure_table_accepts_safe_identifier_only(self) -> None:
         provider = FmpProvider(None, franchise_closure_table="public.franchise_closure_year")
         self.assertEqual(provider.franchise_closure_table, "public.franchise_closure_year")
