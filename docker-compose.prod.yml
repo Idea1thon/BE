@@ -1,0 +1,72 @@
+# 배포용. VM 1대에서 nginx + 백엔드 2개를 띄우고 DB 는 Azure 를 쓴다.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# 로컬용 docker-compose.yml 과 다른 점
+#   - db 서비스가 없다. Azure PostgreSQL 을 그대로 쓴다 (이미 PostGIS·스키마 준비됨)
+#   - nginx 가 앞단에서 FE 와 API 를 한 오리진으로 묶는다
+#   - 값은 전부 .env 에서 온다. 기본값을 두지 않는다 — 배포에서 개발용 비밀이
+#     조용히 쓰이는 것을 막는다
+#
+# 전제: 이 저장소가 /opt/idea1thon/BE, FE 저장소가 /opt/idea1thon/FE 에 있고
+#       FE 는 `npm ci && npm run build` 로 dist/ 가 만들어져 있다.
+name: idea1thon-prod
+
+services:
+  nginx:
+    image: nginx:alpine
+    depends_on:
+      - middle-backend
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # FE 를 이미지로 굽지 않고 빌드 산출물을 마운트한다. FE 를 고칠 때마다
+      # 이미지를 다시 굽는 대신 npm run build 후 nginx 만 재시작하면 된다.
+      - ../FE/dist:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+  middle-backend:
+    build: ./services/middle-backend
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT 를 설정하세요}
+      DATABASE_URL: ${FMP_DATABASE_URL:?Azure fmp 연결 문자열이 필요합니다}
+      JWT_SECRET: ${JWT_SECRET:?32자 이상의 값이 필요합니다}
+      SEED_PASSWORD: ${SEED_PASSWORD:-}
+      # nginx 뒤에서 같은 오리진으로 서빙하므로 브라우저는 CORS 를 태우지 않는다.
+      # 값은 설정 검증을 통과시키기 위한 것이다.
+      CORS_ALLOW_ORIGINS: ${PUBLIC_ORIGIN:?http://<VM 공인 IP> 형태로 설정하세요}
+      RECOMMENDATION_API_URL: http://recommendation-api:8000
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?추천 API 와 같은 값이어야 합니다}
+    restart: unless-stopped
+
+  recommendation-api:
+    build: ./services/recommendation-api
+    environment:
+      DATABASE_URL: ${IDEATON_DATABASE_URL:?Azure ideaton 연결 문자열이 필요합니다}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?중간 백엔드와 같은 값이어야 합니다}
+      RECOMMENDATION_DATA_ROOT: /data
+      RECOMMENDATION_QUARTER: "20261"
+      RECOMMENDATION_SOURCE: db
+      RECOMMENDATION_LLM_MODE: ${RECOMMENDATION_LLM_MODE:-auto}
+      RECOMMENDATION_SEED_MODE: buildings
+      RECOMMENDATION_DEFAULT_LIMIT: "5"
+      RECOMMENDATION_REQUEST_TIMEOUT_SECONDS: "180"
+      RECOMMENDATION_READINESS_TIMEOUT_SECONDS: "3"
+      RECOMMENDATION_MAX_CONCURRENT: "2"
+      RECOMMENDATION_CAPACITY_RETRY_AFTER_SECONDS: "10"
+      RECOMMENDATION_INCLUDE_POI: "false"
+      RECOMMENDATION_INCLUDE_POI_CONTEXT: "false"
+      RECOMMENDATION_INCLUDE_NEWS: "true"
+      RECOMMENDATION_API_OUT_ROOT: /app/output/recommendation_api_runs
+      LLM_API_URL: ${LLM_API_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+    volumes:
+      # 준우형 원천 데이터. 없으면 서버는 뜨지만 실제 추천 요청이 실패한다.
+      - ./data:/data:ro
+      - recommendation-output:/app/output
+    restart: unless-stopped
+
+volumes:
+  recommendation-output:

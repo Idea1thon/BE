@@ -1,0 +1,95 @@
+# 로컬 개발용. 두 서비스와 DB 를 한 번에 올린다.
+#
+#   docker compose up --build
+#
+#   중간 백엔드      http://localhost:8000/docs
+#   추천 API         http://localhost:8001/docs
+#   PostgreSQL       localhost:55432  (fmp / ideaton)
+#
+# 여기 있는 값은 전부 개발용이다. Azure 접속 정보는 이 파일에 넣지 않는다 —
+# .env 를 커밋했던 사고가 한 번 있었고, compose 파일은 특히 눈에 안 띈다.
+name: idea1thon
+
+services:
+  db:
+    # Azure 와 맞춘다: PostgreSQL 16 + PostGIS. 추천 스키마가 geometry(Point, 5181)
+    # 을 쓰므로 순정 postgres 이미지로는 DDL 이 실패한다.
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpass}
+      POSTGRES_DB: postgres
+    ports:
+      - "55432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # 초기화는 볼륨이 비어 있을 때 한 번만 돈다. DDL 을 다시 적용하려면
+      # docker compose down -v 로 볼륨을 지우고 올린다.
+      - ./infra/db:/docker-entrypoint-initdb.d:ro
+      # 스키마 정본을 복사하지 않고 그대로 마운트한다. 사본은 갈라진다.
+      - ./services/recommendation-api/db:/schema:ro
+    healthcheck:
+      # ideaton 까지 확인해야 02 초기화 스크립트가 끝난 시점을 잡는다.
+      # postgres 기본 DB 만 보면 초기화 도중에도 healthy 로 뜬다.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ideaton"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  middle-backend:
+    build: ./services/middle-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-devpass}@db:5432/fmp
+      # 개발 전용 고정값. 32자 이상이어야 기동한다(app/core/config.py).
+      # 운영에서는 반드시 교체한다.
+      JWT_SECRET: ${JWT_SECRET:-local-development-only-not-a-real-secret-0000}
+      SEED_PASSWORD: ${SEED_PASSWORD:-devpass1234}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:5173}
+      # 입지 추천 연동용. 컨테이너 이름으로 부른다 — localhost 가 아니다.
+      RECOMMENDATION_API_URL: http://recommendation-api:8000
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-development-internal-token}
+    ports:
+      - "8000:8000"
+
+  recommendation-api:
+    build: ./services/recommendation-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # 동기 드라이버가 아니라 psql 서브프로세스를 쓴다. sslmode 는 로컬에 불필요.
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-devpass}@db:5432/ideaton
+      # 중간 백엔드가 X-Internal-Token 헤더로 보내는 값과 같아야 한다.
+      # 비어 있으면 서비스가 fail closed 로 503 을 반환한다(의도된 동작).
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-development-internal-token}
+      # 원천 CSV 는 저장소에 없다. 가진 사람만 아래를 채우고 볼륨을 연결한다.
+      RECOMMENDATION_DATA_ROOT: ${RECOMMENDATION_DATA_ROOT:-}
+      RECOMMENDATION_QUARTER: "20261"
+      RECOMMENDATION_SOURCE: db
+      RECOMMENDATION_LLM_MODE: auto
+      RECOMMENDATION_SEED_MODE: buildings
+      RECOMMENDATION_DEFAULT_LIMIT: "5"
+      RECOMMENDATION_REQUEST_TIMEOUT_SECONDS: "180"
+      RECOMMENDATION_READINESS_TIMEOUT_SECONDS: "3"
+      RECOMMENDATION_MAX_CONCURRENT: "4"
+      RECOMMENDATION_CAPACITY_RETRY_AFTER_SECONDS: "10"
+      RECOMMENDATION_INCLUDE_POI: "false"
+      RECOMMENDATION_INCLUDE_POI_CONTEXT: "false"
+      RECOMMENDATION_INCLUDE_NEWS: "true"
+      RECOMMENDATION_API_OUT_ROOT: /app/output/recommendation_api_runs
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:5173}
+    ports:
+      # 8000 은 중간 백엔드가 쓰므로 호스트에서는 8001 로 노출한다.
+      - "8001:8000"
+    volumes:
+      # 실행 결과(run 아티팩트)를 컨테이너 재시작 후에도 볼 수 있게 한다.
+      - recommendation-output:/app/output
+
+volumes:
+  db-data:
+  recommendation-output:
