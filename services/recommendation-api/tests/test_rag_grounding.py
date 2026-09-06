@@ -34,10 +34,16 @@ class RetrievalGroundingTests(unittest.TestCase):
     def test_missing_nonfinite_and_wrong_provenance_are_not_facts(self):
         for overrides in ({"value": None}, {"value": "NaN"}, {"value": "Infinity"},
                           {"value": True}, {"value": "-1"}, {"period": None},
-                          {"industry_code": None}, {"sigungu_name": ""},
+                          {"industry_code": None}, {"spatial_unit_name": ""},
                           {"source_table": "arbitrary.table"}):
             with self.subTest(overrides=overrides):
                 self.assertEqual(self.build(self.row(**overrides)), [])
+
+    def test_admin_dong_row_without_sigungu_name_is_still_a_fact(self):
+        # location.area 의 admin_dong 행은 sigungu_name 이 비어 있다.
+        records = self.build(self.row(sigungu_name=""))
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["spatial_unit_name"], "잠실동")
 
     def test_store_metrics_preserve_real_zero_and_omit_unknown_count(self):
         records = self.build(self.row(dimension="stores", source_table="location.store_quarter",
@@ -47,21 +53,31 @@ class RetrievalGroundingTests(unittest.TestCase):
         self.assertEqual(records[0]["value"], 0)
         self.assertEqual(records[0]["unit"], "개")
 
-    def test_executor_binds_dong_and_sigungu_and_projects_source_coordinates(self):
+    def test_executor_binds_resolved_dong_codes_not_sigungu_name(self):
         queries = []
         def query(sql):
             queries.append(sql)
             return [self.row()]
         context = execute_retrieval_requests(query, [{"tool": "search_region_evidence",
             "dimensions": ["sales", "stores", "flow", "change"]}],
-            {"sigungu": "송파구", "dong": "잠실동"}, "CS100010", "20261")
+            {"sigungu": "송파구", "dong": "잠실동"}, "CS100010", "20261",
+            dong_codes=["11710610", "11710620", "11710670"])
         self.assertEqual(len(queries), 4)
         for sql in queries:
-            self.assertIn("a.sigungu_name = '송파구'", sql)
-            self.assertIn("a.spatial_unit_name = '잠실동'", sql)
-            self.assertIn("a.sigungu_name,", sql)
+            self.assertIn("a.spatial_unit_type = 'admin_dong'", sql)
+            self.assertIn("a.spatial_unit_code IN ('11710610', '11710620', '11710670')", sql)
+            self.assertNotIn("a.spatial_unit_name = '잠실동'", sql)
+            self.assertIn("'송파구') AS sigungu_name", sql)  # 빈 sigungu_name 채움
             self.assertIn(".period,", sql)
         self.assertEqual(len(build_retrieval_evidence(context)), 1)
+
+    def test_executor_falls_back_to_dong_name_without_codes(self):
+        queries = []
+        execute_retrieval_requests(lambda sql: queries.append(sql) or [],
+            [{"tool": "search_region_evidence", "dimensions": ["sales"]}],
+            {"sigungu": "송파구", "dong": "잠실동"}, "CS100010", "20261")
+        self.assertIn("a.spatial_unit_name = '잠실동'", queries[0])
+        self.assertNotIn("a.sigungu_name = '송파구'", queries[0])
 
     def test_input_rows_are_bounded(self):
         rows = [self.row(spatial_unit_code=str(i)) for i in range(100)]

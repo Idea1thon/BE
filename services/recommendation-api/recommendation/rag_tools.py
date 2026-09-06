@@ -66,14 +66,23 @@ def validate_retrieval_requests(raw: Any) -> list[dict[str, Any]]:
     return output
 
 
-def _area_predicate(selected_region: dict[str, str | None]) -> str:
+def _area_predicate(selected_region: dict[str, str | None], dong_codes: list[str] | None = None) -> str:
+    """행정동은 파이프라인이 resolve_region 으로 이미 확정한 코드로 건다.
+
+    location.area 의 admin_dong 행은 sigungu_name 이 비어 있어 이름+시군구
+    매칭이 0행이 됐다. 확정 코드를 받으면 그것으로만 필터하고(법정동 별칭도
+    이 단계에서 이미 풀려 있다), 못 받으면 이름만으로 폴백한다.
+    """
     sigungu = str(selected_region.get("sigungu") or "").strip()
+    codes = sorted({str(code).strip() for code in (dong_codes or []) if str(code).strip()})
+    if codes:
+        joined = ", ".join(_sql_literal(code) for code in codes)
+        return f"a.spatial_unit_type = 'admin_dong' AND a.spatial_unit_code IN ({joined})"
     dong = str(selected_region.get("dong") or "").strip()
     if dong:
         return (
             "a.spatial_unit_type = 'admin_dong' "
-            f"AND a.spatial_unit_name = {_sql_literal(dong)} "
-            f"AND a.sigungu_name = {_sql_literal(sigungu)}"
+            f"AND a.spatial_unit_name = {_sql_literal(dong)}"
         )
     return (
         "a.spatial_unit_type = 'commercial_area' "
@@ -87,13 +96,16 @@ def _dimension_sql(
     industry_code: str,
     quarter: str,
     limit: int,
+    dong_codes: list[str] | None = None,
 ) -> str:
-    predicate = _area_predicate(selected_region)
+    predicate = _area_predicate(selected_region, dong_codes)
     period = _sql_literal(quarter)
     industry = _sql_literal(industry_code)
+    # admin_dong 행은 sigungu_name 이 비어 있으므로 선택 시군구 이름으로 채운다.
+    sigungu_expr = f"coalesce(nullif(a.sigungu_name, ''), {_sql_literal(str(selected_region.get('sigungu') or '').strip())}) AS sigungu_name"
     common = (
         "SELECT a.spatial_unit_type, a.spatial_unit_code, "
-        "a.spatial_unit_name, a.sigungu_name, "
+        f"a.spatial_unit_name, {sigungu_expr}, "
     )
     if dimension == "sales":
         return common + (
@@ -148,6 +160,7 @@ def execute_retrieval_requests(
     selected_region: dict[str, str | None],
     industry_code: str,
     quarter: str,
+    dong_codes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Execute validated tools and return bounded, provenance-bearing rows."""
     if not _QUARTER_RE.fullmatch(quarter):
@@ -159,7 +172,7 @@ def execute_retrieval_requests(
         rows: list[dict[str, str]] = []
         for dimension in request["dimensions"]:
             rows.extend(query(_dimension_sql(
-                dimension, selected_region, industry_code, quarter, request["limit"],
+                dimension, selected_region, industry_code, quarter, request["limit"], dong_codes,
             )))
         results.append({
             "request_id": f"retrieval-{index}",
@@ -232,7 +245,9 @@ def build_retrieval_evidence(context: Any) -> list[dict[str, Any]]:
             names = {key: str(row.get(key) or "").strip() for key in (
                 "spatial_unit_code", "spatial_unit_name", "sigungu_name",
             )}
-            if not all(names.values()):
+            # sigungu_name 은 admin_dong 행에서 비어 있을 수 있다(_dimension_sql 이
+            # 선택 시군구로 채우지만 방어적으로 허용). code·name 은 필수.
+            if not names["spatial_unit_code"] or not names["spatial_unit_name"]:
                 continue
             industry = row.get("industry_code") if dimension in ("sales", "stores") else None
             if dimension in ("sales", "stores") and (

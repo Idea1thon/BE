@@ -2097,7 +2097,7 @@ class FileSource:
     def urban_plan(self):
         return urban_plan.load_from_files(ROOT)
 
-    def retrieve_requests(self, requests, selected_region, industry_code, quarter):
+    def retrieve_requests(self, requests, selected_region, industry_code, quarter, dong_codes=None):
         return {
             "mode": "files",
             "requested_count": len(requests),
@@ -2500,14 +2500,14 @@ class DbSource:
         # 미적재 시 None → 파일 소스 폴백/ missing 처리 (#29).
         return urban_plan.load_from_db(self._query, ROOT)
 
-    def retrieve_requests(self, requests, selected_region, industry_code, quarter):
+    def retrieve_requests(self, requests, selected_region, industry_code, quarter, dong_codes=None):
         # RAG 검색 SQL 은 지역·차원·업종별로 갈라져 종류가 매우 많고(수백 지역 ×
         # 4차원 × 업종) 각기 LIMIT 20 로 저렴하다. 공용 캐시에 태우면 값비싼
         # Seoul-wide 블롭을 FIFO 로 밀어내므로 캐시를 우회한다.
         try:
             return execute_retrieval_requests(
                 lambda sql: self._query(sql, use_cache=False),
-                requests, selected_region, industry_code, quarter,
+                requests, selected_region, industry_code, quarter, dong_codes,
             )
         except (ValueError, self._db.ServingDbError) as exc:
             raise PipelineDependencyError("RAG 읽기 전용 검색 도구를 실행하지 못했습니다.") from exc
@@ -2640,6 +2640,10 @@ def run_pipeline(
         selected_region,
         request.industry_code,
         request.quarter,
+        # 행정동 요청이면 resolve_region 이 확정한 코드로 RAG 를 건다
+        # (법정동 별칭 포함). location.area 의 admin_dong 은 sigungu_name 이
+        # 비어 이름+시군구 매칭이 0행이 되던 문제를 우회한다.
+        dong_codes=[record.code for record in selected_dongs] if request.dong else None,
     )
     input_interpretation["retrieval"] = retrieval_context
 
