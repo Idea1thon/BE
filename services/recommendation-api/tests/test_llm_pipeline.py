@@ -123,32 +123,42 @@ class LLMInputPlannerTests(unittest.TestCase):
         self.assertNotIn("DROP TABLE", captured[0])
 
     def test_llm_cannot_invent_condition_values(self):
-        baseline = parse_conditions("월세 300만원 이하, 20평 이상, 주차 가능")
+        text = "월세 300만원 이하, 20평 이상, 주차 가능"
+        baseline = parse_conditions(text)
         remote = {
+            # bare 숫자는 인용이 없으므로 조건이 되지 못한다 (plan B).
             "monthly_rent_max_krw": 9_999_999,
             "store_area_min_m2": 999,
             "parking_required": False,
             "target_customer": ["관광객"],
             "operating_hours": "night",
         }
-        normalized = _normalize_remote_conditions(remote, baseline)
-        self.assertEqual(normalized["monthly_rent_max_krw"], 3_000_000)
-        self.assertEqual(normalized["store_area_min_m2"], 66.12)
+        normalized = _normalize_remote_conditions(remote, baseline, text)
+        self.assertIsNone(normalized["monthly_rent_max_krw"])
+        self.assertIsNone(normalized["store_area_min_m2"])
         self.assertTrue(normalized["parking_required"])
         self.assertEqual(normalized["target_customer"], [])
         self.assertIsNone(normalized["operating_hours"])
 
-    def test_remote_condition_parser_rejects_partial_numeric_tokens(self):
-        baseline = parse_conditions("월세 300만원 이하, 20평 이상, 주차 가능")
-        remote = {
-            "monthly_rent_max_krw": "300만 원",
-            "store_area_min_m2": "66.12e2",
-            "parking_required": "false",
-        }
-        normalized = _normalize_remote_conditions(remote, baseline)
-        self.assertEqual(normalized["monthly_rent_max_krw"], 3_000_000)
-        self.assertEqual(normalized["store_area_min_m2"], 66.12)
-        self.assertTrue(normalized["parking_required"])
+    def test_numeric_conditions_need_a_verbatim_quote(self):
+        text = "월세 300만원 이하, 20평 이상, 주차 가능"
+        baseline = parse_conditions(text)
+        # 인용이 원문에 있고 라벨·단위·방향·범위가 맞으면 LLM 숫자를 신뢰한다.
+        ok = _normalize_remote_conditions(
+            {"monthly_rent_max_krw": {"value": 3_000_000, "source_text": "월세 300만원 이하"},
+             "store_area_min_m2": {"value": 66.12, "source_text": "20평 이상"}},
+            baseline, text,
+        )
+        self.assertEqual(ok["monthly_rent_max_krw"], 3_000_000)
+        self.assertEqual(ok["store_area_min_m2"], 66.12)
+        # 문자열 값이나 원문에 없는 인용은 거부한다.
+        bad = _normalize_remote_conditions(
+            {"monthly_rent_max_krw": {"value": "300만 원", "source_text": "월세 300만원 이하"},
+             "store_area_min_m2": {"value": 66.12, "source_text": "면적 20평 이상"}},
+            baseline, text,
+        )
+        self.assertIsNone(bad["monthly_rent_max_krw"])
+        self.assertIsNone(bad["store_area_min_m2"])
 
     def test_parking_not_required_is_not_treated_as_required(self):
         result = parse_conditions("커피 매장, 주차 필요 없음")

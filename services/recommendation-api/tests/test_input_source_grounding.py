@@ -1,4 +1,6 @@
-"""Regressions for numeric proposals verified against the user's own words."""
+"""Plan B: numeric conditions come from the LLM's number, checked only against
+the user's own quote (verbatim substring, label, unit, bound direction, range).
+The Korean numeral is not re-parsed by the server."""
 import sys
 import unittest
 from os import environ
@@ -16,41 +18,57 @@ class InputSourceGroundingTests(unittest.TestCase):
             parse_conditions(text), text,
         )
 
-    def test_korean_rent_paraphrase_is_accepted_with_warning(self):
-        result = self.normalize("임대료는 매달 삼백만 원 이하", "monthly_rent_max_krw", 3000000)
-        self.assertEqual(result["monthly_rent_max_krw"], 3000000)
-        self.assertIn("monthly_rent_max_krw: 개별 매물 월세 데이터 없음", result["unsupported_conditions"])
-
-    def test_korean_area_unit_and_bound_are_server_normalized(self):
-        result = self.normalize("매장 면적은 이십 평 이상", "store_area_min_m2", 66.12)
-        self.assertEqual(result["store_area_min_m2"], 66.12)
-        self.assertIn("store_area_m2: 개별 매물 면적 데이터 없음", result["unsupported_conditions"])
-        self.assertIsNone(self.normalize("매장 면적은 이십 평 이상", "store_area_max_m2", 66.12)["store_area_max_m2"])
-
-    def test_false_amount_quote_or_unit_cannot_create_condition(self):
-        for text, value, source in [
-            ("임대료는 삼백만 원 이하", 4000000, None),
-            ("임대료는 삼백만 원 이하", 3000000, "월세 삼백만 원 이하"),
-            ("면적은 삼백만 원 이하", 3000000, None),
-            ("임대료는 삼백만 원 이상", 3000000, None),
-            ("임대료는 삼백만 원 이하", float("inf"), None),
-            ("임대료는 삼백만 원 이하", 10 ** 400, None),
+    def test_llm_number_is_trusted_across_phrasings_the_parser_missed(self):
+        # 종결어미(이하면/이상이면), 혼합 표기(3천만), "넘지 않게" 모두 통과한다.
+        for text, key, value, expected, warning in [
+            ("임대료는 매달 삼백만 원 이하면 좋겠어요", "monthly_rent_max_krw", 3000000, 3000000,
+             "monthly_rent_max_krw: 개별 매물 월세 데이터 없음"),
+            ("보증금 3천만원 이하이고", "deposit_max_krw", 30000000, 30000000,
+             "deposit_max_krw: 개별 매물 보증금 데이터 없음"),
+            ("매장 면적은 20평 이상이면 합니다", "store_area_min_m2", 66.12, 66.12,
+             "store_area_m2: 개별 매물 면적 데이터 없음"),
+            ("월세 300만원 넘지 않게", "monthly_rent_max_krw", 3000000, 3000000,
+             "monthly_rent_max_krw: 개별 매물 월세 데이터 없음"),
         ]:
-            with self.subTest(text=text, value=value):
-                self.assertIsNone(self.normalize(text, "monthly_rent_max_krw", value, source)["monthly_rent_max_krw"])
+            with self.subTest(text=text):
+                result = self.normalize(text, key, value)
+                self.assertEqual(result[key], expected)
+                self.assertIn(warning, result["unsupported_conditions"])
 
-    def test_truncated_negation_or_competing_quote_is_rejected(self):
-        for text in [
-            "임대료는 삼백만 원 이하가 아니에요",
-            "임대료는 삼백만 원 이하 아니고 다른 조건",
-            "임대료는 삼백만 원 이하; 임대료는 이백만 원 이하",
+    def test_quote_must_be_verbatim_and_name_the_condition(self):
+        for text, key, value, source in [
+            ("저렴한 임대료면 좋겠어요", "monthly_rent_max_krw", 3000000, None),   # numeral/unit 없음
+            ("임대료 삼백만원 이하", "monthly_rent_max_krw", 3000000, "월세 삼백만원 이하"),  # 인용이 원문에 없음
+            ("면적은 삼백만 원 이하", "monthly_rent_max_krw", 3000000, None),        # 금액 라벨 없음
+            ("보증금 3천만원 이하", "store_area_max_m2", 40.0, None),               # 면적 라벨/단위 없음
         ]:
-            self.assertIsNone(self.normalize(text, "monthly_rent_max_krw", 3000000,
-                                           "임대료는 삼백만 원 이하")["monthly_rent_max_krw"])
+            with self.subTest(text=text):
+                self.assertIsNone(self.normalize(text, key, value, source)[key])
 
-    def test_existing_numeric_condition_has_precedence(self):
-        text = "월세 200만원 이하; 임대료는 삼백만 원 이하"
-        self.assertEqual(self.normalize(text, "monthly_rent_max_krw", 3000000)["monthly_rent_max_krw"], 2000000)
+    def test_bound_direction_and_negation_and_range_are_enforced(self):
+        self.assertIsNone(self.normalize("임대료 삼백만원 이상", "monthly_rent_max_krw", 3000000)["monthly_rent_max_krw"])
+        self.assertIsNone(self.normalize("매장 면적 20평 이하", "store_area_min_m2", 66.12)["store_area_min_m2"])
+        self.assertIsNone(self.normalize("임대료 삼백만원 이하는 아니고", "monthly_rent_max_krw", 3000000,
+                                         "임대료 삼백만원 이하는 아니고")["monthly_rent_max_krw"])
+        self.assertIsNone(self.normalize("임대료 100원 이하", "monthly_rent_max_krw", 100)["monthly_rent_max_krw"])
+        self.assertIsNone(self.normalize("임대료 삼백만원 이하", "monthly_rent_max_krw", float("inf"))["monthly_rent_max_krw"])
+        self.assertIsNone(self.normalize("임대료 삼백만원 이하", "monthly_rent_max_krw", 10 ** 400)["monthly_rent_max_krw"])
+
+    def test_bare_scalar_without_a_quote_is_never_a_condition(self):
+        result = _normalize_remote_conditions(
+            {"monthly_rent_max_krw": 9_999_999, "deposit_max_krw": 5_000_000},
+            parse_conditions("월세 300만원 이하"), "월세 300만원 이하",
+        )
+        self.assertIsNone(result["monthly_rent_max_krw"])
+        self.assertIsNone(result["deposit_max_krw"])
+
+    def test_deterministic_numeric_baseline_does_not_leak_on_the_llm_path(self):
+        # parse_conditions 가 "3천만"을 3 으로 잘못 읽어도 LLM 경로엔 반영되지 않는다.
+        base = parse_conditions("보증금 3천만원 이하")
+        self.assertEqual(base["deposit_max_krw"], 3)  # 결정론 파서의 알려진 한계
+        result = _normalize_remote_conditions({}, base, "보증금 3천만원 이하")
+        self.assertIsNone(result["deposit_max_krw"])
+        self.assertNotIn("deposit_max_krw: 개별 매물 보증금 데이터 없음", result["unsupported_conditions"])
 
     def test_plan_keeps_grounded_warning_and_explicit_industry(self):
         text = "임대료는 매달 삼백만 원 이하"
@@ -64,7 +82,8 @@ class InputSourceGroundingTests(unittest.TestCase):
             result = plan_input({}, text, explicit_industry_code="CS100010", llm_mode="required")
         self.assertEqual(result["resolved_industry_code"], "CS100010")
         self.assertEqual(result["conditions"]["monthly_rent_max_krw"], 3000000)
-        self.assertEqual(len(result["conditions"]["unsupported_conditions"]), 1)
+        self.assertEqual(result["conditions"]["unsupported_conditions"],
+                         ["monthly_rent_max_krw: 개별 매물 월세 데이터 없음"])
         self.assertNotIn("invented", result["conditions"]["unsupported_conditions"])
 
 

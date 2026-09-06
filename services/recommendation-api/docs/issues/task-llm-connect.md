@@ -68,8 +68,10 @@ LLM 이 지시대로 verbatim 복사해도 12 상한에 걸려 항상 폴백되�
   - `RECOMMENDATION_LLM_MODE=auto` — 셋이 모두 있으면 LLM, 하나라도 없으면 폴백.
 - 연결 지점(기존):
   - `plan_input()` — 자연어 업종·특별조건 구조화 + 읽기전용 분석계획 초안.
-    결정론적 파서가 baseline 이고 LLM 산출은 값 대조(`_normalize_remote_conditions`)
-    후에만 반영. `unsupported_conditions`·`confirmation_required` 는 LLM 이 못 건드린다.
+    숫자 조건(월세·보증금·면적)은 LLM 이 정규화한 값을 신뢰하고 `source_text`
+    인용·라벨·단위·방향·범위만 검증(`_verified_numeric_condition`, 안 B).
+    결정론적 파서는 LLM 비가용 시 폴백. `unsupported_conditions`·
+    `confirmation_required` 는 LLM 이 못 건드린다.
   - `explain_candidates()` — 후보별 Evidence 설명 카드. `validate_card` 통과 실패 시
     해당 후보만 `template_card` 로 폴백.
 - 실패·타임아웃·비용 한도 → 폴백:
