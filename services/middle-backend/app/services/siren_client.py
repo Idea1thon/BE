@@ -115,7 +115,18 @@ async def _post(path: str, payload: dict[str, Any], *, what: str) -> dict[str, A
         logger.error("사이렌 예상 밖 응답 status=%s", response.status_code)
         raise _service_unavailable(f"{what}를 사용할 수 없습니다")
 
-    return response.json()
+    # 200 이라고 본문이 계약을 지킨다는 보장은 없다. 여기서 걸러내지 않으면
+    # 매핑 층에서 AttributeError 같은 예상 밖 예외로 터지고, 호출부는 그것을
+    # 분석 실패로 인식하지 못한다.
+    try:
+        body = response.json()
+    except ValueError as exc:
+        logger.error("사이렌 응답이 JSON 이 아님 path=%s body=%s", path, response.text[:200])
+        raise _service_unavailable(f"{what} 응답을 해석할 수 없습니다") from exc
+    if not isinstance(body, dict):
+        logger.error("사이렌 응답이 객체가 아님 path=%s type=%s", path, type(body).__name__)
+        raise _service_unavailable(f"{what} 응답을 해석할 수 없습니다")
+    return body
 
 
 async def analyze(payload: dict[str, Any]) -> dict[str, Any]:

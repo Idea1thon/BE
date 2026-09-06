@@ -41,7 +41,9 @@ async def test_submit_returns_202_with_analysis_request_id(client, seeded):
     )
     assert res.status_code == 202, res.text
     body = res.json()
-    assert body["status"] == "ANALYZING"
+    # 제출 직후 사이렌을 동기 호출하므로 확정 상태로 돌아온다.
+    # (conftest 의 가짜 사이렌이 calculated 결과를 준다)
+    assert body["status"] == "COMPLETED"
     assert isinstance(body["report_id"], int)
     assert len(body["analysis_request_id"]) == 36  # uuid4
 

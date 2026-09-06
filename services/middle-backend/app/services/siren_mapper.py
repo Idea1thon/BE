@@ -200,8 +200,11 @@ def build_analyze_request(
 
     - 식별자는 문자열이다. 우리는 BIGSERIAL 이라 str() 로 넘긴다. 사이렌은 이 값을
       저장·비교하지 않고 응답에 그대로 돌려주기만 한다.
-    - `llm_mode` 를 명시적으로 끈다. 상대 기본값은 `"explanation_only"` 라
-      지정하지 않으면 LLM 을 부른다. 우리는 LLM 을 구성하지 않았다.
+    - `llm_mode="explanation_only"` 를 명시한다. 이름과 달리 LLM 호출이 아니라
+      결정론적 템플릿이다(`services/siren/explanation.py`,
+      `model: "deterministic-template-v1"`) — 외부를 부르지 않는다. `disabled` 로
+      두면 설명 문장이 통째로 사라지므로 명시적으로 켠다. LLM 이 실제로 붙는
+      모드는 `explanation_and_review_assist` 뿐이고 우리는 쓰지 않는다.
     - `send_notifications` 는 False 를 명시한다. 상대는 true 를 받으면 ValueError
       를 던지고, 알림 생성·발송은 CONTRACT.md 상 우리 책임이다.
     - `market_data` 가 없으면 시장 층이 `missing` 이 되어 종합 점수·등급이 null 인
@@ -215,7 +218,7 @@ def build_analyze_request(
         "industry_code": industry_code,
         "location": location,
         "branch_reports": monthly_reports,
-        "options": {"llm_mode": "disabled", "send_notifications": False},
+        "options": {"llm_mode": "explanation_only", "send_notifications": False},
     }
     if brand_name:
         payload["brand_name"] = brand_name
@@ -236,8 +239,8 @@ GRADE_TO_RISK_LEVEL = {
     "위험": RiskLevel.DANGER,
 }
 
-# DB_SCHEMA 4-9 `rule_version VARCHAR(20)`.
-RULE_VERSION_MAX_LENGTH = 20
+# DB_SCHEMA 4-9 + 0004. 상대 score_version 이 27자라 20 → 60 으로 넓혔다.
+RULE_VERSION_MAX_LENGTH = 60
 
 # 등급별 정수 점수 구간. 사이렌 정책(normal_upper_bound=40, caution_upper_bound=70)과
 # INTERFACE_SPEC 4장(0~39 / 40~69 / 70~100)이 같은 경계를 쓴다.
@@ -265,11 +268,10 @@ def _to_smallint(score: float) -> int:
 class AnalysisValues:
     """`report_analysis` 에 넣을 값. 저장 가능 여부를 함께 들고 다닌다.
 
-    현행 스키마는 `risk_score`·`risk_level` 이 NOT NULL 이고 `rule_version` 이
-    VARCHAR(20) 인데, 사이렌은 데이터가 부족하면 점수·등급을 의도적으로 null 로
-    주고 `score_version` 은 20자를 넘는다. 값을 지어내거나 잘라 넣으면
-    "데이터 부족" 이 "정상" 으로 바뀌고 재현성 정보가 깨진다. 그래서 변환은
-    사실대로 하고, 저장 가능 여부는 `blockers` 로 알린다.
+    0004 이후 부분 결과(점수·등급 null)도 저장할 수 있다. `blockers` 는 남겨
+    둔다 — 값을 지어내거나 잘라 넣는 대신 저장을 막아야 하는 경우가 아직 있다:
+    등급과 점수가 서로 다른 구간을 가리킬 때, 그리고 상대 버전 문자열이 컬럼을
+    넘길 때다. 둘 다 조용히 통과시키면 DB 가 스스로 모순된다.
     """
 
     risk_score: int | None
@@ -278,6 +280,7 @@ class AnalysisValues:
     risk_periods: list[Any]
     recommendations: list[Any]
     rule_version: str
+    alert_policy_version: str | None
     calculated_at: dt.datetime
     calculation_status: str
     blockers: list[str] = field(default_factory=list)
@@ -309,16 +312,15 @@ def to_analysis_values(
         # float → SMALLINT. 상대는 소수 4자리를 주고 우리 컬럼은 정수다.
         # INTERFACE_SPEC 4장이 risk_score 를 integer 0~100 으로 규정한다.
         risk_score = _to_smallint(float(score))
-    else:
-        blockers.append("risk_score 가 null 인데 report_analysis.risk_score 는 NOT NULL")
+    # null 은 결함이 아니다. 사이렌이 "데이터 부족" 을 표시하는 방식이고
+    # 0004 에서 컬럼을 nullable 로 바꿔 그대로 받는다.
 
     risk_level: RiskLevel | None = None
     if grade is not None:
         if grade not in GRADE_TO_RISK_LEVEL:
             raise SirenMappingError(f"알 수 없는 위험 등급: {grade!r}")
         risk_level = GRADE_TO_RISK_LEVEL[grade]
-    else:
-        blockers.append("risk_level 이 null 인데 report_analysis.risk_level 은 NOT NULL")
+
 
     rule_version = str(risk.get("score_version") or "")
     if len(rule_version) > RULE_VERSION_MAX_LENGTH:
@@ -350,6 +352,7 @@ def to_analysis_values(
         risk_periods=[],
         recommendations=list(owner_projection.get("recommended_actions") or []),
         rule_version=rule_version,
+        alert_policy_version=(response.get("alert") or {}).get("alert_policy_version"),
         calculated_at=calculated_at or dt.datetime.now(dt.timezone.utc),
         calculation_status=status,
         blockers=blockers,

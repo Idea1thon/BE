@@ -319,11 +319,18 @@ class AnalysisDetail(BaseModel):
 
     factors · risk_periods · recommendations 는 분석 서비스 응답 DTO 그대로다.
     Backend 는 변환하지 않는다 (INTERFACE_SPEC 4-2).
+
+    `risk_score`·`risk_level` 은 nullable 이다. 사이렌은 시장·가맹점 층 중 하나라도
+    불완전하면 둘을 의도적으로 null 로 주고(0004), 저장도 그대로 한다. 여기서만
+    NOT NULL 로 두면 partial 분석이 붙은 보고서는 상세 조회가 500 이 된다.
+
+    `factors` 는 사이렌 `components` 를 그대로 실으므로 **dict** 다. 예전 행은
+    리스트라 둘 다 받는다 — 변환하지 않기로 한 이상 형태를 좁히면 안 된다.
     """
 
-    risk_score: int
-    risk_level: RiskLevel
-    factors: list
+    risk_score: int | None
+    risk_level: RiskLevel | None
+    factors: dict | list
     risk_periods: list
     recommendations: list
     rule_version: str

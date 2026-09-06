@@ -1,0 +1,8 @@
+# 런타임에 필요 없는 것들. api.py → pipeline → risk_signals 경로만 있으면 된다.
+# 데모 산출물 3.8MB 를 이미지에 넣을 이유가 없다.
+artifacts/
+demo/
+tests/
+__pycache__/
+**/__pycache__/
+*.pyc

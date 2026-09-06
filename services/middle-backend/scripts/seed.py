@@ -137,10 +137,28 @@ INPUT_FIELDS: list[tuple[str, str, str, bool]] = [
     ("FIN_MISC", "기타 잡비", "금융 및 기타", False),
 ]
 
+# 점포 정보: (이름, 주소, 시군구코드, 업종코드, 상권코드, x_5181, y_5181)
+#
+# 상권코드·좌표는 서울 열린데이터 실측이며 `app/data/market_context.json` 의
+# (시군구, 업종) 키와 짝을 이룬다. 이 짝이 맞아야 사이렌에 실제 상권×업종
+# 폐업률·매출·경쟁 데이터를 넘길 수 있고, 안 맞으면 시장 층이 missing 이 되어
+# 종합 점수·등급이 null 인 부분 결과만 나온다.
+#
+# owner2 업종을 CS100010(커피)에서 CS100004(양식)로 옮겼다. 실측 시장 데이터가
+# 있는 마포 조합이 CS100004·CS100006 뿐이라, 커피로 두면 이 점포만 분석이
+# 반쪽이 된다. 데모 시드라 업종을 맞추는 쪽을 택했다.
 ACCOUNTS = [
     ("hq@example.com", "김본사", UserType.HQ, None),
-    ("owner1@example.com", "이점주", UserType.OWNER, ("강남 역삼점", "서울특별시 강남구 역삼동 1-1", "11680", "CS100001")),
-    ("owner2@example.com", "박점주", UserType.OWNER, ("마포 서교점", "서울특별시 마포구 서교동 2-2", "11440", "CS100010")),
+    (
+        "owner1@example.com", "이점주", UserType.OWNER,
+        ("강남 역삼점", "서울특별시 강남구 역삼동 1-1", "11680", "CS100001",
+         "3120185", 201912.0, 445706.0),
+    ),
+    (
+        "owner2@example.com", "박점주", UserType.OWNER,
+        ("마포 서교점", "서울특별시 마포구 서교동 2-2", "11440", "CS100004",
+         "3120098", 190254.0, 453366.0),
+    ),
 ]
 
 # REQ-OW-07 등급별 노출 상품. REQ-OW-10이 "현재는 하드코딩 또는 DB 직접 입력"으로 규정한다.
@@ -207,7 +225,8 @@ async def seed() -> None:
             await session.flush()
 
             if branch_info is not None:
-                b_name, address, region_code, category_code = branch_info
+                (b_name, address, region_code, category_code,
+                 trade_area_code, x_5181, y_5181) = branch_info
                 session.add(
                     Branch(
                         franchise_id=franchise.id,
@@ -216,6 +235,9 @@ async def seed() -> None:
                         address=address,
                         region_code=region_code,
                         business_category_code=category_code,
+                        trade_area_code=trade_area_code,
+                        x_5181=x_5181,
+                        y_5181=y_5181,
                     )
                 )
 

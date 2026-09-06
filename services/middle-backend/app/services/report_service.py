@@ -1,8 +1,11 @@
 """운영보고서 제출. API_SPEC 4-2, REQ-OW-11~16.
 
-위험도 분석 서비스 호출(처리 순서 7단계)은 아직 붙이지 않는다. 사이렌 서비스의
-요청 계약에 저희가 만들 수 없는 값(상권 코드·행정동 코드 체계)이 남아 있어,
-그게 정해진 뒤 별도로 연동한다. 그때까지 보고서는 ANALYZING 으로 남는다.
+제출 직후 위험도 분석(사이렌)을 부른다. 상대가 동기 단일 호출이라 202+폴링
+계층을 우리가 얹지 않는다 — `GET /reports/{id}/status` 는 그대로 두어 폴링하는
+FE 도 첫 호출에서 확정 상태를 받는다.
+
+분석 실패가 제출을 되돌리지 않는다. 점주는 이미 값을 냈고 그 사실은 분석
+성공 여부와 무관하다. 실패는 `status=FAILED` 와 `analysis_error` 로 남는다.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from app.errors import conflict, forbidden, validation_error
 from app.models import Branch, OperationReport, ReportInputField, ReportInputItem, UserAccount
 from app.models.enums import ReportStatus
 from app.schemas import AMOUNT_MAX, ReportCreateRequest
+from app.services import siren_service
 
 # net_sales 산식 (DB_SCHEMA 4-7 D1 확정).
 #   net_sales = 매출 3그룹 합계 − 매출 차감 항목 합계
@@ -127,5 +131,10 @@ async def create_report(
         ]
     )
     await session.commit()
+
+    # 분석은 별도 트랜잭션이다. 여기서 예외가 나도 위에서 커밋한 보고서와
+    # 입력 항목은 남는다.
+    await siren_service.run_analysis(session, report)
+
     await session.refresh(report)
     return report

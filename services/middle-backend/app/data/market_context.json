@@ -1,0 +1,578 @@
+{
+  "11680:CS100001": {
+    "location": {
+      "gu_code": "11680",
+      "admin_dong_code": "11680521",
+      "trade_area_code": "3120185",
+      "x_5181": 201912.0,
+      "y_5181": 445706.0
+    },
+    "market_data": {
+      "source": "seoul_open_data",
+      "closure_source": "seoul_open_data:음식점_상권분기_패널",
+      "sales_source": "seoul_open_data:추정매출-상권",
+      "as_of_quarter": "2026Q1",
+      "closure_quarters": [
+        {
+          "quarter": "2021Q1",
+          "active_count_end": 151,
+          "new_openings": 3,
+          "closures": 7,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2021Q2",
+          "active_count_end": 152,
+          "new_openings": 7,
+          "closures": 6,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2021Q3",
+          "active_count_end": 149,
+          "new_openings": 4,
+          "closures": 7,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2021Q4",
+          "active_count_end": 145,
+          "new_openings": 3,
+          "closures": 7,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2022Q1",
+          "active_count_end": 144,
+          "new_openings": 4,
+          "closures": 5,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2022Q2",
+          "active_count_end": 142,
+          "new_openings": 3,
+          "closures": 5,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2022Q3",
+          "active_count_end": 141,
+          "new_openings": 2,
+          "closures": 3,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2022Q4",
+          "active_count_end": 142,
+          "new_openings": 3,
+          "closures": 2,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2023Q1",
+          "active_count_end": 141,
+          "new_openings": 0,
+          "closures": 1,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2023Q2",
+          "active_count_end": 142,
+          "new_openings": 2,
+          "closures": 1,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2023Q3",
+          "active_count_end": 142,
+          "new_openings": 3,
+          "closures": 3,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2023Q4",
+          "active_count_end": 144,
+          "new_openings": 5,
+          "closures": 3,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2024Q1",
+          "active_count_end": 145,
+          "new_openings": 5,
+          "closures": 4,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2024Q2",
+          "active_count_end": 150,
+          "new_openings": 8,
+          "closures": 3,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2024Q3",
+          "active_count_end": 149,
+          "new_openings": 3,
+          "closures": 4,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2024Q4",
+          "active_count_end": 148,
+          "new_openings": 3,
+          "closures": 4,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2025Q1",
+          "active_count_end": 146,
+          "new_openings": 4,
+          "closures": 6,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2025Q2",
+          "active_count_end": 146,
+          "new_openings": 6,
+          "closures": 6,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2025Q3",
+          "active_count_end": 142,
+          "new_openings": 2,
+          "closures": 6,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2025Q4",
+          "active_count_end": 146,
+          "new_openings": 5,
+          "closures": 1,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2026Q1",
+          "active_count_end": 143,
+          "new_openings": 1,
+          "closures": 4,
+          "quarter_status": "완전"
+        }
+      ],
+      "sales_quarters": [
+        {
+          "quarter": "2021Q1",
+          "amount_krw": 10489358096.0,
+          "txn_count": 316709
+        },
+        {
+          "quarter": "2021Q2",
+          "amount_krw": 11795322456.0,
+          "txn_count": 351591
+        },
+        {
+          "quarter": "2021Q3",
+          "amount_krw": 9379089023.0,
+          "txn_count": 309307
+        },
+        {
+          "quarter": "2021Q4",
+          "amount_krw": 11773491649.0,
+          "txn_count": 346102
+        },
+        {
+          "quarter": "2022Q1",
+          "amount_krw": 10805387439.0,
+          "txn_count": 312507
+        },
+        {
+          "quarter": "2022Q2",
+          "amount_krw": 15082702453.0,
+          "txn_count": 404763
+        },
+        {
+          "quarter": "2022Q3",
+          "amount_krw": 15907567443.0,
+          "txn_count": 428530
+        },
+        {
+          "quarter": "2022Q4",
+          "amount_krw": 17058247070.0,
+          "txn_count": 418030
+        },
+        {
+          "quarter": "2023Q1",
+          "amount_krw": 15930055593.0,
+          "txn_count": 401612
+        },
+        {
+          "quarter": "2023Q2",
+          "amount_krw": 15363389926.0,
+          "txn_count": 397136
+        },
+        {
+          "quarter": "2023Q3",
+          "amount_krw": 15426581446.0,
+          "txn_count": 401268
+        },
+        {
+          "quarter": "2023Q4",
+          "amount_krw": 15980480237.0,
+          "txn_count": 405153
+        },
+        {
+          "quarter": "2024Q1",
+          "amount_krw": 15312336904.0,
+          "txn_count": 399911
+        },
+        {
+          "quarter": "2024Q2",
+          "amount_krw": 15610598768.0,
+          "txn_count": 419956
+        },
+        {
+          "quarter": "2024Q3",
+          "amount_krw": 15140614707.0,
+          "txn_count": 407427
+        },
+        {
+          "quarter": "2024Q4",
+          "amount_krw": 16336983172.0,
+          "txn_count": 413154
+        },
+        {
+          "quarter": "2025Q1",
+          "amount_krw": 15088629780.0,
+          "txn_count": 372296
+        },
+        {
+          "quarter": "2025Q2",
+          "amount_krw": 15292609237.0,
+          "txn_count": 396607
+        },
+        {
+          "quarter": "2025Q3",
+          "amount_krw": 16796503698.0,
+          "txn_count": 425903
+        },
+        {
+          "quarter": "2025Q4",
+          "amount_krw": 16753606616.0,
+          "txn_count": 398400
+        },
+        {
+          "quarter": "2026Q1",
+          "amount_krw": 15197356148.0,
+          "txn_count": 373748
+        }
+      ],
+      "competition": {
+        "radius_m": 250.0,
+        "same_industry_new_recent_3m": 1,
+        "same_industry_new_previous_3m": 6,
+        "similar_industry_new_recent_3m": 0,
+        "similar_industry_new_previous_3m": 1,
+        "similar_industry_codes": [
+          "CS100002",
+          "CS100008"
+        ],
+        "active_only": true,
+        "source": "seoul_open_data:음식점_인허가_서울"
+      }
+    },
+    "_provenance": {
+      "source_file": "services/siren/artifacts/risk-siren/demo/requests/demo-br-01.json",
+      "note": "서울 열린데이터 상권×업종 실측(폐업률·매출·경쟁). 사이렌 데모 산출물에서 발췌."
+    }
+  },
+  "11440:CS100004": {
+    "location": {
+      "gu_code": "11440",
+      "admin_dong_code": "11440740",
+      "trade_area_code": "3120098",
+      "x_5181": 190254.0,
+      "y_5181": 453366.0
+    },
+    "market_data": {
+      "source": "seoul_open_data",
+      "closure_source": "seoul_open_data:음식점_상권분기_패널",
+      "sales_source": "seoul_open_data:추정매출-상권",
+      "as_of_quarter": "2026Q1",
+      "closure_quarters": [
+        {
+          "quarter": "2021Q1",
+          "active_count_end": 11,
+          "new_openings": 0,
+          "closures": 2,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2021Q2",
+          "active_count_end": 11,
+          "new_openings": 1,
+          "closures": 1,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2021Q3",
+          "active_count_end": 10,
+          "new_openings": 0,
+          "closures": 1,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2021Q4",
+          "active_count_end": 10,
+          "new_openings": 0,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2022Q1",
+          "active_count_end": 10,
+          "new_openings": 1,
+          "closures": 1,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2022Q2",
+          "active_count_end": 10,
+          "new_openings": 0,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2022Q3",
+          "active_count_end": 12,
+          "new_openings": 2,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2022Q4",
+          "active_count_end": 14,
+          "new_openings": 2,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2023Q1",
+          "active_count_end": 14,
+          "new_openings": 1,
+          "closures": 1,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2023Q2",
+          "active_count_end": 14,
+          "new_openings": 0,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2023Q3",
+          "active_count_end": 16,
+          "new_openings": 2,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2023Q4",
+          "active_count_end": 16,
+          "new_openings": 1,
+          "closures": 1,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2024Q1",
+          "active_count_end": 16,
+          "new_openings": 0,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2024Q2",
+          "active_count_end": 16,
+          "new_openings": 1,
+          "closures": 1,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2024Q3",
+          "active_count_end": 16,
+          "new_openings": 0,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2024Q4",
+          "active_count_end": 17,
+          "new_openings": 1,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2025Q1",
+          "active_count_end": 17,
+          "new_openings": 0,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2025Q2",
+          "active_count_end": 16,
+          "new_openings": 1,
+          "closures": 2,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2025Q3",
+          "active_count_end": 19,
+          "new_openings": 3,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2025Q4",
+          "active_count_end": 21,
+          "new_openings": 2,
+          "closures": 0,
+          "quarter_status": "완전"
+        },
+        {
+          "quarter": "2026Q1",
+          "active_count_end": 22,
+          "new_openings": 1,
+          "closures": 0,
+          "quarter_status": "완전"
+        }
+      ],
+      "sales_quarters": [
+        {
+          "quarter": "2021Q1",
+          "amount_krw": 1250624204.0,
+          "txn_count": 35569
+        },
+        {
+          "quarter": "2021Q2",
+          "amount_krw": 1621954848.0,
+          "txn_count": 46987
+        },
+        {
+          "quarter": "2021Q3",
+          "amount_krw": 1437037580.0,
+          "txn_count": 44408
+        },
+        {
+          "quarter": "2021Q4",
+          "amount_krw": 2017729159.0,
+          "txn_count": 57917
+        },
+        {
+          "quarter": "2022Q1",
+          "amount_krw": 1315060973.0,
+          "txn_count": 42753
+        },
+        {
+          "quarter": "2022Q2",
+          "amount_krw": 1925646829.0,
+          "txn_count": 55466
+        },
+        {
+          "quarter": "2022Q3",
+          "amount_krw": 1886407120.0,
+          "txn_count": 52599
+        },
+        {
+          "quarter": "2022Q4",
+          "amount_krw": 2088129966.0,
+          "txn_count": 56017
+        },
+        {
+          "quarter": "2023Q1",
+          "amount_krw": 2107036792.0,
+          "txn_count": 60803
+        },
+        {
+          "quarter": "2023Q2",
+          "amount_krw": 2153980674.0,
+          "txn_count": 62499
+        },
+        {
+          "quarter": "2023Q3",
+          "amount_krw": 2257610396.0,
+          "txn_count": 65372
+        },
+        {
+          "quarter": "2023Q4",
+          "amount_krw": 2244213809.0,
+          "txn_count": 65805
+        },
+        {
+          "quarter": "2024Q1",
+          "amount_krw": 1922456460.0,
+          "txn_count": 63220
+        },
+        {
+          "quarter": "2024Q2",
+          "amount_krw": 1836100149.0,
+          "txn_count": 54973
+        },
+        {
+          "quarter": "2024Q3",
+          "amount_krw": 1825655690.0,
+          "txn_count": 55388
+        },
+        {
+          "quarter": "2024Q4",
+          "amount_krw": 2094575400.0,
+          "txn_count": 57954
+        },
+        {
+          "quarter": "2025Q1",
+          "amount_krw": 1710479192.0,
+          "txn_count": 51400
+        },
+        {
+          "quarter": "2025Q2",
+          "amount_krw": 1723901030.0,
+          "txn_count": 50466
+        },
+        {
+          "quarter": "2025Q3",
+          "amount_krw": 1905169132.0,
+          "txn_count": 51864
+        },
+        {
+          "quarter": "2025Q4",
+          "amount_krw": 1998493910.0,
+          "txn_count": 51098
+        },
+        {
+          "quarter": "2026Q1",
+          "amount_krw": 1794349989.0,
+          "txn_count": 52941
+        }
+      ],
+      "competition": {
+        "radius_m": 250.0,
+        "same_industry_new_recent_3m": 0,
+        "same_industry_new_previous_3m": 2,
+        "similar_industry_new_recent_3m": 1,
+        "similar_industry_new_previous_3m": 1,
+        "similar_industry_codes": [
+          "CS100003",
+          "CS100006"
+        ],
+        "active_only": true,
+        "source": "seoul_open_data:음식점_인허가_서울"
+      }
+    },
+    "_provenance": {
+      "source_file": "services/siren/artifacts/risk-siren/demo/requests/demo-br-07.json",
+      "note": "서울 열린데이터 상권×업종 실측(폐업률·매출·경쟁). 사이렌 데모 산출물에서 발췌."
+    }
+  }
+}

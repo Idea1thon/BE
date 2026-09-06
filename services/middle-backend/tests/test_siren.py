@@ -223,9 +223,13 @@ def _request(**kw):
     return build_analyze_request(**base)
 
 
-def test_llm_is_disabled_explicitly():
-    """상대 기본값은 'explanation_only' 다. 명시하지 않으면 LLM 을 부른다."""
-    assert _request()["options"]["llm_mode"] == "disabled"
+def test_explanation_mode_is_set_explicitly():
+    """explanation_only 는 LLM 이 아니라 결정론적 템플릿이다.
+
+    disabled 로 두면 설명 문장이 통째로 사라진다. 실제 LLM 이 붙는 모드는
+    explanation_and_review_assist 뿐이고 우리는 쓰지 않는다.
+    """
+    assert _request()["options"]["llm_mode"] == "explanation_only"
 
 
 def test_notifications_stay_off():
@@ -269,21 +273,35 @@ def test_unknown_grade_is_not_guessed():
         to_analysis_values(body)
 
 
-def test_partial_result_is_reported_as_unstorable_not_coerced():
-    """데이터 부족을 0점·정상으로 바꾸지 않는다."""
+def test_partial_result_is_kept_as_null_not_coerced():
+    """데이터 부족을 0점·정상으로 바꾸지 않는다. 0004 이후 그대로 저장된다."""
     values = to_analysis_values(PARTIAL)
     assert values.risk_score is None
     assert values.risk_level is None
-    assert values.storable is False
-    assert any("risk_score" in b for b in values.blockers)
-    assert any("risk_level" in b for b in values.blockers)
+    assert values.calculation_status == "partial"
+    assert values.storable is True
 
 
-def test_rule_version_overflow_is_a_blocker_not_a_truncation():
-    """VARCHAR(20) 에 27자를 잘라 넣으면 재현성 정보가 깨진다."""
+def test_rule_version_is_kept_whole():
+    """0004 에서 VARCHAR(60) 으로 넓혔다. 자르면 재현성 정보가 깨진다."""
     values = to_analysis_values(CALCULATED)
     assert values.rule_version == "risk-siren-v1.2-provisional"
+    assert values.storable is True
+
+
+def test_rule_version_beyond_the_column_is_still_blocked():
+    """상대가 더 긴 버전 문자열을 쓰면 조용히 잘리는 대신 막는다."""
+    long_version = "risk-siren-" + "x" * 60
+    body = {**CALCULATED, "risk": {**CALCULATED["risk"], "score_version": long_version}}
+    values = to_analysis_values(body)
+    assert values.storable is False
     assert any("rule_version" in b for b in values.blockers)
+
+
+def test_alert_policy_version_is_carried_over():
+    body = {**CALCULATED,
+            "alert": {**CALCULATED["alert"], "alert_policy_version": "confirmed-branch-v1"}}
+    assert to_analysis_values(body).alert_policy_version == "confirmed-branch-v1"
 
 
 @pytest.mark.parametrize(
