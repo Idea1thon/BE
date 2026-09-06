@@ -21,9 +21,12 @@ LLM 은 설명·해석 보조만 담당하고 점수·판정·정렬·하드조�
 - `serving_db._dsn_args()` 가 URL 에서 host·port·user·dbname 을 뽑고,
   `_subprocess_env()` 가 `?sslmode=require` → `PGSSLMODE`, 비밀번호 → `PGPASSWORD` 로 넘긴다.
   psql 드라이버 설치 불필요(기존 `COPY ... TO STDOUT` 패턴 유지).
-- 적재 범위: 서울 전체 25개 구(2026-09-06 이관). 미이관 지역을 요청하면
-  `resolve_region()` 이 `PipelineDependencyError("행정동 데이터에서 시군구가 비어 있습니다: …")`
-  로 명확히 실패한다(크래시 아님, 503 계열).
+- 적재 범위: 서울 전체 25개 구(2026-09-06 이관). `DbSource.layers()` 는 적재된
+  `location.area` 행에서만 `sigungu_by_prefix` 를 만들므로, 미적재/미지원 시군구를
+  요청하면 `resolve_region()` 이 `PipelineInputError("시군구를 확인할 수 없습니다: …")`
+  → API 422(`invalid_request`) 로 명확히 거절한다(크래시 아님). 서울 외 `sido` 도 동일.
+  (`PipelineDependencyError` "행정동 데이터에서 시군구가 비어 있음" 경로는 시군구는
+  이관됐는데 행정동 행만 0 인 부분 이관 상태에서만 발동 — 전 25구 이관돼 현재는 미발동.)
 - 행정동 필터는 `ADSTRD_CD` 앞 5자리(= `SIGNGU_CD`) 기준이다
   (`resolve_region`: `sigungu_by_prefix.get(r.code[:5]) == request.sigungu`).
   FileSource·DbSource 가 동일 규칙을 쓰며 `PipelineInvarianceTests`·
@@ -33,7 +36,7 @@ LLM 은 설명·해석 보조만 담당하고 점수·판정·정렬·하드조�
 - [x] `--source db` 커넥션이 Azure 접속 정보(sslmode 포함)를 쓰도록, Docker 는 폴백 유지
 - [x] 접속 정보·시크릿을 `.env` 로 분리(`.env.example` 갱신), 커밋 금지 확인
       (`.gitignore`: `.env`, `.env.*`, `!.env.example`, `.api_budget.json`)
-- [x] Azure 적재 범위 확인 → 미이관 지역 요청 시 `PipelineDependencyError`
+- [x] Azure 적재 범위 확인 → 미적재 시군구 요청 시 `PipelineInputError`(422)로 거절
 - [x] 행정동 필터가 코드 앞 5자리 기준으로 동작하는지 검증(기존 통합 테스트가 커버)
 
 ## 2. LLM 연결 — gpt-5.6-luna (구현 완료)
@@ -43,8 +46,10 @@ chat-completions 클라이언트다(stdlib 만 사용). 새 provider 모듈을 �
 이 클라이언트에 자격증명을 넣어 연결한다.
 
 - `.env`:
-  - `LLM_API_URL=https://api.openai.com/v1`
-  - `LLM_API_KEY=<키>` — `OPENAI_API_KEY` 로 넣어도 폴백 인식된다(`LLMConfig.from_env`).
+  - `LLM_API_URL=https://api.openai.com/v1` (프록시/게이트웨이면 그 URL)
+  - `LLM_API_KEY=<키>` — 이 변수에 실제 키를 넣는 것으로만 활성화된다.
+    셸에 흔히 떠 있는 `OPENAI_API_KEY` 는 인식하지 않는다(offline 로 알던 환경에서
+    실호출·과금이 켜지는 것을 막기 위함).
   - `LLM_MODEL=gpt-5.6-luna`
   - `RECOMMENDATION_LLM_MODE=auto` — 셋이 모두 있으면 LLM, 하나라도 없으면 폴백.
 - 연결 지점(기존):
@@ -56,14 +61,16 @@ chat-completions 클라이언트다(stdlib 만 사용). 새 provider 모듈을 �
 - 실패·타임아웃·비용 한도 → 폴백:
   - HTTP/네트워크/타임아웃/JSON 파싱 실패 → `LLMRuntimeError` → 호출부가 template/
     deterministic 폴백(`llm_mode="required"` 일 때만 예외 전파).
-  - 비용 한도: `LLM_MAX_CALLS_PER_RUN`(기본 12). `run_pipeline` 이 요청마다
-    `reset_call_budget()` 로 스레드별 카운터를 0 으로 만들고, 초과하면 `generate_json`
-    이 `LLMRuntimeError` 를 던져 이후 호출이 폴백된다. `0` = 상한 없음.
+  - 비용 한도: `LLM_MAX_CALLS_PER_RUN`(기본 `0` = 무제한, opt-in). `run_pipeline` 이
+    요청마다 `reset_call_budget()` 로 스레드별 카운터를 0 으로 만들고, 캡을 넘으면
+    `generate_json` 이 `LLMRuntimeError` 를 던져 이후 호출이 폴백된다. 요청당 호출 수는
+    `1(planner) + 후보 수(explanation)` 이므로 캡은 그보다 크게 잡는다. `required`
+    모드에서는 캡을 무시한다(자체 비용캡을 503 으로 보고하지 않도록).
 - LLM 미설정·`--source files` 환경에서도 파이프라인은 그대로 동작한다
   (`test_llm_pipeline.py` offline 경로, `--source files` 회귀).
 
 ### 세부 작업
-- [x] OpenAI 호환 클라이언트에 gpt-5.6-luna 연결 (`LLM_API_URL/KEY/MODEL`, `OPENAI_API_KEY` 폴백)
+- [x] OpenAI 호환 클라이언트에 gpt-5.6-luna 연결 (`LLM_API_URL`/`LLM_API_KEY`/`LLM_MODEL`)
 - [x] RAG Evidence 설명 카드 생성부에 LLM 호출 연결 (결정론적 계약 유지)
 - [x] 호출 실패·타임아웃·비용 한도(`LLM_MAX_CALLS_PER_RUN`) 시 폴백
 - [x] `--source files` 및 LLM 미설정 환경 회귀 확인
@@ -72,9 +79,10 @@ chat-completions 클라이언트다(stdlib 만 사용). 새 provider 모듈을 �
 
 `services/recommendation-api` 에서:
 
-- `tests/test_llm_pipeline.py::LLMRuntimeConfigTests` (신규) — `OPENAI_API_KEY` 폴백 인식,
-  `LLM_API_KEY` 우선, `LLM_MAX_CALLS_PER_RUN` 초과 시 예산 예외 + `reset_call_budget` 복구,
-  `0` = 무제한.
+- `tests/test_llm_pipeline.py::LLMRuntimeConfigTests` (신규) — `LLM_API_KEY` 만 인식(셸
+  `OPENAI_API_KEY` 무시), `LLM_MAX_CALLS_PER_RUN` 초과 시 예산 예외 + `reset_call_budget`
+  복구, `0` = 무제한, `required` 모드는 캡 무시, 예산 소진 시 `explain_candidates` 가
+  template 로 degrade(예외 아님).
 - 기존 offline/`required`/폴백 경로 전부 유지.
 
 ## 참고 사항
