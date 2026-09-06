@@ -10,14 +10,14 @@ class TargetedRetrievalTests(unittest.TestCase):
             return [{"reg": "present"}] if "to_regclass" in sql else []
         return execute_retrieval_requests(query or capture,
             [{"tool": "search_region_evidence", "dimensions": dimensions}],
-            {"sigungu": "마포구", "dong": dong}, "CS100010", "20261",
+            {"sigungu": "마포구", "sigungu_code": "11440", "dong": dong}, "CS100010", "20261",
             target_areas=targets)
 
     def test_selected_candidate_scope_and_dong_are_both_bound(self):
         self.execute(["sales"], [{"spatial_unit_type": "commercial_area", "spatial_unit_code": "3120042"}], dong="합정동")
         self.assertIn("a.spatial_unit_code IN ('3120042')", self.queries[0])
-        self.assertIn("a.admin_dong_name = '합정동'", self.queries[0])
-        self.assertIn("a.sigungu_name = '마포구'", self.queries[0])
+        self.assertNotIn("a.admin_dong_name =", self.queries[0])
+        self.assertNotIn("a.sigungu_name =", self.queries[0])
 
     def test_empty_or_invalid_targets_do_not_broaden_search(self):
         for targets in ([], [{"spatial_unit_type": "commercial_area", "spatial_unit_code": "1' OR 1=1"}]):
@@ -126,13 +126,11 @@ class TargetedRetrievalTests(unittest.TestCase):
         self.assertIn("LIMIT 100", queries[0])
         self.assertEqual(len(build_retrieval_evidence(result)), 100)
 
-    def test_dong_scope_has_geometry_fallback_for_unpopulated_area_metadata(self):
+    def test_resolved_hosts_are_not_discarded_by_nullable_region_metadata(self):
         self.execute(["sales"], [{"spatial_unit_type": "commercial_area", "spatial_unit_code": "3120042"}], dong="합정동")
         sql = self.queries[0]
-        self.assertIn("d.spatial_unit_name = '합정동'", sql)
-        self.assertIn("d.sigungu_name = '마포구'", sql)
-        self.assertIn("ST_Intersects(a.geom, d.geom)", sql)
-        self.assertIn("ST_Area(ST_Intersection(a.geom, d.geom)) > 0", sql)
+        for dependency in ("ST_", "a.sigungu_name =", "a.sigungu_code =", "area_crosswalk", "a.admin_dong_name ="):
+            self.assertNotIn(dependency, sql)
 
     def test_ambiguous_rent_crosswalk_does_not_pick_arbitrary_source_or_consume_cap(self):
         self.execute(["rent"])
@@ -156,8 +154,8 @@ class TargetedRetrievalTests(unittest.TestCase):
         data_queries = [sql for sql in self.queries if "to_regclass" not in sql]
         self.assertEqual(len(data_queries), 5)
         for sql in data_queries:
-            self.assertIn("a.spatial_unit_code = '11440660'", sql)
-            self.assertIn("a.sigungu_code = '11440'", sql)
+            self.assertIn("a.spatial_unit_code IN ('11440660')", sql)
+            self.assertNotIn("a.sigungu_code =", sql)
             self.assertNotIn("a.spatial_unit_name =", sql)
             self.assertNotIn("a.sigungu_name =", sql)
             self.assertNotIn("ST_", sql)
@@ -169,10 +167,9 @@ class TargetedRetrievalTests(unittest.TestCase):
         self.assertEqual(len(self.queries), 2)
         commercial, dong = self.queries
         self.assertIn("a.spatial_unit_code IN ('3120042')", commercial)
-        self.assertIn("a.admin_dong_code = '11440660'", commercial)
-        self.assertIn("commercial_to_admin_overlap", commercial)
-        self.assertIn("dcw.join_eligible", commercial)
-        self.assertIn("a.spatial_unit_code = '11440660'", dong)
+        self.assertNotIn("a.admin_dong_code =", commercial)
+        self.assertNotIn("commercial_to_admin_overlap", commercial)
+        self.assertIn("a.spatial_unit_code IN ('11440660')", dong)
         for sql in self.queries:
             self.assertNotIn("a.sigungu_name =", sql)
             self.assertNotIn("a.admin_dong_name =", sql)
@@ -223,3 +220,59 @@ class TargetedRetrievalTests(unittest.TestCase):
         self.coded_execute(["sales"], [])
         self.assertIn("coalesce(nullif(a.sigungu_name, ''), '마포구') AS sigungu_name", self.queries[0])
         self.assertNotIn("a.sigungu_name =", self.queries[0])
+
+    def test_alias_dong_codes_all_queried_and_preserved(self):
+        codes = ["11710670", "11710680", "11710690"]
+        queries = []
+        def query(sql):
+            queries.append(sql)
+            return [{"spatial_unit_type": "admin_dong", "spatial_unit_code": code,
+                "spatial_unit_name": "잠실", "sigungu_name": "송파구", "period": "20261",
+                "dimension": "sales", "source_table": "location.sales_quarter", "value": "100",
+                "industry_code": "CS100010"} for code in codes]
+        result = execute_retrieval_requests(query,
+            [{"tool": "search_region_evidence", "dimensions": ["sales"]}],
+            {"dong": "잠실동", "sigungu_code": "11710", "admin_dong_codes": codes},
+            "CS100010", "20261", target_areas=[])
+        self.assertEqual(len(queries), 1)
+        self.assertIn("IN ('11710670', '11710680', '11710690')", queries[0])
+        self.assertIn("LIMIT 3", queries[0])
+        self.assertEqual(len(build_retrieval_evidence(result)), 3)
+        self.assertEqual(result['results'][0]['admin_dong_count'], 3)
+
+    def test_explicit_empty_or_unresolved_named_dong_never_broadens(self):
+        for region in ({"dong": "잠실동", "sigungu_code": "11710", "admin_dong_codes": []},
+                       {"dong": "잠실동", "sigungu_code": "11710"},
+                       {"dong": "잠실동", "sigungu": "송파구"}):
+            result = execute_retrieval_requests(lambda sql: self.fail("unexpected query"),
+                [{"tool": "search_region_evidence", "dimensions": ["sales"]}],
+                region, "CS100010", "20261")
+            self.assertEqual(result['results'][0]['availability'][0]['reason'], 'region_unresolved')
+
+    def test_dong_code_list_merge_prefix_and_bound_are_validated(self):
+        from recommendation.rag_tools import _dong_codes
+        self.assertEqual(_dong_codes({'admin_dong_code':'11710670', 'admin_dong_codes':['11710670','11710680']}),
+                         ['11710670','11710680'])
+        for region in ({'admin_dong_codes':['11440660'],'sigungu_code':'11710'},
+                       {'admin_dong_codes':['11710bad']}, {'admin_dong_codes':'11710670'},
+                       {'admin_dong_codes':['11710670'] * 51}):
+            with self.assertRaises(ValueError):
+                _dong_codes(region)
+
+    def test_empty_array_tool_and_condition_values_are_ignored(self):
+        from recommendation.rag_tools import validate_retrieval_requests
+        for value in ([], {}, None, True, 1):
+            self.assertEqual(validate_retrieval_requests([{"tool": value, "dimensions": ["sales"]}]), [])
+        self.assertEqual(validate_retrieval_requests([{"tool": "search_region_evidence", "dimensions": []}]), [])
+        self.assertEqual(validate_retrieval_requests([]), [])
+
+    def test_empty_scopes_with_all_dimensions_never_issue_queries(self):
+        dimensions = ["sales", "stores", "flow", "change", "workplace_population", "rent", "vacancy"]
+        for targets in (None, []):
+            result = execute_retrieval_requests(lambda sql: self.fail("unexpected broad query"),
+                [{"tool": "search_region_evidence", "dimensions": dimensions}],
+                {"dong": "잠실동", "sigungu_code": "11710", "admin_dong_codes": []},
+                "CS100010", "20261", target_areas=targets)
+            self.assertEqual(result['results'][0]['rows'], [])
+            self.assertTrue(all(s['status'] == 'missing' for s in result['results'][0]['availability']))
+            self.assertEqual(build_retrieval_evidence(result), [])

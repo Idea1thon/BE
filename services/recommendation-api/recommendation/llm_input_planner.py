@@ -385,7 +385,7 @@ def _valid_plan(raw: Any, fallback: list[dict[str, Any]]) -> list[dict[str, Any]
         return fallback
     output = []
     for item in raw[:8]:
-        if not isinstance(item, dict) or item.get("tool") not in ALLOWED_PLAN_TOOLS:
+        if not isinstance(item, dict) or not isinstance(item.get("tool"), str) or item["tool"] not in ALLOWED_PLAN_TOOLS:
             continue
         output.append({
             "tool": item["tool"],
@@ -408,14 +408,14 @@ def _valid_inference_hypotheses(raw: Any) -> list[dict[str, Any]]:
         claim_type = item.get("claim_type")
         confidence = item.get("confidence")
         refs = item.get("basis_refs")
-        if not claim or claim_type not in {"hypothesis", "scenario", "causal_hypothesis", "estimate"}:
+        if not claim or not isinstance(claim_type, str) or claim_type not in {"hypothesis", "scenario", "causal_hypothesis", "estimate"}:
             continue
         output.append({
             "claim": claim,
             "status": "unverified",
             "claim_type": claim_type,
             "basis_refs": [str(ref)[:120] for ref in refs[:8] if str(ref).strip()] if isinstance(refs, list) else [],
-            "confidence": confidence if confidence in {"low", "medium", "high"} else "low",
+            "confidence": confidence if isinstance(confidence, str) and confidence in {"low", "medium", "high"} else "low",
         })
     return output
 
@@ -437,14 +437,14 @@ def _valid_preferences(raw: Any, baseline: dict[str, list[dict[str, Any]]]) -> d
             if not record["source_text"]:
                 continue
             strength = item.get("strength")
-            record["strength"] = strength if strength in ALLOWED_PREFERENCE_STRENGTHS else "inferred"
+            record["strength"] = strength if isinstance(strength, str) and strength in ALLOWED_PREFERENCE_STRENGTHS else "inferred"
             if item.get("value") is not None:
                 record["value"] = str(item["value"]).strip()[:80]
             mode = item.get("mode")
-            if mode in ALLOWED_PREFERENCE_MODES:
+            if isinstance(mode, str) and mode in ALLOWED_PREFERENCE_MODES:
                 record["mode"] = mode
             anchor_type = item.get("anchor_type")
-            if anchor_type is not None and anchor_type not in ALLOWED_ANCHOR_TYPES:
+            if anchor_type is not None and (not isinstance(anchor_type, str) or anchor_type not in ALLOWED_ANCHOR_TYPES):
                 continue
             if record["type"] == "near_anchor" and anchor_type not in ALLOWED_ANCHOR_TYPES:
                 continue
@@ -515,7 +515,7 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
             for item in raw_candidates[:10]:
                 if isinstance(item, str) and item in SUPPORTED_INDUSTRIES:
                     parsed_candidates.append({"industry_code": item, "name": INDUSTRY_NAMES[item], "confidence": None, "source": "llm"})
-                elif isinstance(item, dict) and item.get("industry_code") in SUPPORTED_INDUSTRIES:
+                elif isinstance(item, dict) and isinstance(item.get("industry_code"), str) and item["industry_code"] in SUPPORTED_INDUSTRIES:
                     parsed_candidates.append({
                         "industry_code": item["industry_code"], "name": INDUSTRY_NAMES[item["industry_code"]],
                         "confidence": item.get("confidence"), "source": "llm",

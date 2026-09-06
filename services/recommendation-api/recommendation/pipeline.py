@@ -2669,6 +2669,12 @@ def run_pipeline(
         selected_region['sigungu_code'] = gu_code
     if dong_code:
         selected_region['admin_dong_code'] = dong_code
+    if request.dong or dong_code:
+        # A legal-dong alias can resolve to multiple administrative polygons.
+        # Preserve all resolved identifiers; never send the alias back to SQL.
+        selected_region['admin_dong_codes'] = [record.code for record in selected_dongs]
+        if not selected_dongs and dong_code:
+            selected_region['admin_dong_codes'] = [dong_code]
     query_context = build_query_context(request.special_condition_text, selected_region,
                                         request.industry_code, conditions, preferences)
     question_contract = build_question_contract(query_context)

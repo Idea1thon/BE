@@ -480,7 +480,7 @@ def explain_candidates(
     query_context['question_contract'] = contract
     comparison = build_candidate_comparison(candidates, contract, retrieval_evidence)
     config = LLMConfig.from_env(llm_mode)
-    if llm_mode == "required" and not config.available:
+    if candidates and llm_mode == "required" and not config.available:
         raise LLMRuntimeError("llm-mode=required지만 LLM_API_URL/LLM_API_KEY/LLM_MODEL 설정이 없습니다.")
     source_catalogs: dict[str, Any] = {}
     relevance: dict[str, Any] = {}
@@ -490,7 +490,7 @@ def explain_candidates(
     errors: list[str] = []
     llm_used = 0
     client = None
-    if config.available:
+    if candidates and config.available:
         try:
             client = OpenAICompatibleJsonClient(config)
         except LLMRuntimeError as exc:
@@ -623,6 +623,7 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         mode = "template"
     return {
         "cards": cards,
+        "empty_reason": "no_candidates" if not candidates else None,
         "retrieval_evidence": retrieval_evidence,
         "sources_by_candidate": source_catalogs,
         "relevance_by_candidate": relevance,
