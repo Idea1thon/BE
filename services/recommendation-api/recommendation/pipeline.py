@@ -54,7 +54,6 @@ from shapely.strtree import STRtree
 ROOT = find_project_root(__file__)
 DEFAULT_QUARTER = "20261"
 DEFAULT_RENT_QUARTER = "20262"
-DEFAULT_MARGIN_M = 300
 DEFAULT_DEDUP_M = 80
 DEFAULT_RADIUS_M = 500
 DEFAULT_BUS_RADIUS_M = 250
@@ -373,13 +372,10 @@ def resolve_region(
         selected = in_gu
     target_geoms = [dong_layer.geoms[dong_layer.records.index(rec)] for rec in selected]
     target_poly = unary_union(target_geoms)
-    buffered = target_poly.buffer(DEFAULT_MARGIN_M)
-    if request.dong:
-        # 행정동을 고르면 300m 여유는 두되 선택 시군구 밖으로는 넘기지 않는다.
-        # (역삼1동 요청에 강남대로 건너편 서초구 서초동 건물이 후보로 잡히던 문제)
-        gu_poly = unary_union([dong_layer.geoms[dong_layer.records.index(r)] for r in in_gu])
-        buffered = buffered.intersection(gu_poly)
-    return selected, target_poly, buffered
+    # 후보는 선택 범위(행정동을 골랐으면 그 행정동, 아니면 시군구 전체) 폴리곤 안으로만
+    # 한정한다. 예전에는 300m 버퍼를 둬서 인접 행정동·시군구 건물이 후보로 끌려왔다
+    # (서교동 요청에 대흥동·서강동 건물, 역삼1동 요청에 서초구 서초동 건물).
+    return selected, target_poly, target_poly
 
 
 def index_rows(rows: Iterable[dict[str, str]], keys: tuple[str, ...], filters: dict[str, str]) -> dict[tuple[str, ...], dict[str, str]]:

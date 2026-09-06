@@ -109,18 +109,21 @@ class FastApiBoundaryTests(unittest.TestCase):
         self.assertEqual(region_response["sido"], "서울특별시")
         self.assertIn("잠실2동", region_response["dong"])
 
-    def test_dong_target_buffer_stays_inside_the_selected_sigungu(self) -> None:
-        # 역삼1동 요청에 강남대로 건너편 서초구 건물이 후보로 잡히던 문제(#25 후속).
+    def test_dong_selection_confines_candidates_to_that_dong(self) -> None:
+        # 서교동 요청에 대흥동·서강동 건물, 역삼1동 요청에 서초구 건물이 후보로
+        # 잡히던 문제(#25 후속). 행정동을 고르면 target 범위 = 그 행정동 폴리곤.
         _, _, dong_layer, sigungu_by_prefix = load_layers()
-        _, _, buffered = resolve_region(
-            RecommendationRequest("서울특별시", "강남구", "역삼1동", "CS100001"),
-            dong_layer, sigungu_by_prefix,
-        )
-        seocho = [dong_layer.geoms[i] for i, r in enumerate(dong_layer.records)
-                  if sigungu_by_prefix.get(r.code[:5]) == "서초구"]
-        from shapely.ops import unary_union as _uu
-        overlap = buffered.intersection(_uu(seocho)).area
-        self.assertLess(overlap, 1.0, f"target buffer가 서초구로 {overlap:.1f}㎡ 넘어감")
+        for sigungu, dong in (("마포구", "서교동"), ("강남구", "역삼1동")):
+            selected, target_poly, buffered = resolve_region(
+                RecommendationRequest("서울특별시", sigungu, dong, "CS100001"),
+                dong_layer, sigungu_by_prefix,
+            )
+            self.assertEqual(buffered, target_poly)
+            others = [dong_layer.geoms[i] for i, r in enumerate(dong_layer.records)
+                      if r not in selected]
+            from shapely.ops import unary_union as _uu
+            spill = buffered.intersection(_uu(others)).area
+            self.assertLess(spill, 1.0, f"{dong} 범위가 다른 행정동으로 {spill:.1f}㎡ 넘어감")
 
     def test_every_catalog_dong_is_resolvable_by_the_spatial_layer(self) -> None:
         _, _, dong_layer, sigungu_by_prefix = load_layers()
