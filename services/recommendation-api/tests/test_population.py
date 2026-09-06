@@ -164,5 +164,41 @@ class PipelineInvarianceTests(unittest.TestCase):
                 self.assertIsInstance(e["period"], str, f"{c['candidate_id']} {e['metric_name']}")
 
 
+class DbSourcePopulationParityTests(unittest.TestCase):
+    """--source db 인구 근거가 context.population_snapshot에서 --source files와 동일하게 나와야 한다.
+
+    DB(또는 context.population_snapshot) 미가용 시 skip.
+    """
+
+    REQ = dict(sido="서울특별시", sigungu="송파구", dong="잠실동",
+               industry_code="CS100010", special_condition_text="", quarter="20261")
+
+    def setUp(self):
+        try:
+            from recommendation import serving_db
+            serving_db.query("SELECT 1 FROM context.population_snapshot LIMIT 1")
+        except Exception as exc:  # noqa: BLE001
+            self.skipTest(f"context.population_snapshot 미가용: {type(exc).__name__}")
+
+    def test_db_population_matches_files(self):
+        from recommendation.pipeline import RecommendationRequest, run_pipeline
+        f = {c["candidate_id"]: c for c in run_pipeline(RecommendationRequest(**self.REQ), source="files", llm_mode="offline", limit=20)["candidates"]}
+        d = {c["candidate_id"]: c for c in run_pipeline(RecommendationRequest(**self.REQ), source="db", llm_mode="offline", limit=20)["candidates"]}
+        common = set(f) & set(d)
+        self.assertTrue(common, "db·files 공통 후보 없음")
+
+        def pop_notes(c):
+            return sorted(n for n in c["context_notes"] if any(t in n for t in ("FC-03", "FC-04", "FC-05", "FC-06")))
+
+        for cid in common:
+            self.assertEqual(pop_notes(f[cid]), pop_notes(d[cid]), cid)
+            self.assertEqual(f[cid]["profile_ref"]["as_of_quarter"].get("resident"),
+                             d[cid]["profile_ref"]["as_of_quarter"].get("resident"), cid)
+            self.assertEqual(f[cid]["data_confidence"]["level"], d[cid]["data_confidence"]["level"], cid)
+        # db 모드에서도 인구 근거가 실제로 붙어야 한다(missing 처리 아님)
+        self.assertTrue(any(pop_notes(c) for c in d.values()), "db 모드 후보에 인구 context_notes 없음")
+        self.assertTrue(all("수요구성" in c["dimension_evidence"] for c in d.values()))
+
+
 if __name__ == "__main__":
     unittest.main()

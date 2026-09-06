@@ -171,17 +171,29 @@ def _load_crosswalk(root: Path) -> dict[str, list[tuple[str, float]]]:
     return out
 
 
-def load_population(root: Path,
-                    flow_dong: dict[str, dict[str, str]] | None = None,
-                    resident_quarter: str = RESIDENT_AS_OF,
-                    worker_quarter: str = WORKER_AS_OF,
-                    foreign_quarter: str = FOREIGN_LATEST_COMPLETE) -> PopulationData:
-    """flow_dong: 길단위인구 행정동 인덱스(dong_code → row). FC-06b 분모(유동인구 일평균)용.
-    None이면 FC-06b 근사비율은 계산하지 않는다."""
-    resident_trdar, resident_dong = _load_stepwise(root, _RESIDENT_DIR, _RESIDENT_FILES, resident_quarter, "상주인구")
-    worker_trdar, worker_dong = _load_stepwise(root, _WORKER_DIR, _WORKER_FILES, worker_quarter, "직장_인구")
-    foreign_dong_raw = _load_foreign(root, foreign_quarter)
-    crosswalk = _load_crosswalk(root)
+_SOURCE_PATHS = {
+    "resident": f"{_RESIDENT_DIR}/{_RESIDENT_FILES['상권']}",
+    "resident_dong": f"{_RESIDENT_DIR}/{_RESIDENT_FILES['행정동']}",
+    "worker": f"{_WORKER_DIR}/{_WORKER_FILES['상권']}",
+    "worker_dong": f"{_WORKER_DIR}/{_WORKER_FILES['행정동']}",
+    "foreign": f"{_FOREIGN_DIR}/외국인생활인구_행정동_분기.csv",
+    "population_crosswalk": _CROSSWALK,
+}
+
+
+def assemble(
+    *,
+    resident_trdar: dict[str, dict[str, str]],
+    resident_dong: dict[str, dict[str, str]],
+    worker_trdar: dict[str, dict[str, str]],
+    worker_dong: dict[str, dict[str, str]],
+    foreign_dong_raw: dict[str, dict[str, float | None]],
+    crosswalk: dict[str, list[tuple[str, float]]],
+    flow_dong: dict[str, dict[str, str]] | None,
+    as_of: dict[str, str],
+    source_paths: dict[str, str] | None = None,
+) -> PopulationData:
+    """이미 파싱된 행 dict에서 PopulationData를 조립한다. 파일 소스와 DB 소스 공통 코어."""
     flow_dong = flow_dong or {}
 
     # FC-06a/06b: 행정동에서 근사 비율을 **먼저** 계산한다(분자=생활인구 통신신호, 분모=상주/유동 타 방법론).
@@ -233,27 +245,45 @@ def load_population(root: Path,
         "foreign_long_dong": sorted(v for r in foreign_dong.values() if (v := r["장기_외국인_평균"]) is not None),
     }
 
-    rel = lambda p: str(Path(p))  # noqa: E731
     return PopulationData(
         resident_trdar=resident_trdar, resident_dong=resident_dong,
         worker_trdar=worker_trdar, worker_dong=worker_dong,
         foreign_dong=foreign_dong, foreign_trdar=foreign_trdar,
         seoul=seoul,
-        as_of={"resident": resident_quarter, "worker": worker_quarter, "foreign_resident": foreign_quarter},
-        source_paths={
-            "resident": f"{_RESIDENT_DIR}/{_RESIDENT_FILES['상권']}",
-            "resident_dong": f"{_RESIDENT_DIR}/{_RESIDENT_FILES['행정동']}",
-            "worker": f"{_WORKER_DIR}/{_WORKER_FILES['상권']}",
-            "worker_dong": f"{_WORKER_DIR}/{_WORKER_FILES['행정동']}",
-            "foreign": f"{_FOREIGN_DIR}/외국인생활인구_행정동_분기.csv",
-            "population_crosswalk": _CROSSWALK,
-        },
+        as_of=dict(as_of),
+        source_paths=source_paths or dict(_SOURCE_PATHS),
         coverage={
             "resident_trdar": len(resident_trdar), "resident_dong": len(resident_dong),
             "worker_trdar": len(worker_trdar), "worker_dong": len(worker_dong),
             "foreign_dong": len(foreign_dong), "foreign_trdar": len(foreign_trdar),
         },
     )
+
+
+def load_population(root: Path,
+                    flow_dong: dict[str, dict[str, str]] | None = None,
+                    resident_quarter: str = RESIDENT_AS_OF,
+                    worker_quarter: str = WORKER_AS_OF,
+                    foreign_quarter: str = FOREIGN_LATEST_COMPLETE) -> PopulationData:
+    """파일 소스: 원천 CSV에서 인구 스냅샷을 읽는다.
+
+    flow_dong: 길단위인구 행정동 인덱스(dong_code → row). FC-06b 분모(유동인구 일평균)용.
+    """
+    resident_trdar, resident_dong = _load_stepwise(root, _RESIDENT_DIR, _RESIDENT_FILES, resident_quarter, "상주인구")
+    worker_trdar, worker_dong = _load_stepwise(root, _WORKER_DIR, _WORKER_FILES, worker_quarter, "직장_인구")
+    foreign_dong_raw = _load_foreign(root, foreign_quarter)
+    crosswalk = _load_crosswalk(root)
+    return assemble(
+        resident_trdar=resident_trdar, resident_dong=resident_dong,
+        worker_trdar=worker_trdar, worker_dong=worker_dong,
+        foreign_dong_raw=foreign_dong_raw, crosswalk=crosswalk, flow_dong=flow_dong,
+        as_of={"resident": resident_quarter, "worker": worker_quarter, "foreign_resident": foreign_quarter},
+    )
+
+
+def load_crosswalk(root: Path) -> dict[str, list[tuple[str, float]]]:
+    """DB 소스도 상권↔행정동 면적가중 crosswalk는 파일에서 읽는다(작은 파생 산출물)."""
+    return _load_crosswalk(root)
 
 
 @dataclass
