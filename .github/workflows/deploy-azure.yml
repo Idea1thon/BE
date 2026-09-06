@@ -20,4 +20,4 @@ jobs:
             cd ${{ secrets.AZURE_DEPLOY_PATH }}
             git fetch origin dev
             git reset --hard origin/dev
-            docker compose -f docker-compose.prod.yml up -d --build --force-recreate recommendation-api
+            docker compose -f docker-compose.prod.yml up -d --build --force-recreate middle-backend recommendation-api
