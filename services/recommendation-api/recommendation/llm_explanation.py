@@ -144,14 +144,20 @@ def validate_card(candidate: dict[str, Any], card: Any) -> tuple[bool, list[str]
         errors.append("summary가 비어 있거나 문자열이 아님")
     for key in ("reasons", "counter_evidence", "context_notes", "missing_features"):
         values = card.get(key)
+        # 카드 배열의 원소는 어차피 아래에서 후보 배열의 원소와 일치해야 하므로,
+        # 상한은 후보 배열 자체 크기에 맞춘다 — 파이프라인이 만든 긴 context_notes
+        # (인구 FC-03~06·도시계획 FC-51/52 등, #28·#29)를 그대로 복사해도 통과.
+        allowed_claims = _candidate_claims(candidate, key)
+        max_items = max(12, len(allowed_claims))
+        max_len = max(500, max((len(claim) for claim in allowed_claims), default=0))
         if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
             errors.append(f"{key}가 문자열 배열이 아님")
-        elif len(values) > 12 or any(len(value) > 500 for value in values):
+        elif len(values) > max_items or any(len(value) > max_len for value in values):
             errors.append(f"{key}의 길이 제한 초과")
         else:
-            allowed_claims = set(_candidate_claims(candidate, key))
+            allowed_set = set(allowed_claims)
             for index, value in enumerate(values):
-                if value not in allowed_claims:
+                if value not in allowed_set:
                     errors.append(f"{key}[{index}]가 후보의 관측 근거와 일치하지 않음")
     errors.extend(_validate_inference_hypotheses(card.get("inference_hypotheses")))
     valid_refs = _candidate_reference_ids(candidate)

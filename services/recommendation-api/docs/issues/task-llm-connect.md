@@ -50,6 +50,15 @@ chat-completions 클라이언트다(stdlib 만 사용). 새 provider 모듈을 �
 먼저 호출하고, 파라미터 관련 400 이면 구형 형식(`max_tokens`+`temperature=0`)으로
 한 번 재시도한다 — 최신 모델·구형 OpenAI 호환 서버 양쪽에서 동작한다.
 
+또 추론 모델은 `max_completion_tokens` 안에서 추론 토큰을 먼저 소비하므로 한도가
+낮으면 content 없이 잘린다. `LLM_MAX_OUTPUT_TOKENS` 기본값을 6000 으로 올렸고
+(설명 카드 JSON ~2k + 추론 여유), `finish_reason=length` + 빈 content 는 "JSON 아님"
+대신 잘림 오류로 명확히 보고한다(→ 호출부 폴백).
+
+`validate_card` 의 배열 길이 상한은 후보 배열 자체 크기에 맞춘다(예전 고정 12·500).
+#28·#29 로 `context_notes` 가 12개를 넘게 돼(인구 FC-03~06·도시계획 FC-51/52),
+LLM 이 지시대로 verbatim 복사해도 12 상한에 걸려 항상 폴백되던 문제.
+
 - `.env`:
   - `LLM_API_URL=https://api.openai.com/v1` (프록시/게이트웨이면 그 URL)
   - `LLM_API_KEY=<키>` — 이 변수에 실제 키를 넣는 것으로만 활성화된다.
