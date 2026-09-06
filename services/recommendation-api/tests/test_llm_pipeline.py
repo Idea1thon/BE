@@ -8,7 +8,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
-from recommendation.llm_explanation import template_card, validate_card
+from recommendation.llm_explanation import explain_candidates, template_card, validate_card
 from recommendation.llm_input_planner import (
     _normalize_remote_conditions,
     _valid_preferences,
@@ -233,19 +233,21 @@ class LLMRuntimeConfigTests(unittest.TestCase):
 
     BASE = {"LLM_API_URL": "https://api.openai.com/v1", "LLM_MODEL": "gpt-5.6-luna"}
 
-    def test_openai_api_key_is_recognized_as_fallback(self):
-        env = {**self.BASE, "OPENAI_API_KEY": "sk-openai"}
+    def setUp(self):
+        self.addCleanup(reset_call_budget)  # thread-local 카운터가 다른 테스트로 새지 않게
+
+    def test_only_llm_api_key_activates_not_shell_openai_api_key(self):
+        # 셸에 흔히 떠 있는 OPENAI_API_KEY 로는 활성화되지 않는다(과금 방지).
+        env = {**self.BASE, "OPENAI_API_KEY": "sk-shell"}
         with patch.dict(environ, env, clear=False):
             environ.pop("LLM_API_KEY", None)
-            config = LLMConfig.from_env("auto")
-        self.assertEqual(config.api_key, "sk-openai")
-        self.assertTrue(config.available)
-
-    def test_llm_api_key_takes_precedence(self):
-        env = {**self.BASE, "LLM_API_KEY": "sk-primary", "OPENAI_API_KEY": "sk-fallback"}
-        with patch.dict(environ, env, clear=False):
-            config = LLMConfig.from_env("auto")
-        self.assertEqual(config.api_key, "sk-primary")
+            off = LLMConfig.from_env("auto")
+            self.assertIsNone(off.api_key)
+            self.assertFalse(off.available)
+            environ["LLM_API_KEY"] = "sk-explicit"
+            on = LLMConfig.from_env("auto")
+        self.assertEqual(on.api_key, "sk-explicit")
+        self.assertTrue(on.available)
 
     def test_call_budget_trips_after_limit_then_resets(self):
         with patch.dict(environ, {"LLM_MAX_CALLS_PER_RUN": "2"}, clear=False):
@@ -262,6 +264,45 @@ class LLMRuntimeConfigTests(unittest.TestCase):
             reset_call_budget()
             for _ in range(50):
                 _charge_call()
+
+    def test_required_mode_ignores_call_budget(self):
+        with patch.dict(environ, {"LLM_MAX_CALLS_PER_RUN": "1"}, clear=False):
+            reset_call_budget()
+            _charge_call(enforce=False)
+            _charge_call(enforce=False)  # required 경로는 캡 무시 → 예외 없음
+
+    def test_budget_exhaustion_mid_run_degrades_explain_candidates(self):
+        # generate_json 의 첫 줄이 _charge_call 이라, 예산이 소진되면 LLMRuntimeError 를
+        # 던진다. explain_candidates 는 그 예외를 후보별로 잡아 template 로 떨어뜨려야
+        # 하며(auto 모드) 요청 전체가 깨지면 안 된다.
+        cands = [{**ExplanationValidationTests.CANDIDATE, "candidate_id": f"APT-{i}"} for i in range(3)]
+        good_card = {
+            "candidate_id": None, "summary": "조건부 검토 후보입니다. 관측된 근거와 확인되지 않은 조건을 함께 검토해야 합니다.",
+            "reasons": [], "counter_evidence": [], "context_notes": [],
+            "missing_features": ["FC-10: 핵심 지표 결측"], "inference_hypotheses": [], "claim_type": "descriptive",
+        }
+
+        def _card(_prompt, payload):
+            _charge_call()  # 실제 generate_json 의 첫 줄
+            return {**good_card, "candidate_id": payload["candidate_evidence"]["candidate_id"]}
+
+        env = {**self.BASE, "LLM_API_KEY": "sk-explicit", "LLM_MAX_CALLS_PER_RUN": "1"}
+        with patch.dict(environ, env, clear=False), patch(
+            "recommendation.llm_explanation.OpenAICompatibleJsonClient.generate_json", side_effect=_card,
+        ):
+            reset_call_budget()
+            result = explain_candidates(cands, llm_mode="auto")  # 예외 없이 반환돼야
+        self.assertIn(result["explanation_mode"], {"mixed", "template"})
+        self.assertEqual(len(result["cards"]), 3)
+        self.assertTrue(result["degraded"])
+
+    def test_generate_json_charges_the_budget(self):
+        # 계약 고정: 실제 generate_json 첫 동작이 _charge_call 이다(HTTP 이전).
+        import inspect
+
+        from recommendation.llm_runtime import OpenAICompatibleJsonClient
+        src = inspect.getsource(OpenAICompatibleJsonClient.generate_json)
+        self.assertIn("_charge_call(", src)
 
 
 class ExplanationValidationTests(unittest.TestCase):
