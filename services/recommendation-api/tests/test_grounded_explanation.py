@@ -130,6 +130,34 @@ class GroundedExplanationTests(unittest.TestCase):
         self.assertEqual(pruned['citations'], {'reasons:0': ['reasons:0']})
         self.assertTrue(validate_card(cand, pruned, verified_claims=verified)[0])
 
+    def test_verified_rewrites_do_not_trip_the_bucket_count_or_length_cap(self):
+        # note가 많은 후보(서교동: 인구 FC-03~06 + 도시계획 FC-51/52)는 원본
+        # verbatim 15개에 검증 통과 재서술 몇 개만 붙어도 max(12, len) 상한을 넘었다.
+        notes = [f'배경 지표 {i} 관측치 (FC-0{i})' for i in range(15)]
+        cand = {
+            'candidate_id': 'seogyo', 'fit_tier': '조건부 검토',
+            'reasons': [], 'counter_evidence': [], 'missing_features': [],
+            'context_notes': notes, 'evidence': [],
+        }
+        card = template_card(cand)
+        card['context_notes'] = notes + [
+            '배경 지표 0 관측치는 서울 대비 낮은 편입니다.',
+            '배경 지표 1 관측치는 최신 스냅샷 기준입니다.',
+            '배경 지표 ' + '길게 ' * 250 + '끝.',   # 700자 초과 재서술
+        ]
+        card['citations'] = {
+            'context_notes:15': ['context_notes:0'],
+            'context_notes:16': ['context_notes:1'],
+            'context_notes:17': ['context_notes:2'],
+        }
+        verified = {'context_notes:15', 'context_notes:16', 'context_notes:17'}
+        sources = explanation_sources(cand, [])
+        ok, errs = validate_card(cand, card, verified_claims=verified, source_catalog=sources)
+        self.assertTrue(ok, errs)
+        # 검증 안 된 재서술까지 얹으면 다시 상한에 걸린다.
+        card['context_notes'].append('검증 안 된 추가 문장')
+        self.assertFalse(validate_card(cand, card, verified_claims=verified, source_catalog=sources)[0])
+
     @patch('recommendation.llm_explanation.LLMConfig.from_env')
     @patch('recommendation.llm_explanation.OpenAICompatibleJsonClient')
     def test_partial_verification_yields_llm_card_without_the_bad_claim(self, client_type, config):

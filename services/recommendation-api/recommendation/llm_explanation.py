@@ -355,9 +355,13 @@ def validate_card(candidate: dict[str, Any], card: Any, *, verified_claims: set[
         # 카드 배열의 원소는 어차피 아래에서 후보 배열의 원소와 일치해야 하므로,
         # 상한은 후보 배열 자체 크기에 맞춘다 — 파이프라인이 만든 긴 context_notes
         # (인구 FC-03~06·도시계획 FC-51/52 등, #28·#29)를 그대로 복사해도 통과.
+        # grounded 재서술(#41/#50)은 원본 verbatim에 더해지므로, 이 bucket에서
+        # 검증을 통과한 재서술 수만큼 상한을 넓힌다. 안 그러면 note가 많은 후보
+        # (서교동 등)는 재서술 몇 개만 붙어도 초과해 required 모드가 예외를 던진다.
         allowed_claims = _candidate_claims(candidate, key)
-        max_items = max(12, len(allowed_claims))
-        max_len = max(500, max((len(claim) for claim in allowed_claims), default=0))
+        verified_here = sum(1 for vc in verified_claims if vc.startswith(f"{key}:"))
+        max_items = max(12, len(allowed_claims)) + verified_here
+        max_len = max(500, max((len(claim) for claim in allowed_claims), default=0)) + (400 if verified_here else 0)
         if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
             errors.append(f"{key}가 문자열 배열이 아님")
         elif len(values) > max_items or any(len(value) > max_len for value in values):
