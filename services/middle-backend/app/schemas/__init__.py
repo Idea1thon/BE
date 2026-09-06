@@ -359,3 +359,59 @@ class NotificationReadResponse(BaseModel):
     notification_id: int
     is_read: bool
     read_at: datetime | None = None
+
+
+# ------------------------------------------------------------------ 입지 추천
+MAX_CONDITION_TEXT = 2_000  # 추천 서비스의 special_condition_text 상한과 같다
+
+
+class LocationRecommendationRequest(BaseModel):
+    """입지 추천 요청. API_SPEC 에 없는 신규 계약이다.
+
+    지역을 코드로 받는 이유: FE 는 `GET /regions` 로 코드를 이미 갖고 있고,
+    이름을 그대로 받으면 오타나 표기 차이("강남"/"강남구")를 우리가 검증할 수
+    없다. 추천 서비스가 요구하는 한글 이름으로의 변환은 서버에서 한다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    region_code: str = Field(min_length=1, max_length=20)
+    business_category_code: str | None = Field(default=None, max_length=20)
+    special_condition_text: str = Field(default="", max_length=MAX_CONDITION_TEXT)
+    limit: int | None = Field(default=None, ge=1, le=50)
+
+
+class LocationRecommendationAccepted(BaseModel):
+    """202. 실행이 길어져 결과를 나중에 받아야 할 때.
+
+    `run_ticket` 은 추천 서비스의 run_id 를 요청자에게 묶은 서명 토큰이다.
+    FE 는 값을 해석하지 말고 `retry_after` 초 뒤에 그대로 실어 보낸다.
+
+        GET /api/v1/location-recommendations/{run_ticket}
+    """
+
+    run_ticket: str
+    status: str = "RUNNING"
+    retry_after: int = 5
+
+
+class LocationRecommendationResponse(BaseModel):
+    """200. 추천 서비스의 응답을 변환 없이 싣는다.
+
+    candidates·explanations·summary 의 내부 구조는 추천 서비스가 정본이다.
+    여기서 다시 모델링하면 상대가 필드를 하나 추가할 때마다 우리가 조용히
+    떨어뜨리게 된다. 위험도 분석 JSONB 를 그대로 싣는 것과 같은 판단이다.
+
+    **타입은 상대의 `RecommendationApiResponse`(services/recommendation-api/
+    api/main.py)를 정본으로 삼는다.** candidates 는 list, explanations 는
+    `{cards, explanation_mode, degraded, llm}` 형태의 **dict** 다. 이 둘을 바꿔
+    적으면 정상 응답이 전부 500 으로 떨어진다 (PR #26 리뷰).
+    """
+
+    run_id: str
+    status: str = "COMPLETED"
+    request: dict
+    input_interpretation: dict = Field(default_factory=dict)
+    summary: dict = Field(default_factory=dict)
+    candidates: list = Field(default_factory=list)
+    explanations: dict = Field(default_factory=dict)

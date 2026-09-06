@@ -1,5 +1,7 @@
 """FastAPI 앱 엔트리포인트."""
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -9,11 +11,25 @@ from fastapi.openapi.utils import get_openapi
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.errors import register_error_handlers
+from app.services import recommendation_client
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
+    """추천 서비스 HTTP 커넥션을 앱 수명에 맞춘다.
+
+    폴링은 몇 초 간격으로 반복되는 호출이라 매번 클라이언트를 열고 닫으면
+    TCP 핸드셰이크 비용이 그대로 쌓인다. 하나를 재사용하고 종료 시 닫는다.
+    """
+    yield
+    await recommendation_client.close_client()
+
 
 app = FastAPI(
     title="중소 프랜차이즈 운영 지원 서비스 — Backend API",
     version="0.1.0",
     docs_url="/docs",
+    lifespan=lifespan,
 )
 
 # CORS — 허용 Origin은 환경변수(CORS_ALLOW_ORIGINS)로 관리한다. 와일드카드는 설정에서 차단된다.
