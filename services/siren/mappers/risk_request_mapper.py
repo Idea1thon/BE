@@ -94,12 +94,12 @@ def _blank_blocks() -> dict[str, Any]:
     return copy.deepcopy(_EMPTY_BLOCKS)
 
 
-def _source_tag(value: object) -> str:
+def _source_tag(value: object, *, synthetic: bool = False) -> str:
     raw = str(getattr(value, "value", value) or "MANUAL").upper()
     if raw == "POS":
-        return "pos"
+        return "synthetic_pos" if synthetic else "pos"
     if raw == "MANUAL":
-        return "self_reported"
+        return "synthetic_self_reported" if synthetic else "self_reported"
     raise ValueError(f"unsupported FMP input_source: {value!r}")
 
 
@@ -116,7 +116,13 @@ def _monthly_report(report: dict[str, Any]) -> dict[str, Any]:
         for key in path[:-1]:
             target = target[key]
         target[path[-1]] = float(amount)
-    source = _source_tag(report.get("input_source"))
+    # Synthetic fixtures can carry this marker without changing the FMP
+    # input_source enum. Preserve it so a report without reviews still
+    # discloses that its financial inputs are synthetic.
+    source = _source_tag(
+        report.get("input_source"),
+        synthetic=bool(report.get("synthetic", False)),
+    )
     month = report["month"]
     if isinstance(month, dt.date):
         month_text = month.strftime("%Y-%m")

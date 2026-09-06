@@ -23,6 +23,7 @@ class _Fmp:
                     "month": date(2026, 1, 1),
                     "input_source": "MANUAL",
                     "items": {"HALL_CARD": 1000},
+                    "synthetic": True,
                 }
             ],
             franchise_closure={
@@ -94,9 +95,36 @@ class OrchestratorContractTests(unittest.IsolatedAsyncioTestCase):
         request = captured[0]
         self.assertEqual(request.location.trade_area_code, None)
         self.assertEqual(request.branch_reports[0].sales.hall.credit, 1000)
+        self.assertEqual(request.branch_reports[0].sales_source, "synthetic_self_reported")
+        self.assertEqual(request.branch_reports[0].cost_source, "synthetic_self_reported")
         self.assertEqual(request.options.llm_mode, "explanation_only")
         self.assertFalse(request.options.send_notifications)
         self.assertEqual(request.franchise_closure.closures, 5)
+
+    async def test_synthetic_report_is_disclosed_without_reviews(self) -> None:
+        orchestrator = RiskSirenOrchestrator(
+            fmp_provider=_Fmp(),
+            ideaton_provider=_Ideaton(),
+            review_provider=_Reviews(),
+        )
+
+        result = await orchestrator.analyze_trigger(
+            SirenAnalyzeTrigger(
+                request_id="req-synthetic-no-reviews",
+                report_id="report-1",
+                franchise_id="10",
+                branch_id="20",
+                as_of=date(2026, 1, 31),
+            )
+        )
+
+        self.assertIsNone(result["review_signal"].get("source"))
+        self.assertTrue(result["data_provenance"]["contains_synthetic"])
+        by_signal = {
+            item["signal_id"]: item for item in result["data_provenance"]["by_signal"]
+        }
+        self.assertTrue(by_signal["SR-02.branch"]["synthetic"])
+        self.assertTrue(by_signal["SR-05"]["synthetic"])
 
 
 class FmpProviderConfigTests(unittest.TestCase):
