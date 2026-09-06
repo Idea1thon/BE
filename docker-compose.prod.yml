@@ -37,7 +37,15 @@ services:
       # 값은 설정 검증을 통과시키기 위한 것이다.
       CORS_ALLOW_ORIGINS: ${PUBLIC_ORIGIN:?http://<VM 공인 IP> 형태로 설정하세요}
       RECOMMENDATION_API_URL: http://recommendation-api:8000
+      SIREN_API_URL: http://siren:8000
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?추천 API 와 같은 값이어야 합니다}
+    restart: unless-stopped
+
+  # 폐업 위험 사이렌. 순수 계산 서비스이고 **인증이 없다**(services/siren/api.py 에
+  # 토큰 검사가 없음). 포트를 열지 않고 compose 내부 네트워크에만 둔다 — nginx 뒤로
+  # 노출되는 순간 누구나 호출할 수 있다. 중간 백엔드만 http://siren:8000 으로 부른다.
+  siren:
+    build: ./services/siren
     restart: unless-stopped
 
   recommendation-api:
