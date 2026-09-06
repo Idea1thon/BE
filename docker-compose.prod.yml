@@ -73,6 +73,7 @@ services:
       LLM_API_URL: ${LLM_API_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-20}
     volumes:
       # 준우형 원천 데이터. 없으면 서버는 뜨지만 실제 추천 요청이 실패한다.
       - ./data:/data:ro
