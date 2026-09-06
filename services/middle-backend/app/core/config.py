@@ -43,10 +43,23 @@ class Settings(BaseSettings):
     # 설정 누락이 "추천 결과가 비어 있다" 로 조용히 나타나면 원인을 못 찾는다.
     recommendation_api_url: str = "http://localhost:8001"
     internal_api_token: str = ""
-    # 추천 파이프라인은 최대 180초다. 그보다 조금 길게 잡아 우리 쪽이 먼저 끊지
-    # 않게 한다. 우리가 먼저 끊으면 상대는 계속 돌고 있는데 run_id 를 못 받아
-    # 폴링도 못 하는 상태가 된다.
-    recommendation_timeout_seconds: float = 190.0
+
+    # 추천 서비스의 파이프라인 실행 상한. **상대와 같은 환경변수 이름을 읽는다**
+    # (RECOMMENDATION_REQUEST_TIMEOUT_SECONDS). compose 가 두 서비스에 같은 값을
+    # 넣으므로 운영자가 한 곳만 바꾸면 양쪽이 함께 움직인다.
+    #
+    # 우리 HTTP 타임아웃을 이 값보다 짧게 두면 안 된다. 우리가 먼저 끊으면 상대는
+    # 계속 돌고 있는데 run_id 를 못 받아 폴링조차 못 하는 상태가 된다. 그래서
+    # 아래 여유를 더한 값을 쓴다.
+    recommendation_request_timeout_seconds: float = 180.0
+    recommendation_timeout_margin_seconds: float = 10.0
+
+    @property
+    def recommendation_client_timeout(self) -> float:
+        return (
+            self.recommendation_request_timeout_seconds
+            + self.recommendation_timeout_margin_seconds
+        )
 
     # CORS — FE(Vite dev server)가 브라우저에서 호출한다.
     # 쉼표로 구분된 문자열 또는 JSON 배열을 받는다. 와일드카드는 허용하지 않는다.

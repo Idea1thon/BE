@@ -18,6 +18,7 @@ import jwt
 from app.core.config import settings
 
 ACCESS_TOKEN_TYPE = "access"
+RUN_TICKET_TYPE = "run_ticket"
 
 
 # --------------------------------------------------------------------------
@@ -81,3 +82,45 @@ def generate_refresh_token() -> tuple[str, str, datetime]:
 
 def hash_refresh_token(raw: str) -> str:
     return "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+# --------------------------------------------------------------------------
+# 추천 실행 티켓
+# --------------------------------------------------------------------------
+def create_run_ticket(run_id: str, user_id: int) -> str:
+    """추천 실행을 발급한 사용자에게 묶는 서명 토큰.
+
+    폴링 대상이 우리 DB 에 없는 외부 리소스라 authorize_branch() 같은 소유권
+    검증을 걸 곳이 없다. run_id 를 그대로 돌려주면 값을 아는 사람은 누구나 남의
+    추천 결과를 조회할 수 있다.
+
+    매핑 테이블을 두는 대신 서명으로 해결한다. 저장소가 없으니 재기동·다중
+    워커에서도 동작하고, 마이그레이션도 필요 없다. 만료를 짧게 둬서 유출된
+    티켓의 수명도 제한한다.
+    """
+    now = datetime.now(UTC)
+    payload = {
+        "sub": str(user_id),
+        "run_id": run_id,
+        "type": RUN_TICKET_TYPE,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=30)).timestamp()),
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_run_ticket(ticket: str, user_id: int) -> str:
+    """티켓에서 run_id 를 꺼낸다. 서명·만료·소유자가 모두 맞아야 한다.
+
+    검증 실패 시 jwt 예외를 그대로 올린다. 호출자가 404 로 변환한다 —
+    남의 티켓인지 만료된 티켓인지 구분해 알려줄 이유가 없다.
+    """
+    payload = jwt.decode(ticket, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    if payload.get("type") != RUN_TICKET_TYPE:
+        raise jwt.InvalidTokenError("not a run ticket")
+    if payload.get("sub") != str(user_id):
+        raise jwt.InvalidTokenError("run ticket belongs to another user")
+    run_id = payload.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise jwt.InvalidTokenError("run ticket has no run_id")
+    return run_id

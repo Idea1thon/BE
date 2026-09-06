@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Response, status
+import jwt
+from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, SessionDep
+from app.core.security import create_run_ticket, decode_run_ticket
 from app.errors import (
     FORBIDDEN_403,
     NOT_FOUND_404,
@@ -107,7 +109,6 @@ async def create_location_recommendation(
     body: LocationRecommendationRequest,
     current_user: CurrentUser,
     session: SessionDep,
-    response: Response,
 ):
     """REQ 입지 추천. 로그인한 사용자면 본사·점주 모두 사용할 수 있다."""
     sido, sigungu, dong = await _resolve_region(session, body.region_code)
@@ -141,14 +142,13 @@ async def create_location_recommendation(
             request_id=request_id,
         )
     except RecommendationPending as pending:
-        return _accepted(pending)
+        return _accepted(pending, current_user.id)
 
-    response.status_code = status.HTTP_200_OK
     return _completed(result)
 
 
 @router.get(
-    "/{run_id}",
+    "/{run_ticket}",
     responses={
         200: {"model": LocationRecommendationResponse},
         202: {"model": LocationRecommendationAccepted},
@@ -157,18 +157,30 @@ async def create_location_recommendation(
         **SERVICE_UNAVAILABLE_503,
     },
 )
-async def get_location_recommendation(run_id: str, current_user: CurrentUser):
-    """폴링. 202 가 오는 동안 FE 는 retry_after 초 간격으로 다시 부른다."""
+async def get_location_recommendation(run_ticket: str, current_user: CurrentUser):
+    """폴링. 202 가 오는 동안 FE 는 retry_after 초 간격으로 다시 부른다.
+
+    경로에 오는 값은 추천 서비스의 run_id 가 아니라 우리가 발급한 서명 티켓이다.
+    폴링 대상이 우리 DB 에 없는 외부 리소스라 authorize_branch() 같은 소유권
+    검증을 걸 곳이 없어, 발급 시점에 요청자를 서명에 묶는다.
+    """
+    try:
+        run_id = decode_run_ticket(run_ticket, current_user.id)
+    except jwt.InvalidTokenError as exc:
+        # 남의 티켓인지 만료된 티켓인지 구분해 알려줄 이유가 없다.
+        raise not_found("추천 실행을 찾을 수 없습니다") from exc
+
     try:
         result = await recommendation_client.fetch_recommendation_run(run_id)
     except RecommendationPending as pending:
-        return _accepted(pending)
+        return _accepted(pending, current_user.id)
     return _completed(result)
 
 
-def _accepted(pending: RecommendationPending) -> JSONResponse:
+def _accepted(pending: RecommendationPending, user_id: int) -> JSONResponse:
     body = LocationRecommendationAccepted(
-        run_id=pending.run_id, retry_after=pending.retry_after
+        run_ticket=create_run_ticket(pending.run_id, user_id),
+        retry_after=pending.retry_after,
     )
     # Retry-After 를 헤더로도 준다. 폴링 간격을 FE 가 임의로 정하면
     # 동시 실행 슬롯을 우리 쪽 재시도로 채우게 된다.
@@ -186,5 +198,5 @@ def _completed(result: dict) -> LocationRecommendationResponse:
         input_interpretation=result.get("input_interpretation", {}),
         summary=result.get("summary", {}),
         candidates=result.get("candidates", []),
-        explanations=result.get("explanations", []),
+        explanations=result.get("explanations", {}),
     )

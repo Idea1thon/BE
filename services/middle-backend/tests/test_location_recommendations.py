@@ -22,6 +22,10 @@ GANGNAM = "11680"          # 시드의 강남구
 YEOKSAM = "1168010100"     # 시드의 역삼1동
 SEOUL = "11"               # 시도
 
+# 상대의 RecommendationApiResponse(services/recommendation-api/api/main.py)를
+# 정본으로 삼는다. candidates 는 list, **explanations 는 dict** 다.
+# 이 픽스처를 우리 가정대로 지어내면 계약 불일치를 테스트가 못 잡는다 —
+# PR #26 리뷰에서 실제로 그렇게 놓쳤다.
 COMPLETED_BODY = {
     "request_id": "r-1",
     "run_id": "run-abc",
@@ -30,7 +34,12 @@ COMPLETED_BODY = {
     "input_interpretation": {"resolved_industry_code": "CS100001"},
     "summary": {"applied_limit": 5},
     "candidates": [{"rank": 1, "name": "역삼역 일대"}],
-    "explanations": [{"rank": 1, "text": "유동인구와 임대료 대비 우수"}],
+    "explanations": {
+        "cards": [{"rank": 1, "text": "유동인구와 임대료 대비 우수"}],
+        "explanation_mode": "rule",
+        "degraded": False,
+        "llm": {},
+    },
 }
 
 
@@ -52,18 +61,16 @@ def _fake_service(monkeypatch, handler):
     """추천 서비스를 MockTransport 로 대체한다."""
     captured: dict = {}
 
-    def _make_client() -> httpx.AsyncClient:
-        def _handle(request: httpx.Request) -> httpx.Response:
-            captured["request"] = request
-            return handler(request)
+    def _handle(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return handler(request)
 
-        return httpx.AsyncClient(
-            base_url="http://recommendation-api",
-            headers={"X-Internal-Token": "test-token"},
-            transport=httpx.MockTransport(_handle),
-        )
-
-    monkeypatch.setattr(recommendation_client, "_client", _make_client)
+    fake = httpx.AsyncClient(
+        base_url="http://recommendation-api",
+        headers={"X-Internal-Token": "test-token"},
+        transport=httpx.MockTransport(_handle),
+    )
+    monkeypatch.setattr(recommendation_client, "get_client", lambda: fake)
     return captured
 
 
@@ -84,8 +91,9 @@ async def test_returns_result_when_service_completes(client, monkeypatch):
     body = res.json()
     assert body["run_id"] == "run-abc"
     assert body["candidates"][0]["name"] == "역삼역 일대"
-    # 추천 서비스의 응답을 변환 없이 싣는다.
+    # 추천 서비스의 응답을 변환 없이 싣는다. explanations 는 list 가 아니라 dict 다.
     assert body["explanations"] == COMPLETED_BODY["explanations"]
+    assert body["explanations"]["cards"][0]["rank"] == 1
 
     sent = captured["request"]
     assert sent.headers["X-Internal-Token"] == "test-token"
@@ -157,38 +165,73 @@ async def test_timeout_becomes_202_with_run_id(client, monkeypatch):
     )
 
     assert res.status_code == 202, res.text
-    assert res.json()["run_id"] == "run-late"
     assert res.json()["status"] == "RUNNING"
+    # run_id 를 그대로 주지 않는다. 값을 아는 사람이 남의 결과를 볼 수 있다.
+    assert res.json()["run_ticket"] != "run-late"
     # FE 가 폴링 간격을 임의로 정하면 우리 재시도가 상대의 슬롯을 채운다.
     assert res.headers["Retry-After"] == str(res.json()["retry_after"])
 
 
+async def _ticket_for(client, monkeypatch, creds=HQ) -> tuple[str, dict[str, str]]:
+    """202 를 한 번 받아 폴링용 티켓을 얻는다."""
+    _fake_service(
+        monkeypatch,
+        lambda req: httpx.Response(
+            504, json={"detail": {"message": "초과", "run_id": "run-late"}}
+        ),
+    )
+    headers = await _auth(client, creds)
+    res = await client.post(
+        "/api/v1/location-recommendations", headers=headers, json={"region_code": GANGNAM}
+    )
+    assert res.status_code == 202
+    return res.json()["run_ticket"], headers
+
+
 async def test_polling_returns_202_while_running(client, monkeypatch):
+    ticket, headers = await _ticket_for(client, monkeypatch)
     _fake_service(
         monkeypatch,
         lambda req: httpx.Response(202, json={"run_id": "run-late", "status": "running"}),
     )
-    headers = await _auth(client, HQ)
-    res = await client.get("/api/v1/location-recommendations/run-late", headers=headers)
+    res = await client.get(f"/api/v1/location-recommendations/{ticket}", headers=headers)
     assert res.status_code == 202
-    assert res.json()["run_id"] == "run-late"
 
 
 async def test_polling_returns_result_when_done(client, monkeypatch):
+    ticket, headers = await _ticket_for(client, monkeypatch)
     _fake_service(monkeypatch, lambda req: httpx.Response(200, json=COMPLETED_BODY))
-    headers = await _auth(client, HQ)
-    res = await client.get("/api/v1/location-recommendations/run-abc", headers=headers)
+    res = await client.get(f"/api/v1/location-recommendations/{ticket}", headers=headers)
     assert res.status_code == 200
     assert res.json()["candidates"][0]["rank"] == 1
 
 
+async def test_another_user_cannot_poll_with_someone_elses_ticket(client, monkeypatch):
+    """티켓은 발급받은 사용자에게 묶인다. 값을 알아도 남은 쓸 수 없다."""
+    ticket, _ = await _ticket_for(client, monkeypatch, creds=HQ)
+    _fake_service(monkeypatch, lambda req: httpx.Response(200, json=COMPLETED_BODY))
+    other = await _auth(client, OWNER1)
+
+    res = await client.get(f"/api/v1/location-recommendations/{ticket}", headers=other)
+    assert res.status_code == 404
+
+
+async def test_forged_ticket_is_404(client, monkeypatch):
+    _fake_service(monkeypatch, lambda req: httpx.Response(200, json=COMPLETED_BODY))
+    headers = await _auth(client, HQ)
+    res = await client.get(
+        "/api/v1/location-recommendations/not-a-signed-ticket", headers=headers
+    )
+    assert res.status_code == 404
+
+
 async def test_polling_unknown_run_is_404(client, monkeypatch):
+    ticket, headers = await _ticket_for(client, monkeypatch)
     _fake_service(
         monkeypatch,
         lambda req: httpx.Response(404, json={"detail": {"message": "없음"}}),
     )
-    headers = await _auth(client, HQ)
-    res = await client.get("/api/v1/location-recommendations/run-none", headers=headers)
+    res = await client.get(f"/api/v1/location-recommendations/{ticket}", headers=headers)
     assert res.status_code == 404
 
 

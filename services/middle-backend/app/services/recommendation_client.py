@@ -81,16 +81,32 @@ def _retry_after(response: httpx.Response, default: int) -> int:
         return default
 
 
-def _client() -> httpx.AsyncClient:
+# 커넥션을 재사용한다. 폴링은 몇 초 간격으로 반복되는 호출이라 매번 새 클라이언트를
+# 열면 TCP 핸드셰이크 비용이 그대로 쌓인다. 수명은 앱 lifespan 이 관리한다.
+_shared_client: httpx.AsyncClient | None = None
+
+
+def get_client() -> httpx.AsyncClient:
+    global _shared_client
     if not settings.internal_api_token.strip():
         # 상대도 토큰 미설정이면 503 으로 답한다. 우리도 같은 자리에서 막아
         # "추천 결과가 비어 있다" 로 조용히 나타나지 않게 한다.
         raise _internal_error("추천 서비스 호출 설정이 완료되지 않았습니다")
-    return httpx.AsyncClient(
-        base_url=settings.recommendation_api_url.rstrip("/"),
-        headers={"X-Internal-Token": settings.internal_api_token},
-        timeout=settings.recommendation_timeout_seconds,
-    )
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            base_url=settings.recommendation_api_url.rstrip("/"),
+            headers={"X-Internal-Token": settings.internal_api_token},
+            timeout=settings.recommendation_client_timeout,
+        )
+    return _shared_client
+
+
+async def close_client() -> None:
+    """앱 종료 시 커넥션을 정리한다."""
+    global _shared_client
+    if _shared_client is not None and not _shared_client.is_closed:
+        await _shared_client.aclose()
+    _shared_client = None
 
 
 def _raise_for_common_errors(response: httpx.Response) -> None:
@@ -135,8 +151,7 @@ async def request_recommendation(
         payload["limit"] = limit
 
     try:
-        async with _client() as client:
-            response = await client.post(_CREATE_PATH, json=payload)
+        response = await get_client().post(_CREATE_PATH, json=payload)
     except httpx.TimeoutException as exc:
         # 우리 타임아웃이 상대보다 길므로 여기 도달하면 상대가 응답 자체를
         # 못 준 것이다. run_id 를 모르니 폴링도 불가능하다.
@@ -165,8 +180,7 @@ async def request_recommendation(
 async def fetch_recommendation_run(run_id: str) -> dict[str, Any]:
     """폴링. 완료면 결과, 진행 중이면 RecommendationPending."""
     try:
-        async with _client() as client:
-            response = await client.get(_RUN_PATH.format(run_id=run_id))
+        response = await get_client().get(_RUN_PATH.format(run_id=run_id))
     except httpx.HTTPError as exc:
         logger.warning("추천 실행 조회 실패 run_id=%s error=%s", run_id, exc)
         raise _service_unavailable("추천 서비스에 연결할 수 없습니다") from exc
