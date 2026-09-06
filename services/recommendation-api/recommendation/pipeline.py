@@ -45,6 +45,7 @@ from .llm_runtime import LLMRuntimeError, reset_call_budget
 from .paths import SERVICE_ROOT, find_project_root
 from .rag_tools import execute_retrieval_requests
 from .query_context import build_query_context
+from .question_contract import build_question_contract, retrieval_requests_for_contract
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Point, shape
 from shapely.ops import unary_union
@@ -2097,7 +2098,7 @@ class FileSource:
     def urban_plan(self):
         return urban_plan.load_from_files(ROOT)
 
-    def retrieve_requests(self, requests, selected_region, industry_code, quarter):
+    def retrieve_requests(self, requests, selected_region, industry_code, quarter, *, target_areas=None):
         return {
             "mode": "files",
             "requested_count": len(requests),
@@ -2500,14 +2501,15 @@ class DbSource:
         # 미적재 시 None → 파일 소스 폴백/ missing 처리 (#29).
         return urban_plan.load_from_db(self._query, ROOT)
 
-    def retrieve_requests(self, requests, selected_region, industry_code, quarter):
+    def retrieve_requests(self, requests, selected_region, industry_code, quarter, *, target_areas=None):
         # RAG 검색 SQL 은 지역·차원·업종별로 갈라져 종류가 매우 많고(수백 지역 ×
-        # 4차원 × 업종) 각기 LIMIT 20 로 저렴하다. 공용 캐시에 태우면 값비싼
+        # 최대 7차원 × 업종) 최종 후보 상권 최대50개로 제한한다. 공용 캐시에 태우면 값비싼
         # Seoul-wide 블롭을 FIFO 로 밀어내므로 캐시를 우회한다.
         try:
             return execute_retrieval_requests(
                 lambda sql: self._query(sql, use_cache=False),
                 requests, selected_region, industry_code, quarter,
+                target_areas=target_areas,
             )
         except (ValueError, self._db.ServingDbError) as exc:
             raise PipelineDependencyError("RAG 읽기 전용 검색 도구를 실행하지 못했습니다.") from exc
@@ -2629,19 +2631,19 @@ def run_pipeline(
         raise PipelineInputError(f"분기 코드는 YYYYQ 형식(마지막 자리는 1~4)이어야 합니다: {request.quarter}")
     conditions = input_interpretation["conditions"]
     preferences = input_interpretation.get("preferences", {})
+    query_context = build_query_context(
+        request.special_condition_text, selected_region, request.industry_code,
+        conditions, preferences,
+    )
+    question_contract = build_question_contract(query_context)
+    query_context["question_contract"] = question_contract
+    input_interpretation["question_contract"] = question_contract
     src = make_source(source)
     data_source_manifest = src.describe()
     data_source_manifest["seed_mode"] = seed_mode
     trdar_layer, hinterland_layer, dong_layer, sigungu_by_prefix = src.layers()
     selected_dongs, target_poly, target_buffer = resolve_region(request, dong_layer, sigungu_by_prefix)
     target_sigungu = request.sigungu
-    retrieval_context = src.retrieve_requests(
-        input_interpretation.get("retrieval_requests", []),
-        selected_region,
-        request.industry_code,
-        request.quarter,
-    )
-    input_interpretation["retrieval"] = retrieval_context
 
     # 현재 분기 정규화 feature table용 인덱스. 중복 키는 index_rows에서 즉시 중단한다.
     store_trdar, store_path = src.scope_index("data/점포/2026년", "점포-상권", request.quarter, "상권_코드", request.industry_code)
@@ -2736,6 +2738,23 @@ def run_pipeline(
     candidates = _order_by_preferences(candidates, preferences)
     if limit is not None:
         candidates = candidates[:limit]
+    target_areas = []
+    seen_target_codes = set()
+    for candidate in candidates:
+        host = (candidate.get("location") or {}).get("host_commercial_area") or {}
+        if host.get("code") and str(host["code"]) not in seen_target_codes:
+            seen_target_codes.add(str(host["code"]))
+            target_areas.append({
+                "spatial_unit_type": "commercial_area",
+                "spatial_unit_code": str(host["code"]),
+                "spatial_unit_name": host.get("name") or "",
+            })
+    retrieval_context = src.retrieve_requests(
+        retrieval_requests_for_contract(question_contract, input_interpretation.get("retrieval_requests", [])),
+        selected_region, request.industry_code, request.quarter,
+        target_areas=target_areas,
+    )
+    input_interpretation["retrieval"] = retrieval_context
     try:
         errors = validate_candidates(candidates)
     except Exception as exc:
@@ -2764,10 +2783,7 @@ def run_pipeline(
         try:
             explanations = explain_candidates(
                 candidates, llm_mode=llm_mode, retrieval_context=retrieval_context,
-                query_context=build_query_context(
-                    request.special_condition_text, selected_region, request.industry_code,
-                    conditions, preferences,
-                ),
+                query_context=query_context,
             )
         except LLMRuntimeError as exc:
             raise PipelineDependencyError("추천 설명 LLM을 사용할 수 없습니다.") from exc

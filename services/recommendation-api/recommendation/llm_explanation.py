@@ -10,6 +10,10 @@ from .rag_tools import build_retrieval_evidence
 from .evidence_reranker import select_sources, order_card_claims
 from .verification_diagnostics import build_verification_diagnostics
 from .grounding_periods import normalize_claim_periods
+from .question_contract import build_question_contract
+from .question_explanation import finish_question_card, matches_candidate, NO_QUESTION_EXPLANATION
+from .candidate_comparison import build_candidate_comparison
+from .comparison_explanation import add_comparison_context
 from .llm_runtime import (
     LLMConfig,
     LLMRuntimeError,
@@ -447,6 +451,22 @@ def _restore_required_context(candidate: dict[str, Any], card: dict[str, Any]) -
     return restored
 
 
+def _finish_question_explanation(card, candidate, selected, retrieval, contract, comparison, sources):
+    final, diagnostic = finish_question_card(card, candidate, selected, retrieval, contract)
+    # Remove the provisional missing-explanation notice before comparisons
+    # append claims, so their final diagnostic positions never need remapping.
+    provisional_notice = NO_QUESTION_EXPLANATION in final.get('missing_features', [])
+    if provisional_notice:
+        final['missing_features'] = [text for text in final['missing_features'] if text != NO_QUESTION_EXPLANATION]
+    final, comparison_diagnostic = add_comparison_context(final, candidate, comparison, sources)
+    diagnostic['comparison'] = comparison_diagnostic
+    if contract.get('topic_ids') or contract.get('excluded_topics'):
+        diagnostic['optional_answer_available'] = bool(final['reasons'] or final['context_notes'])
+        if provisional_notice and not diagnostic['optional_answer_available']:
+            final['missing_features'].append(NO_QUESTION_EXPLANATION)
+    return final, diagnostic
+
+
 def explain_candidates(
     candidates: list[dict[str, Any]],
     llm_mode: str = "auto",
@@ -454,12 +474,18 @@ def explain_candidates(
     query_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     retrieval_evidence = build_retrieval_evidence(retrieval_context or {})
+    has_query_context = bool(query_context)
+    query_context = dict(query_context or {})
+    contract = query_context.get('question_contract') or build_question_contract(query_context)
+    query_context['question_contract'] = contract
+    comparison = build_candidate_comparison(candidates, contract, retrieval_evidence)
     config = LLMConfig.from_env(llm_mode)
     if llm_mode == "required" and not config.available:
         raise LLMRuntimeError("llm-mode=required지만 LLM_API_URL/LLM_API_KEY/LLM_MODEL 설정이 없습니다.")
     source_catalogs: dict[str, Any] = {}
     relevance: dict[str, Any] = {}
     verification: dict[str, Any] = {}
+    question_grounding: dict[str, Any] = {}
     cards: list[dict[str, Any]] = []
     errors: list[str] = []
     llm_used = 0
@@ -492,7 +518,15 @@ claim_type은 descriptive 또는 associational만 허용한다."""
     for candidate in candidates:
         sources = explanation_sources(candidate, retrieval_evidence)
         source_catalogs[str(candidate.get("candidate_id"))] = sources
-        selected, ranking = select_sources(query_context or {}, sources, client)
+        # Retain the full catalog for audit, but another candidate's SQL region
+        # must not enter this candidate's prompt or verifier.
+        eligible = sources
+        if contract.get('topic_ids'):
+            scoped_ids = {item['evidence_id'] for item in retrieval_evidence if matches_candidate(item, candidate)}
+            eligible = {ref: source for ref, source in sources.items()
+                        if not ref.startswith('retrieval-') or ref in scoped_ids}
+        selected, ranking = select_sources(query_context, eligible, client)
+        ranking['catalog_source_count'] = len(sources)
         relevance[str(candidate.get("candidate_id"))] = ranking
         card = None
         draft = None
@@ -507,7 +541,7 @@ claim_type은 descriptive 또는 associational만 허용한다."""
                     "candidate_evidence": ({"candidate_id": candidate.get("candidate_id"),
                                             "fit_tier": candidate.get("fit_tier"),
                                             "hypothesis_reference_ids": sorted(_candidate_reference_ids(candidate))}
-                                           if query_context else candidate),
+                                           if has_query_context else candidate),
                     "query_context": query_context or {},
                     "explanation_sources": selected,
                     "output_contract": {
@@ -542,6 +576,9 @@ claim_type은 descriptive 또는 associational만 허용한다."""
                 if valid:
                     card["explanation_mode"] = "mixed" if restored else "llm"
                     final = order_card_claims(card, selected)
+                    final, question_diagnostic = _finish_question_explanation(
+                        final, candidate, selected, retrieval_evidence, contract, comparison, sources)
+                    question_grounding[str(candidate.get('candidate_id'))] = question_diagnostic
                     cards.append(final)
                     verification[str(candidate.get('candidate_id'))] = build_verification_diagnostics(
                         template_card(candidate), draft, final, decisions,
@@ -567,6 +604,9 @@ claim_type은 descriptive 또는 associational만 허용한다."""
                     fallback_reason = 'verification_error'
                 errors.append(f"{candidate.get('candidate_id')}: {exc}")
         final = order_card_claims(template_card(candidate), selected)
+        final, question_diagnostic = _finish_question_explanation(
+            final, candidate, selected, retrieval_evidence, contract, comparison, sources)
+        question_grounding[str(candidate.get('candidate_id'))] = question_diagnostic
         cards.append(final)
         verification[str(candidate.get('candidate_id'))] = build_verification_diagnostics(
             template_card(candidate), draft, final, decisions,
@@ -587,6 +627,8 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         "sources_by_candidate": source_catalogs,
         "relevance_by_candidate": relevance,
         "verification_by_candidate": verification,
+        "question_grounding_by_candidate": question_grounding,
+        "question_comparison": comparison,
         "query_context": query_context or {},
         "explanation_mode": mode,
         "degraded": mode != "llm",
