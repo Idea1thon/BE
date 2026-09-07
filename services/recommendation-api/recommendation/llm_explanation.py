@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from decimal import Decimal
 from typing import Any
 
@@ -515,6 +517,162 @@ def _finish_question_explanation(card, candidate, selected, retrieval, contract,
     return final, diagnostic
 
 
+def _explain_one_candidate(
+    candidate: dict[str, Any], *, retrieval_evidence: list[dict[str, Any]],
+    query_context: dict[str, Any], contract: dict[str, Any], comparison: dict[str, Any],
+    client: OpenAICompatibleJsonClient | None, system_prompt: str,
+    has_query_context: bool, llm_mode: str,
+) -> dict[str, Any]:
+    """Generate, verify, and finalize one card in isolation.
+
+    The caller aggregates these immutable-by-convention results in input
+    order. Keeping all mutable diagnostics local makes bounded parallel
+    execution safe without changing the response ordering contract.
+    """
+    candidate_id = str(candidate.get('candidate_id'))
+    sources = explanation_sources(candidate, retrieval_evidence)
+    # Retain the full catalog for audit, but another candidate's SQL region
+    # must not enter this candidate's prompt or verifier.
+    scoped_ids = {item['evidence_id'] for item in retrieval_evidence if matches_candidate(item, candidate)}
+    eligible = {ref: source for ref, source in sources.items()
+                if not ref.startswith('retrieval-') or ref in scoped_ids}
+    selected, ranking = select_sources(query_context, eligible, client)
+    ranking['catalog_source_count'] = len(sources)
+    card = None
+    draft = None
+    decisions: dict[str, str] = {}
+    restored: list[str] = []
+    errors: list[str] = []
+    generation_status = 'not_attempted'
+    fallback_reason = 'no_client' if client is None else None
+    stage = 'generation'
+    llm_used = 0
+    if client:
+        try:
+            card = client.generate_json(system_prompt, {
+                "candidate_evidence": ({"candidate_id": candidate.get("candidate_id"),
+                                        "fit_tier": candidate.get("fit_tier"),
+                                        "hypothesis_reference_ids": sorted(_candidate_reference_ids(candidate))}
+                                       if has_query_context else candidate),
+                "query_context": query_context or {},
+                "explanation_sources": selected,
+                "output_contract": {
+                    "candidate_id": candidate.get('candidate_id'),
+                    "summary": "string",
+                    **{bucket: "array<string>" for bucket in _OBSERVED_BUCKETS},
+                    "citations": "object<claim_position, array<source_id>>",
+                    "inference_hypotheses": "array<object>; empty when no unverified hypothesis",
+                    "claim_type": "descriptive|associational",
+                },
+            })
+            draft = card
+            generation_status = 'generated' if isinstance(card, dict) else 'invalid_card'
+            stage = 'draft_validation'
+            structure_errors = _draft_structure_errors(candidate, card)
+            if structure_errors:
+                generation_status = 'invalid_card'
+                fallback_reason = 'draft_schema_invalid'
+                raise LLMRuntimeError('LLM 설명 형식 오류: ' + '; '.join(structure_errors))
+            if isinstance(card, dict):
+                stage = 'verification'
+                verified = verify_grounded_claims(candidate, card, selected, client, decisions=decisions)
+                card, verified = prune_unverified_claims(candidate, card, verified)
+            else:
+                verified = set()
+            # One verified section is still useful. Keep it and fall back
+            # only when the model produced no surviving content at all.
+            # Verbatim/template claims that survived pruning still make
+            # the generated card useful: unsupported claims must be
+            # removed individually rather than forcing a whole-card
+            # replacement and hiding their diagnostics.
+            has_generated_section = (
+                isinstance(card.get('summary'), str)
+                and card.get('summary') != template_card(candidate)['summary']
+            ) or any(
+                any(value not in _candidate_claims(candidate, bucket)
+                    for value in card.get(bucket, []) if isinstance(value, str))
+                for bucket in _OBSERVED_BUCKETS
+            )
+            preserved_server_sections = any(
+                card.get(bucket) for bucket in ('counter_evidence', 'missing_features')
+            )
+            preserved_card_content = any(card.get(bucket) for bucket in _OBSERVED_BUCKETS)
+            if not has_generated_section and not preserved_server_sections and not preserved_card_content:
+                fallback_reason = 'empty_explanation'
+                raise LLMRuntimeError('검증 후 설명 목록이 모두 비어 있어 원천 근거 템플릿으로 복귀합니다.')
+            restored = _restore_required_context(candidate, card)
+            stage = 'card_validation'
+            valid, validation_errors = validate_card(candidate, card, verified_claims=verified, source_catalog=selected)
+            if valid:
+                final = order_card_claims(card, selected)
+                final, question_diagnostic = _finish_question_explanation(
+                    final, candidate, selected, retrieval_evidence, contract, comparison, sources)
+                generated_sections, failed_sections, grounding_status = _section_diagnostics(
+                    candidate, draft, final, decisions, fallback_reason=None)
+                if generated_sections:
+                    generation_status = (
+                        'complete' if set(generated_sections) == set(_EXPLANATION_SECTIONS)
+                        else 'partial'
+                    )
+                else:
+                    generation_status = 'fallback'
+                final["explanation_mode"] = "mixed" if restored else "llm"
+                return {
+                    "candidate_id": candidate_id,
+                    "sources": sources,
+                    "ranking": ranking,
+                    "card": final,
+                    "question_grounding": question_diagnostic,
+                    "verification": build_verification_diagnostics(
+                        template_card(candidate), draft, final, decisions,
+                        generation_status=generation_status, fallback_reason=None,
+                        restored_source_ids=restored,
+                        generated_sections=generated_sections,
+                        failed_sections=failed_sections,
+                        grounding_status=grounding_status,
+                    ),
+                    "errors": errors,
+                    "llm_used": 1,
+                }
+            fallback_reason = 'card_validation_failed'
+            errors.extend(f"{candidate.get('candidate_id')}: {error}" for error in validation_errors)
+            if llm_mode == "required":
+                raise LLMRuntimeError(
+                    f"LLM 설명 카드 검증 실패({candidate.get('candidate_id')}): "
+                    + "; ".join(validation_errors)
+                )
+        except LLMRuntimeError as exc:
+            if llm_mode == "required":
+                raise
+            if stage == 'generation':
+                generation_status = 'runtime_error'
+                fallback_reason = 'generation_error'
+            elif stage == 'verification' and fallback_reason is None:
+                fallback_reason = 'verification_error'
+            errors.append(f"{candidate.get('candidate_id')}: {exc}")
+    final = order_card_claims(template_card(candidate), selected)
+    final, question_diagnostic = _finish_question_explanation(
+        final, candidate, selected, retrieval_evidence, contract, comparison, sources)
+    generated_sections, failed_sections, grounding_status = _section_diagnostics(
+        candidate, draft, final, decisions, fallback_reason=fallback_reason)
+    return {
+        "candidate_id": candidate_id,
+        "sources": sources,
+        "ranking": ranking,
+        "card": final,
+        "question_grounding": question_diagnostic,
+        "verification": build_verification_diagnostics(
+            template_card(candidate), draft, final, decisions,
+            generation_status=generation_status, fallback_reason=fallback_reason,
+            generated_sections=generated_sections,
+            failed_sections=failed_sections,
+            grounding_status=grounding_status,
+        ),
+        "errors": errors,
+        "llm_used": llm_used,
+    }
+
+
 def explain_candidates(
     candidates: list[dict[str, Any]],
     llm_mode: str = "auto",
@@ -564,136 +722,39 @@ summary는 문자열이다. reasons, counter_evidence, context_notes, missing_fe
 인용은 최상위 citations 객체에만 넣고 각 값은 출처 ID 문자열 배열로 반환하라. missing_features의 재서술에도 출처 인용이 필요하다.
 서버의 반대근거와 미확인 항목을 빠뜨리지 말라. output_contract는 반환 형식이며 후보 사실을 추가하는 근거가 아니다.
 claim_type은 descriptive 또는 associational만 허용한다."""
-    for candidate in candidates:
-        sources = explanation_sources(candidate, retrieval_evidence)
-        source_catalogs[str(candidate.get("candidate_id"))] = sources
-        # Retain the full catalog for audit, but another candidate's SQL region
-        # must not enter this candidate's prompt or verifier.
-        scoped_ids = {item['evidence_id'] for item in retrieval_evidence if matches_candidate(item, candidate)}
-        eligible = {ref: source for ref, source in sources.items()
-                    if not ref.startswith('retrieval-') or ref in scoped_ids}
-        selected, ranking = select_sources(query_context, eligible, client)
-        ranking['catalog_source_count'] = len(sources)
-        relevance[str(candidate.get("candidate_id"))] = ranking
-        card = None
-        draft = None
-        decisions: dict[str, str] = {}
-        restored: list[str] = []
-        generation_status = 'not_attempted'
-        fallback_reason = 'no_client' if client is None else None
-        stage = 'generation'
-        if client:
-            try:
-                card = client.generate_json(system_prompt, {
-                    "candidate_evidence": ({"candidate_id": candidate.get("candidate_id"),
-                                            "fit_tier": candidate.get("fit_tier"),
-                                            "hypothesis_reference_ids": sorted(_candidate_reference_ids(candidate))}
-                                           if has_query_context else candidate),
-                    "query_context": query_context or {},
-                    "explanation_sources": selected,
-                    "output_contract": {
-                        "candidate_id": candidate.get('candidate_id'),
-                        "summary": "string",
-                        **{bucket: "array<string>" for bucket in _OBSERVED_BUCKETS},
-                        "citations": "object<claim_position, array<source_id>>",
-                        "inference_hypotheses": "array<object>; empty when no unverified hypothesis",
-                        "claim_type": "descriptive|associational",
-                    },
-                })
-                draft = card
-                generation_status = 'generated' if isinstance(card, dict) else 'invalid_card'
-                stage = 'draft_validation'
-                structure_errors = _draft_structure_errors(candidate, card)
-                if structure_errors:
-                    generation_status = 'invalid_card'
-                    fallback_reason = 'draft_schema_invalid'
-                    raise LLMRuntimeError('LLM 설명 형식 오류: ' + '; '.join(structure_errors))
-                if isinstance(card, dict):
-                    stage = 'verification'
-                    verified = verify_grounded_claims(candidate, card, selected, client, decisions=decisions)
-                    card, verified = prune_unverified_claims(candidate, card, verified)
-                else:
-                    verified = set()
-                # One verified section is still useful. Keep it and fall back
-                # only when the model produced no surviving content at all.
-                # Verbatim/template claims that survived pruning still make
-                # the generated card useful: unsupported claims must be
-                # removed individually rather than forcing a whole-card
-                # replacement and hiding their diagnostics.
-                has_generated_section = (
-                    isinstance(card.get('summary'), str)
-                    and card.get('summary') != template_card(candidate)['summary']
-                ) or any(
-                    any(value not in _candidate_claims(candidate, bucket)
-                        for value in card.get(bucket, []) if isinstance(value, str))
-                    for bucket in _OBSERVED_BUCKETS
-                )
-                preserved_server_sections = any(
-                    card.get(bucket) for bucket in ('counter_evidence', 'missing_features')
-                )
-                preserved_card_content = any(card.get(bucket) for bucket in _OBSERVED_BUCKETS)
-                if not has_generated_section and not preserved_server_sections and not preserved_card_content:
-                    fallback_reason = 'empty_explanation'
-                    raise LLMRuntimeError('검증 후 설명 목록이 모두 비어 있어 원천 근거 템플릿으로 복귀합니다.')
-                restored = _restore_required_context(candidate, card)
-                stage = 'card_validation'
-                valid, validation_errors = validate_card(candidate, card, verified_claims=verified, source_catalog=selected)
-                if valid:
-                    card["explanation_mode"] = "mixed" if restored else "llm"
-                    final = order_card_claims(card, selected)
-                    final, question_diagnostic = _finish_question_explanation(
-                        final, candidate, selected, retrieval_evidence, contract, comparison, sources)
-                    question_grounding[str(candidate.get('candidate_id'))] = question_diagnostic
-                    generated_sections, failed_sections, grounding_status = _section_diagnostics(
-                        candidate, draft, final, decisions, fallback_reason=None)
-                    if generated_sections:
-                        generation_status = (
-                            'complete' if set(generated_sections) == set(_EXPLANATION_SECTIONS)
-                            else 'partial'
-                        )
-                    else:
-                        generation_status = 'fallback'
-                    cards.append(final)
-                    verification[str(candidate.get('candidate_id'))] = build_verification_diagnostics(
-                        template_card(candidate), draft, final, decisions,
-                        generation_status=generation_status, fallback_reason=None,
-                        restored_source_ids=restored,
-                        generated_sections=generated_sections,
-                        failed_sections=failed_sections,
-                        grounding_status=grounding_status,
-                    )
-                    llm_used += 1
-                    continue
-                fallback_reason = 'card_validation_failed'
-                errors.extend(f"{candidate.get('candidate_id')}: {error}" for error in validation_errors)
-                if llm_mode == "required":
-                    raise LLMRuntimeError(
-                        f"LLM 설명 카드 검증 실패({candidate.get('candidate_id')}): "
-                        + "; ".join(validation_errors)
-                    )
-            except LLMRuntimeError as exc:
-                if llm_mode == "required":
-                    raise
-                if stage == 'generation':
-                    generation_status = 'runtime_error'
-                    fallback_reason = 'generation_error'
-                elif stage == 'verification' and fallback_reason is None:
-                    fallback_reason = 'verification_error'
-                errors.append(f"{candidate.get('candidate_id')}: {exc}")
-        final = order_card_claims(template_card(candidate), selected)
-        final, question_diagnostic = _finish_question_explanation(
-            final, candidate, selected, retrieval_evidence, contract, comparison, sources)
-        question_grounding[str(candidate.get('candidate_id'))] = question_diagnostic
-        generated_sections, failed_sections, grounding_status = _section_diagnostics(
-            candidate, draft, final, decisions, fallback_reason=fallback_reason)
-        cards.append(final)
-        verification[str(candidate.get('candidate_id'))] = build_verification_diagnostics(
-            template_card(candidate), draft, final, decisions,
-            generation_status=generation_status, fallback_reason=fallback_reason,
-            generated_sections=generated_sections,
-            failed_sections=failed_sections,
-            grounding_status=grounding_status,
+    def run_one(candidate: dict[str, Any]) -> dict[str, Any]:
+        return _explain_one_candidate(
+            candidate,
+            retrieval_evidence=retrieval_evidence,
+            query_context=query_context,
+            contract=contract,
+            comparison=comparison,
+            client=client,
+            system_prompt=system_prompt,
+            has_query_context=has_query_context,
+            llm_mode=llm_mode,
         )
+
+    if client and len(candidates) > 1 and config.max_concurrency > 1:
+        # copy_context gives each worker its own Context object while the
+        # mutable budget state inside it remains shared and locked. Results
+        # are collected in submission order so ranking and API output stay
+        # deterministic even when requests finish out of order.
+        with ThreadPoolExecutor(max_workers=min(config.max_concurrency, len(candidates))) as executor:
+            futures = [executor.submit(copy_context().run, run_one, candidate) for candidate in candidates]
+            results = [future.result() for future in futures]
+    else:
+        results = [run_one(candidate) for candidate in candidates]
+
+    for result in results:
+        candidate_id = result['candidate_id']
+        source_catalogs[candidate_id] = result['sources']
+        relevance[candidate_id] = result['ranking']
+        question_grounding[candidate_id] = result['question_grounding']
+        verification[candidate_id] = result['verification']
+        cards.append(result['card'])
+        errors.extend(result['errors'])
+        llm_used += result['llm_used']
 
     if not candidates:
         mode = "template"
