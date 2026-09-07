@@ -7,14 +7,14 @@ docker compose up --build
 | | 주소 |
 |---|---|
 | 중간 백엔드 | http://localhost:8000/docs |
-| 추천 API | http://localhost:8001/docs |
+| 통합 pipeline-api (추천 + Siren) | http://localhost:8001/docs |
 | PostgreSQL | localhost:55432 (`ideaton`) |
 
 첫 기동에서 일어나는 일:
 
 1. `db` — `ideaton` DB 생성, 추천 스키마 DDL 적용 (PostGIS·pgcrypto 포함)
 2. `middle-backend` — `alembic upgrade head` 후 시드, 그다음 서버
-3. `recommendation-api` — 서버만
+3. `pipeline-api` — 입지 추천 + 폐업 위험 사이렌 서버
 
 ## 알아둘 것
 
@@ -35,7 +35,7 @@ DDL 만으로 충분한 작업(스키마 확인, 마이그레이션, 중간 백�
 
 **추천 API 컨테이너에는 `postgresql-client` 가 들어 있다.** `recommendation/serving_db.py` 가 Python 드라이버가 아니라 `psql` 서브프로세스로 `COPY (SELECT ...) TO STDOUT` 을 실행하기 때문이다. 이걸 빼면 기동은 되지만 파이프라인이 실행 시점에 죽는다.
 
-**서비스 간 호출은 컨테이너 이름으로 한다.** 중간 백엔드에서 추천 API 는 `http://recommendation-api:8000` 이다. `localhost:8001` 은 호스트에서만 통한다.
+**서비스 간 호출은 컨테이너 이름으로 한다.** 중간 백엔드에서 추천과 Siren은 통합 `pipeline-api`의 `http://pipeline-api:8000`을 사용한다. `localhost:8001`은 호스트에서만 통한다.
 
 **`INTERNAL_API_TOKEN` 은 양쪽이 같아야 한다.** 추천 API 는 이 값이 비어 있으면 fail closed 로 503 을 반환한다 — 설정 누락을 조용히 통과시키지 않으려는 의도된 동작이다.
 

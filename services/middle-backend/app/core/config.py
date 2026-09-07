@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # 시드 전용 (scripts/seed.py). 기본값을 두지 않는다 — 알려진 비밀번호로 계정이 생긴다.
     seed_password: str = ""
 
-    # 입지 추천 서비스 (services/recommendation-api). 서버 간 호출 전용이다.
+    # 통합 pipeline-api (추천 + Siren). 서버 간 호출 전용이다.
     #
     # 토큰에 기본값을 두지 않는다. 값이 없으면 추천 API 가 503 fail closed 로
     # 답하는데, 그쪽이 의도적으로 그렇게 만들어져 있으므로 우리도 맞춘다.
@@ -61,18 +61,17 @@ class Settings(BaseSettings):
             + self.recommendation_timeout_margin_seconds
         )
 
-    # 위험도 사이렌 서비스 (services/siren). 서버 간 호출 전용이다.
+    # 통합 pipeline-api의 위험도 사이렌 endpoint. 서버 간 호출 전용이다.
     #
-    # 상대 api.py 에는 토큰 검사가 없다. 공개 네트워크에 노출하면 누구나 부를 수
-    # 있으므로 compose 내부 네트워크에만 둔다. 토큰이 붙는 날을 대비해
-    # INTERNAL_API_TOKEN 이 있으면 헤더로 실어 보낸다(지금은 무시된다).
+    # 추천 endpoint와 같은 내부 토큰을 사용한다.
     #
     # 추천과 달리 순수 계산 동기 호출이라 타임아웃이 짧아도 된다. 그래도 12개월치
     # 보고서를 한 번에 보내므로 기본 60초를 둔다.
-    siren_api_url: str = "http://localhost:8002"
+    siren_api_url: str = "http://localhost:8001"
     siren_request_timeout_seconds: float = 60.0
-    # The trigger path stays opt-in until the deployment supplies source DB
-    # access, the Siren internal token, and has verified the storage migration.
+    # This remains a deployment gate: the local/production examples enable it
+    # after the Siren source DB, internal token, and storage migration are ready.
+    # Keeping the Python default fail-closed protects ad-hoc server starts.
     siren_analysis_enabled: bool = False
 
     # CORS — FE(Vite dev server)가 브라우저에서 호출한다.

@@ -1,6 +1,6 @@
-"""입지 추천 서비스 HTTP 클라이언트.
+"""통합 pipeline-api의 입지 추천 HTTP 클라이언트.
 
-`services/recommendation-api` 를 서버 간 호출로 부른다. 브라우저에 노출하지
+추천 endpoint를 서버 간 호출로 부른다. 브라우저에 노출하지
 않는 이유는 `X-Internal-Token` 때문이다 — 그 값이 사용자에게 보이는 순간
 누구나 추천 API 를 직접 부를 수 있다.
 

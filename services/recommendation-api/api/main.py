@@ -11,8 +11,8 @@ This API transports the selected region and special-condition text to the
 existing pipeline without interpreting or rewriting the user's request.
 The recommendation package itself still performs its configured input-planning,
 deterministic validation, data analysis, Evidence validation, and explanation
-stages. Risk-siren development is intentionally isolated in
-`/Users/parkjunwoo/Documents/siren` and is not connected to this route yet.
+stages. The risk-siren routes are registered from the sibling Siren package so
+both pipelines run in this same process and container.
 
 Run locally from the repository root with::
 
@@ -35,6 +35,7 @@ import secrets
 import sys
 import threading
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -49,6 +50,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
+PROJECT_ROOT = SERVICE_ROOT.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from recommendation.env import load_env
 from recommendation.paths import find_project_root
@@ -73,6 +77,7 @@ from recommendation.pipeline import (
     run_pipeline,
     validate_candidates,
 )
+from services.siren.api import close_siren_resources, risk_siren_router
 
 
 class RegionInput(BaseModel):
@@ -643,11 +648,20 @@ def _response_payload(run_id: str, payload: PipelineRecommendationRequest, resul
     }
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Close shared Siren DB providers when the combined process stops."""
+    yield
+    await close_siren_resources()
+
+
 app = FastAPI(
-    title="Seoul Site Recommendation API",
-    version="0.1.0",
-    description="LLM-assisted input interpretation with deterministic, Evidence-first recommendation output.",
+    title="IDEATON Pipeline API",
+    version="0.2.0",
+    description="Recommendation and deterministic risk-siren pipelines behind one internal API.",
+    lifespan=lifespan,
 )
+app.include_router(risk_siren_router)
 
 cors_origins = [item.strip() for item in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if item.strip()]
 if cors_origins:
@@ -662,7 +676,7 @@ if cors_origins:
 
 @app.get("/healthz", tags=["system"])
 async def healthz() -> dict[str, str]:
-    return {"status": "ok", "pipeline": "recommendation_pipeline_v2_llm_input"}
+    return {"status": "ok", "pipeline": "recommendation_and_risk_siren"}
 
 
 @app.get("/readyz", tags=["system"])

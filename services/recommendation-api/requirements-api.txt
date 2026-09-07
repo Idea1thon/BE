@@ -4,3 +4,7 @@ uvicorn[standard]>=0.32,<1
 pyshp>=2.3,<3
 shapely>=2.0,<3
 jsonschema>=4.23,<5
+# Shared IDEATON DB access used by the integrated risk-siren routes.
+pydantic>=2.10,<3
+sqlalchemy[asyncio]>=2.0,<3
+asyncpg>=0.30,<1
