@@ -1,6 +1,6 @@
-"""폐업 위험 사이렌 서비스 HTTP 클라이언트 (`services/siren`).
+"""통합 pipeline-api의 폐업 위험 사이렌 HTTP 클라이언트.
 
-**호출 규약** (상대 쪽 `services/siren/api.py` 기준)
+**호출 규약** (통합 pipeline-api에 등록된 Siren 라우터 기준)
 
   POST /internal/risk-sirens/analyze      200 결과 / 422 입력 계약 위반
   POST /internal/risk-sirens/hq-summary   200 결과 / 422 입력 계약 위반
@@ -15,8 +15,8 @@ INTERFACE_SPEC 4장은
 
 **내부 인증.** 상대 `api.py` 는 `SIREN_INTERNAL_API_TOKEN`이 설정된 배포에서
 `X-Internal-Token`을 검증한다. 이 클라이언트는 `INTERNAL_API_TOKEN`을 같은 헤더로
-전달하므로 두 서비스의 토큰을 동일하게 설정해야 한다. Siren API는 nginx 외부 공개가
-아닌 내부 서비스 네트워크에서만 노출한다.
+전달하므로 pipeline-api와 중간 백엔드의 토큰을 동일하게 설정해야 한다. 해당 경로는
+nginx 외부 공개가 아닌 내부 서비스 네트워크에서만 호출한다.
 """
 
 from __future__ import annotations

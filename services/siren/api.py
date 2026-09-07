@@ -7,7 +7,7 @@ from math import isfinite
 import hmac
 import os
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -39,6 +39,7 @@ app = FastAPI(
 )
 
 _orchestrator: RiskSirenOrchestrator = build_default_orchestrator()
+risk_siren_router = APIRouter()
 
 
 def require_internal_access(
@@ -51,7 +52,12 @@ def require_internal_access(
     the same value through ``X-Internal-Token``.
     """
 
-    expected = os.getenv("SIREN_INTERNAL_API_TOKEN", "").strip()
+    # Standalone Siren uses its component-specific variable. The combined
+    # pipeline-api intentionally shares one server-to-server credential.
+    expected = (
+        os.getenv("SIREN_INTERNAL_API_TOKEN", "").strip()
+        or os.getenv("INTERNAL_API_TOKEN", "").strip()
+    )
     environment = os.getenv("ENVIRONMENT", "development").strip().lower()
     if not expected:
         if environment in {"production", "prod"}:
@@ -81,7 +87,7 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "risk-siren", "version": "1.0.0"}
 
 
-@app.post(
+@risk_siren_router.post(
     "/internal/risk-sirens/analyze",
     response_model=RiskSirenResponse,
     dependencies=[Depends(require_internal_access)],
@@ -93,7 +99,7 @@ def analyze_risk(request: RiskSirenRequest) -> RiskSirenResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post(
+@risk_siren_router.post(
     "/internal/risk-sirens/analyze-trigger",
     response_model=RiskSirenResponse,
     dependencies=[Depends(require_internal_access)],
@@ -110,7 +116,7 @@ async def analyze_trigger(request: SirenAnalyzeTrigger) -> RiskSirenResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post(
+@risk_siren_router.post(
     "/internal/risk-sirens/hq-summary",
     response_model=HqSummaryResponse,
     dependencies=[Depends(require_internal_access)],
@@ -120,3 +126,11 @@ def hq_summary(request: HqSummaryRequest) -> HqSummaryResponse:
         return HqSummaryResponse.model_validate(summarize(request))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def close_siren_resources() -> None:
+    """Release provider engines for standalone and combined deployments."""
+    await _orchestrator.close()
+
+
+app.include_router(risk_siren_router)
