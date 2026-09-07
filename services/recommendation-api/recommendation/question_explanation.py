@@ -1,6 +1,10 @@
 """Bounded server rendering of scoped SQL observations, separate from LLM claims."""
 from __future__ import annotations
 
+import json
+
+from .feature_catalog import FEATURE_BY_ID, feature_ids_for_record
+
 _DIMENSIONS = {
     'rent': ('rent', '임대가격지수', 'R-ONE 임대 통계'),
     'vacancy': ('vacancy', '공실률', 'R-ONE 공실 통계'),
@@ -10,6 +14,37 @@ _DIMENSIONS = {
     'flow': ('flow', '유동인구 합계', '유동인구 통계'),
 }
 NO_QUESTION_EXPLANATION = '질문에 직접 답하는 관측 설명을 구성하지 못했습니다. 질문별 비교표의 관측값과 미확인 항목을 확인해야 합니다.'
+
+
+def _feature_observation_claim(feature_id: str, record: dict) -> str:
+    """Render one exact structured observation, retaining its caveats."""
+    metadata = FEATURE_BY_ID[feature_id]
+    value = record.get('value')
+    unit = str(record.get('unit') or '')
+    period = record.get('observed_end_period') or record.get('period') or '기간 미상'
+    grain = record.get('spatial_grain') or '공간범위 미상'
+    proxy = ' (대리 공간단위)' if record.get('grain_is_proxy') else ''
+    limitation = str(record.get('limitation') or '').strip()
+    caveat = f' {limitation}' if limitation else ''
+    return (f"{metadata['label']}({feature_id}) 관측값은 {value}{unit}이며, "
+            f"관측기간 {period}, 공간단위 {grain}{proxy}이다.{caveat}")
+
+
+def _feature_source_records(sources: dict, feature_ids: set[str]) -> dict[str, list[tuple[str, dict]]]:
+    grouped: dict[str, list[tuple[str, dict]]] = {feature_id: [] for feature_id in feature_ids}
+    for source_id, source in sources.items():
+        if source.get('bucket') != 'evidence' or not source_id.startswith('candidate-evidence:'):
+            continue
+        try:
+            record = json.loads(source.get('text', ''))
+        except (TypeError, ValueError):
+            record = None
+        if not isinstance(record, dict):
+            continue
+        for feature_id in feature_ids_for_record(record):
+            if feature_id in grouped:
+                grouped[feature_id].append((source_id, record))
+    return grouped
 
 
 def matches_candidate(item: dict, candidate: dict) -> bool:
@@ -36,9 +71,18 @@ def finish_question_card(card: dict, candidate: dict, selected: dict,
     not candidate performance, and are diagnosed as server rendering.
     """
     topics = set(contract.get('topic_ids') or [])
+    feature_ids = {feature_id for feature_id in contract.get('feature_ids', [])
+                   if feature_id in FEATURE_BY_ID}
+    # Legacy topic handlers already own these observations (rent, sales, ...).
+    # Use catalog Evidence rendering for genuinely catalog-only intent so an
+    # old question does not suddenly duplicate a candidate metric in notes.
+    catalog_feature_ids = {
+        feature_id for feature_id in feature_ids
+        if FEATURE_BY_ID[feature_id]['topic_id'] not in topics
+    }
     diagnostics = {'mode': 'not_requested', 'removed_optional_claim_count': 0,
                    'server_rendered_claims': []}
-    if not topics and not contract.get('excluded_topics'):
+    if not topics and not contract.get('excluded_topics') and not feature_ids:
         return card, diagnostics
     result = dict(card)
     citations = card.get('citations') or {}
@@ -60,9 +104,19 @@ def finish_question_card(card: dict, candidate: dict, selected: dict,
         (item['value'], item['unit'], item['period'], item.get('source_region'), item.get('grain_is_proxy'))
         for item in items}) != 1}
     blocked_refs = {item['evidence_id'] for topic in ambiguous for item in grouped[topic]}
-    relevant = {ref: source for ref, source in selected.items()
-                if source['bucket'] in {'evidence', 'reasons', 'context_notes'}
-                and ref not in blocked_refs}
+    feature_only = bool(feature_ids) and not topics and not contract.get('excluded_topics')
+    relevant = {}
+    for ref, source in selected.items():
+        if source['bucket'] not in {'evidence', 'reasons', 'context_notes'} or ref in blocked_refs:
+            continue
+        # A catalog-only request must not accidentally retain an unrelated
+        # prose reason just because the LLM cited it. Mixed legacy+catalog
+        # requests retain the legacy topic filtering and add feature evidence.
+        if feature_only:
+            source_features = feature_ids_for_record(source.get('text'))
+            if not source_features & feature_ids:
+                continue
+        relevant[ref] = source
     for bucket in ('reasons', 'context_notes'):
         result[bucket] = []
         for index, claim in enumerate(card.get(bucket) or []):
@@ -104,6 +158,42 @@ def finish_question_card(card: dict, candidate: dict, selected: dict,
         diagnostics['server_rendered_claims'].append({'final_position': position, 'source_id': ref,
             'topic_id': topic, 'spatial_unit_type': spatial_type,
             'spatial_unit_code': item['spatial_unit_code'], 'method': 'validated_sql_template'})
+    # Catalog features are answered from candidate Evidence, not from the
+    # legacy SQL dimension table. Keep each observation citable and retain
+    # ambiguity/missingness instead of selecting a convenient period.
+    feature_records = _feature_source_records(selected, catalog_feature_ids)
+    for feature_id in sorted(catalog_feature_ids):
+        observations = feature_records.get(feature_id, [])
+        if not observations:
+            reason = f"{FEATURE_BY_ID[feature_id]['label']}({feature_id}) 유효한 후보 Evidence가 없습니다."
+            if reason not in result['missing_features']:
+                result['missing_features'].append(reason)
+            continue
+        signatures = {
+            (record.get('value'), record.get('unit'),
+             record.get('observed_end_period') or record.get('period'),
+             record.get('spatial_grain'), record.get('grain_is_proxy'))
+            for _, record in observations
+        }
+        if len(signatures) != 1:
+            reason = f"{FEATURE_BY_ID[feature_id]['label']}({feature_id}) 여러 관측값·기간·공간범위가 있어 단일 값으로 표시하지 않았습니다."
+            if reason not in result['missing_features']:
+                result['missing_features'].append(reason)
+            diagnostics.setdefault('ambiguous_features', []).append(feature_id)
+            continue
+        refs = [ref for ref, _ in observations]
+        if any(observation_ref in existing_refs
+               for observation_ref in refs for existing_refs in remapped.values()):
+            continue
+        ref, record = observations[0]
+        position = f"context_notes:{len(result['context_notes'])}"
+        result['context_notes'].append(_feature_observation_claim(feature_id, record))
+        remapped[position] = [ref]
+        diagnostics['server_rendered_claims'].append({
+            'final_position': position, 'source_id': ref, 'feature_id': feature_id,
+            'topic_id': FEATURE_BY_ID[feature_id]['topic_id'],
+            'method': 'validated_candidate_evidence_template',
+        })
     for unsupported in contract.get('unsupported') or []:
         reason = unsupported.get('reason')
         if isinstance(reason, str) and reason not in result['missing_features']:

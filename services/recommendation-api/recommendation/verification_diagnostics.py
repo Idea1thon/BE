@@ -58,7 +58,10 @@ def build_verification_diagnostics(
     restored_source_ids: list[str] | None = None,
     generated_sections: list[str] | None = None,
     failed_sections: list[str] | None = None,
+    failed_section_reasons: dict[str, Any] | None = None,
     grounding_status: str = 'not_attempted',
+    summary_replaced: bool = False,
+    summary_replacement_source_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Compare original draft positions with the final, pruned and ordered card.
 
@@ -79,10 +82,13 @@ def build_verification_diagnostics(
         'generation_status': generation_status,
         'generated_sections': list(generated_sections or []),
         'failed_sections': list(failed_sections or []),
+        'failed_section_reasons': dict(failed_section_reasons or {}),
         'grounding_status': grounding_status,
         'final_mode': final['explanation_mode'],
         'fallback_reason': fallback_reason,
         'summary_reverted': False,
+        'summary_replaced': summary_replaced,
+        'summary_replacement_source_ids': list(summary_replacement_source_ids or []),
         'draft_claim_count': 0, 'rewritten_claim_count': 0,
         'verified_claim_count': sum(value == 'supported' for value in decisions.values()),
         'removed_claim_count': 0,

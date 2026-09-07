@@ -229,6 +229,12 @@ class EvidenceRerankerTests(unittest.TestCase):
         client_type.return_value.generate_json.side_effect = respond
         result = explain_candidates([candidate], query_context=self.query)
         self.assertEqual(seen[-1]['query_context']['original_text'], self.query['original_text'])
+        self.assertEqual(seen[-1]['original_user_text'], self.query['original_text'])
+        self.assertEqual(seen[-1]['preferences'], self.query['preferences'])
+        self.assertEqual(seen[-1]['question_contract'], result['query_context']['question_contract'])
+        self.assertIn('evidence', seen[-1]['candidate_evidence'])
+        self.assertIn('dimension_evidence', seen[-1]['candidate_evidence'])
+        self.assertNotIn('context_notes', seen[-1]['candidate_evidence'])
         self.assertIn('candidate-evidence:0', seen[-1]['explanation_sources'])
         self.assertEqual(result['cards'][0]['counter_evidence'], ['위험 경고'])
         self.assertEqual(candidate['fit_tier'], '주의')

@@ -2894,6 +2894,7 @@ def run_pipeline(
             "generation_status": explanations.get("generation_status"),
             "generated_sections_by_candidate": explanations.get("generated_sections_by_candidate", {}),
             "failed_sections_by_candidate": explanations.get("failed_sections_by_candidate", {}),
+            "failed_section_reasons_by_candidate": explanations.get("failed_section_reasons_by_candidate", {}),
             "grounding_status_by_candidate": explanations.get("grounding_status_by_candidate", {}),
         },
     }

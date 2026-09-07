@@ -64,11 +64,20 @@ class VerificationDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(result['explanation_mode'], 'llm')
                 self.assertEqual(result['llm']['validation_or_runtime_errors'], [])
                 self.assertEqual(d['draft_retrieval_citation_count'], 1)
-                self.assertEqual(d['final_retrieval_citation_count'], int(supported))
+                # A supported partial section now replaces the generic summary
+                # with a cited core observation; that adds one summary ref.
+                expected_retrieval_refs = int(supported) + int(d['summary_replaced'])
+                self.assertEqual(d['final_retrieval_citation_count'], expected_retrieval_refs)
                 c = self.claim(d, 'context_notes:0')
                 self.assertEqual(c['disposition'], disposition)
                 self.assertEqual(c['verification'], 'supported' if supported else 'semantic_rejected')
                 self.assertEqual(c['final_position'], 'context_notes:0' if supported else None)
+                if supported:
+                    self.assertTrue(d['summary_replaced'])
+                    self.assertNotIn('comparison', d['failed_section_reasons'])
+                else:
+                    self.assertEqual(d['failed_section_reasons']['comparison']['reason'],
+                                     'semantic_rejected')
                 self.assertEqual(calls, 2)
 
     def test_local_rejections_have_specific_reasons_and_do_not_call_verifier(self):
@@ -84,8 +93,12 @@ class VerificationDiagnosticsTests(unittest.TestCase):
                 card['context_notes'] = [text]
                 card['citations'] = {'context_notes:0': refs}
                 result, calls = self.run_card(card)
-                self.assertEqual(self.claim(self.diagnostic(result), 'context_notes:0')['verification'], reason)
+                d = self.diagnostic(result)
+                self.assertEqual(self.claim(d, 'context_notes:0')['verification'], reason)
                 self.assertEqual(result['cards'][0]['context_notes'], [])
+                self.assertEqual(d['failed_section_reasons']['comparison']['reason'], reason)
+                self.assertEqual(result['failed_section_reasons_by_candidate']['test'],
+                                 d['failed_section_reasons'])
                 self.assertEqual(calls, 1)
 
     def test_semantic_false_missing_and_invalid_verdict_are_distinct(self):
@@ -134,6 +147,7 @@ class VerificationDiagnosticsTests(unittest.TestCase):
         result, _ = self.run_card(card, {'verdicts': [{'claim_id': 'context_notes:0', 'supported': True}]})
         d = self.diagnostic(result)
         self.assertEqual(d['fallback_reason'], 'card_validation_failed')
+        self.assertEqual(d['failed_section_reasons']['summary']['stage'], 'validation')
         self.assertEqual(self.claim(d, 'context_notes:0')['verification'], 'supported')
         self.assertEqual(self.claim(d, 'context_notes:0')['disposition'], 'card_fallback')
 
