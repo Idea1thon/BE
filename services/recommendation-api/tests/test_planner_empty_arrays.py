@@ -19,7 +19,8 @@ class PlannerEmptyArraysTests(unittest.TestCase):
             self.assertFalse(result['confirmation_required'])
             self.assertIsInstance(result['conditions'], dict)
             self.assertIsInstance(result['preferences'], dict)
-            self.assertEqual(result['retrieval_requests'], [])
+            self.assertTrue(result['retrieval_requests'])
+            self.assertEqual(result['retrieval_requests'][0]['tool'], 'search_region_evidence')
             self.assertEqual(result['planner']['execution'], 'llm')
             self.assertEqual(result['resolved_industry_code'], 'CS100010')
 

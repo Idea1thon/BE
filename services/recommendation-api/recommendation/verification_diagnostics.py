@@ -56,6 +56,9 @@ def build_verification_diagnostics(
     template: dict[str, Any], draft: Any, final: dict[str, Any],
     decisions: dict[str, str], *, generation_status: str, fallback_reason: str | None,
     restored_source_ids: list[str] | None = None,
+    generated_sections: list[str] | None = None,
+    failed_sections: list[str] | None = None,
+    grounding_status: str = 'not_attempted',
 ) -> dict[str, Any]:
     """Compare original draft positions with the final, pruned and ordered card.
 
@@ -74,6 +77,9 @@ def build_verification_diagnostics(
     result = {
         'content_status': 'unverified_draft',
         'generation_status': generation_status,
+        'generated_sections': list(generated_sections or []),
+        'failed_sections': list(failed_sections or []),
+        'grounding_status': grounding_status,
         'final_mode': final['explanation_mode'],
         'fallback_reason': fallback_reason,
         'summary_reverted': False,

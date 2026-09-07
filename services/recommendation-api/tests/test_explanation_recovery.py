@@ -54,8 +54,29 @@ class ExplanationRecoveryTests(unittest.TestCase):
                     card['citations'] = {'summary': ['summary']}
                 verdict = {'verdicts': [{'claim_id': 'summary', 'supported': True}]} if rewrite else None
                 result, _ = self.run_card(card, verdict)
-                self.assertEqual(result['explanation_mode'], 'template')
-                self.assertEqual(result['cards'][0]['reasons'], ['버스정류장 3개'])
+                if rewrite:
+                    self.assertEqual(result['generation_status'], 'partial')
+                    self.assertIn('summary', result['generated_sections_by_candidate']['building'])
+                    self.assertEqual(result['cards'][0]['summary'], card['summary'])
+                else:
+                    self.assertEqual(result['explanation_mode'], 'template')
+                self.assertEqual(result['cards'][0]['reasons'], [] if rewrite else ['버스정류장 3개'])
+
+    def test_one_grounded_section_is_retained_with_explicit_partial_status(self):
+        card = template_card(self.candidate)
+        card.update(
+            summary='건물 데이터와 확인되지 않은 임대 조건을 함께 검토해야 합니다.',
+            reasons=[], counter_evidence=[], context_notes=[], missing_features=[],
+        )
+        card['citations'] = {'summary': ['summary']}
+        result, _ = self.run_card(card, {'verdicts': [{'claim_id': 'summary', 'supported': True}]})
+        diagnostic = result['verification_by_candidate']['building']
+        self.assertIn('summary', diagnostic['generated_sections'])
+        self.assertIn('strengths', diagnostic['failed_sections'])
+        self.assertEqual(diagnostic['grounding_status'], 'grounded')
+        self.assertEqual(result['generation_status'], 'partial')
+        self.assertEqual(result['generated_sections_by_candidate']['building'], ['summary'])
+        self.assertNotEqual(result['cards'][0]['summary'], template_card(self.candidate)['summary'])
 
     def test_malformed_array_items_are_rejected_before_pruning_or_semantic_call(self):
         for malformed in [[{'text': '버스정류장 3개'}], [None], '버스정류장 3개', [''], ['  ']]:

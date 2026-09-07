@@ -1,4 +1,5 @@
 """Source-scoped period equivalence for the numeric grounding gate only."""
+from __future__ import annotations
 
 import json
 import re

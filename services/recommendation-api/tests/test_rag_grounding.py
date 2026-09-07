@@ -20,7 +20,8 @@ class RetrievalGroundingTests(unittest.TestCase):
 
     def test_facts_carry_scope_and_stable_ids_independent_of_row_order(self):
         sales = self.row()
-        flow = self.row(dimension="flow", value="250.5", industry_code=None, source_table="location.flow_quarter")
+        flow = self.row(dimension="flow", value="250.5", industry_code=None,
+                        source_table="location.flow_quarter")
         records = self.build(sales, flow, sales)
         self.assertEqual(len(records), 2)
         self.assertEqual(records[0]["value"], 120000)
@@ -66,8 +67,9 @@ class RetrievalGroundingTests(unittest.TestCase):
         self.assertEqual(len(build_retrieval_evidence(context)), 1)
 
     def test_input_rows_are_bounded(self):
-        rows = [self.row(spatial_unit_code=str(i)) for i in range(100)]
-        self.assertEqual(len(self.build(*rows)), 80)
+        rows = [self.row(spatial_unit_code=str(i), value=str(i + 1)) for i in range(100)]
+        records = self.build(*rows)
+        self.assertEqual(len(records), 80)
 
 
 if __name__ == "__main__":

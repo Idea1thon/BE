@@ -31,3 +31,19 @@ class QuestionContractTests(unittest.TestCase):
         self.assertEqual(c['topic_ids'], [])
         self.assertEqual(c['unsupported'][0]['id'], 'unmapped_question')
         self.assertEqual(retrieval_requests_for_contract(c, ['fallback']), ['fallback'])
+
+    def test_empty_text_with_region_and_industry_uses_default_analysis_contract(self):
+        contract = build_question_contract({
+            'normalized_text': '',
+            'selected_region': {'sigungu': '종로구', 'dong': '청운효자동'},
+            'industry_code': 'CS100001',
+        })
+        self.assertEqual(contract['mode'], 'default_region_industry')
+        self.assertTrue(contract['comparison_requested'])
+        self.assertEqual(contract['analysis_topics'], [
+            'demand', 'competition', 'population', 'sales_potential',
+            'commercial_activity', 'accessibility', 'development', 'risk',
+        ])
+        self.assertEqual(retrieval_requests_for_contract(contract, [])[0]['dimensions'], [
+            'workplace_population', 'stores', 'sales', 'flow', 'rent', 'vacancy',
+        ])
