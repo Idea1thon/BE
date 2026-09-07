@@ -1,4 +1,4 @@
-# 배포용. VM 1대에서 nginx + 중간 백엔드 + 통합 pipeline-api를 띄우고 DB 는 Azure 를 쓴다.
+# 배포용. VM 1대에서 nginx + 중간 백엔드 + 통합 recommendation-api를 띄우고 DB 는 Azure 를 쓴다.
 #
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
@@ -36,17 +36,17 @@ services:
       # nginx 뒤에서 같은 오리진으로 서빙하므로 브라우저는 CORS 를 태우지 않는다.
       # 값은 설정 검증을 통과시키기 위한 것이다.
       CORS_ALLOW_ORIGINS: ${PUBLIC_ORIGIN:?http://<VM 공인 IP> 형태로 설정하세요}
-      RECOMMENDATION_API_URL: http://pipeline-api:8000
-      SIREN_API_URL: http://pipeline-api:8000
+      RECOMMENDATION_API_URL: http://recommendation-api:8000
+      SIREN_API_URL: http://recommendation-api:8000
       # 운영보고서 제출 시 Siren ID-only trigger를 실행한다. 누락되면
       # 분석이 조용히 비활성화되지 않도록 배포 자체를 실패시킨다.
       SIREN_ANALYSIS_ENABLED: ${SIREN_ANALYSIS_ENABLED:?true로 설정하세요}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?추천 API 와 같은 값이어야 합니다}
     restart: unless-stopped
 
-  # 추천과 폐업 위험 사이렌을 한 컨테이너에서 제공한다. 같은 IDEATON DB를
+  # 추천과 폐업 위험 사이렌을 기존 recommendation-api 한 컨테이너에서 제공한다. 같은 IDEATON DB를
   # 읽고, 중간 백엔드에서 두 endpoint를 모두 내부 토큰으로 호출한다.
-  pipeline-api:
+  recommendation-api:
     build:
       context: .
       dockerfile: services/recommendation-api/Dockerfile
