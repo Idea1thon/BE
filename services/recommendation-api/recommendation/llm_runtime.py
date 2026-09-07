@@ -12,7 +12,8 @@ import os
 import re
 import threading
 import time
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -32,9 +33,16 @@ class LLMRuntimeError(RuntimeError):
 # 요청당 호출 수는 최대 1(planner) + 3 × 후보 수(리랭킹+설명+재서술 검토)라 캡을 걸 때는 그보다 크게
 # 잡아야 auto 모드에서 조용히 template 로 떨어지지 않는다. required 모드에서는
 # 캡을 무시한다(자체 비용캡을 외부 장애처럼 503 으로 보고하지 않도록).
-# run_pipeline 이 요청마다 reset_call_budget() 를 호출하므로 카운터는 요청
-# 스레드별로 격리된다.
-_call_budget = threading.local()
+# run_pipeline 이 요청마다 reset_call_budget() 를 호출한다. ContextVar 로 요청
+# 간 상태는 격리하고, 한 요청에서 복제된 worker context는 같은 상태 객체를
+# 공유하므로 병렬 호출도 하나의 예산을 함께 사용한다.
+@dataclass
+class _CallBudgetState:
+    used: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+
+
+_call_budget: ContextVar[_CallBudgetState | None] = ContextVar("llm_call_budget", default=None)
 
 
 def _max_calls_per_run() -> int:
@@ -46,16 +54,20 @@ def _max_calls_per_run() -> int:
 
 
 def reset_call_budget() -> None:
-    """추천 실행 시작 시 이 스레드의 LLM 호출 카운터를 0 으로 되돌린다."""
-    _call_budget.used = 0
+    """추천 실행 시작 시 현재 요청의 LLM 호출 카운터를 0으로 되돌린다."""
+    _call_budget.set(_CallBudgetState())
 
 
 def _charge_call(*, enforce: bool = True) -> None:
     limit = _max_calls_per_run()
-    used = getattr(_call_budget, "used", 0)
-    if enforce and limit and used >= limit:
-        raise LLMRuntimeError(f"LLM 호출 예산 초과 (LLM_MAX_CALLS_PER_RUN={limit})")
-    _call_budget.used = used + 1
+    state = _call_budget.get()
+    if state is None:
+        state = _CallBudgetState()
+        _call_budget.set(state)
+    with state.lock:
+        if enforce and limit and state.used >= limit:
+            raise LLMRuntimeError(f"LLM 호출 예산 초과 (LLM_MAX_CALLS_PER_RUN={limit})")
+        state.used += 1
 
 
 # This is deliberately shared by the planner and explanation stages. The
