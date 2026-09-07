@@ -114,12 +114,15 @@ class ExplanationRecoveryTests(unittest.TestCase):
         self.assertEqual(final['reasons'], ['버스정류장이 3개 있습니다.'])
         self.assertEqual(final['counter_evidence'], self.candidate['counter_evidence'])
         self.assertEqual(final['missing_features'], ['월세: 확인 안 됨'])
-        self.assertEqual(final['citations'], {'reasons:0': ['reasons:0']})
+        self.assertEqual(final['citations'], {
+            'reasons:0': ['reasons:0'], 'summary': ['reasons:0'],
+        })
         self.assertEqual(final['explanation_mode'], 'mixed')
         self.assertEqual(result['explanation_mode'], 'mixed')
         self.assertTrue(result['degraded'])
         d = result['verification_by_candidate']['building']
         self.assertIsNone(d['fallback_reason'])
+        self.assertTrue(d['summary_replaced'])
         self.assertEqual(d['restored_claim_count'], 2)
         self.assertEqual(d['restored_claims'], [
             {'source_id': 'counter_evidence:0', 'final_position': 'counter_evidence:0'},

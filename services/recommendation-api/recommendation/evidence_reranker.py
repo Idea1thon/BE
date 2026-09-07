@@ -7,6 +7,7 @@ from collections import Counter
 from typing import Any
 
 from .llm_runtime import LLMRuntimeError
+from .feature_catalog import feature_ids_for_record, feature_topic_ids
 
 MAX_RERANK_SOURCES = 48
 TOP_SOURCES = 32
@@ -56,6 +57,7 @@ def source_topic_ids(source: dict[str, Any]) -> set[str]:
             record = decoded
     if record is not None:
         topics = set()
+        topics.update(feature_topic_ids(feature_ids_for_record(record)))
         metric = record.get('metric_name')
         if isinstance(metric, str):
             if metric in _METRIC_TOPICS:
@@ -70,7 +72,9 @@ def source_topic_ids(source: dict[str, Any]) -> set[str]:
         return topics
     if not isinstance(text, str):
         return set()
-    return {topic for topic, words in _TOPIC_KEYWORDS.items() if any(word in text for word in words)}
+    topics = {topic for topic, words in _TOPIC_KEYWORDS.items() if any(word in text for word in words)}
+    topics.update(feature_topic_ids(feature_ids_for_record(text)))
+    return topics
 
 
 _STOP_WORDS = {'비교', '비교해줘', '알고', '싶어요', '추천', '추천해줘', '해주세요', '곳', '정보', '대한', '그리고', '보고', '해줘', '확인', '조건', '관련', '있는', '좋은', '어떤', '어디'}
@@ -146,6 +150,10 @@ def select_sources(query: dict[str, Any], sources: dict[str, dict[str, Any]], cl
     contract = contract if isinstance(contract, dict) else {}
     raw_topics = contract.get('topic_ids')
     topics = {t for t in raw_topics if isinstance(t, str)} if isinstance(raw_topics, list) else set()
+    raw_feature_ids = contract.get('feature_ids')
+    if isinstance(raw_feature_ids, list):
+        topics.update(feature_topic_ids({feature_id for feature_id in raw_feature_ids
+                                         if isinstance(feature_id, str)}))
     raw_excluded = contract.get('excluded_topics')
     excluded = {t for t in raw_excluded if isinstance(t, str)} if isinstance(raw_excluded, list) else set()
     mandatory = [key for key, source in sources.items() if source.get('bucket') in _MANDATORY_BUCKETS]

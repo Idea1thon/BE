@@ -16,6 +16,7 @@ from .question_contract import build_question_contract
 from .question_explanation import finish_question_card, matches_candidate, NO_QUESTION_EXPLANATION
 from .candidate_comparison import build_candidate_comparison
 from .comparison_explanation import add_comparison_context
+from .feature_catalog import FEATURE_CATALOG_VERSION, feature_catalog_for_prompt
 from .llm_runtime import (
     LLMConfig,
     LLMRuntimeError,
@@ -55,6 +56,24 @@ def template_card(candidate: dict[str, Any]) -> dict[str, Any]:
         "inference_hypotheses": [],
         "claim_type": "descriptive",
         "explanation_mode": "template",
+    }
+
+
+def _structured_candidate_payload(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Build the model input around typed observations, not prose notes."""
+    return {
+        "candidate_id": candidate.get("candidate_id"),
+        "fit_tier": candidate.get("fit_tier"),
+        "industry_code": candidate.get("industry_code"),
+        "greenfield": candidate.get("greenfield"),
+        "data_confidence": candidate.get("data_confidence"),
+        "location": candidate.get("location") or {},
+        "evidence": [item for item in candidate.get("evidence") or [] if isinstance(item, dict)],
+        "dimension_evidence": candidate.get("dimension_evidence") or {},
+        "reasons": _candidate_claims(candidate, "reasons"),
+        "counter_evidence": _candidate_claims(candidate, "counter_evidence"),
+        "missing_features": _candidate_claims(candidate, "missing_features"),
+        "hypothesis_reference_ids": sorted(_candidate_reference_ids(candidate)),
     }
 
 
@@ -501,6 +520,99 @@ def _section_diagnostics(
     return generated, [section for section in _EXPLANATION_SECTIONS if section not in generated], grounding
 
 
+def _claim_source_ids(card: dict[str, Any], bucket: str, claim: str,
+                      selected: dict[str, dict[str, Any]]) -> list[str]:
+    refs: list[str] = []
+    for index, value in enumerate(card.get(bucket) or []):
+        if value == claim:
+            candidate_refs = (card.get('citations') or {}).get(f'{bucket}:{index}', [])
+            if isinstance(candidate_refs, list):
+                refs.extend(ref for ref in candidate_refs if isinstance(ref, str) and ref in selected)
+    if refs:
+        return list(dict.fromkeys(refs))[:8]
+    return [ref for ref, source in selected.items()
+            if source.get('bucket') == bucket and source.get('text') == claim][:8]
+
+
+def _replace_generic_partial_summary(
+    candidate: dict[str, Any], final: dict[str, Any], generated_sections: list[str],
+    selected: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], bool, list[str]]:
+    """Keep a grounded partial answer visible when only summary was generic."""
+    if not generated_sections or final.get('summary') != template_card(candidate)['summary']:
+        return final, False, []
+    section_buckets = []
+    if 'strengths' in generated_sections:
+        section_buckets.append('reasons')
+    if 'risks' in generated_sections:
+        section_buckets.append('counter_evidence')
+    if 'comparison' in generated_sections or 'outlook' in generated_sections:
+        section_buckets.append('context_notes')
+    for bucket in section_buckets:
+        for claim in final.get(bucket) or []:
+            if not isinstance(claim, str) or claim in _candidate_claims(candidate, bucket):
+                continue
+            refs = _claim_source_ids(final, bucket, claim, selected)
+            if not refs:
+                continue
+            result = dict(final)
+            result['summary'] = (
+                f"{candidate.get('fit_tier', '조건부 검토')} 후보입니다. "
+                f"핵심 관측: {claim} 확인되지 않은 조건도 함께 검토해야 합니다."
+            )
+            citations = dict(final.get('citations') or {})
+            citations['summary'] = refs
+            result['citations'] = citations
+            return result, True, refs
+    return final, False, []
+
+
+def _section_failure_reasons(
+    candidate: dict[str, Any], draft: Any, decisions: dict[str, str],
+    failed_sections: list[str], *, fallback_reason: str | None,
+    validation_errors: list[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Expose why each absent section was rejected or never generated."""
+    section_buckets = {
+        'summary': ('summary',), 'strengths': ('reasons',),
+        'risks': ('counter_evidence',), 'comparison': ('context_notes',),
+        'outlook': ('context_notes',),
+    }
+    fallback_stage = {
+        'draft_schema_invalid': 'schema', 'card_validation_failed': 'validation',
+        'verification_error': 'grounding', 'generation_error': 'generation',
+        'empty_explanation': 'generation', 'no_client': 'generation',
+    }.get(fallback_reason or '', 'generation')
+    reasons: dict[str, dict[str, Any]] = {}
+    for section in failed_sections:
+        claim_ids: list[str] = []
+        if isinstance(draft, dict):
+            for bucket in section_buckets.get(section, ()):
+                if bucket == 'summary':
+                    if isinstance(draft.get('summary'), str):
+                        claim_ids.append('summary')
+                else:
+                    values = draft.get(bucket)
+                    if isinstance(values, list):
+                        claim_ids.extend(f'{bucket}:{index}' for index in range(len(values)))
+        claim_reasons = [decisions[claim_id] for claim_id in claim_ids if claim_id in decisions]
+        if fallback_reason:
+            detail = fallback_reason
+            if validation_errors:
+                detail = f"{fallback_reason}: {'; '.join(validation_errors[:4])}"
+            reasons[section] = {'stage': fallback_stage, 'reason': detail,
+                                'claim_ids': claim_ids[:12]}
+        elif claim_reasons:
+            reason = next((value for value in claim_reasons if value == 'semantic_rejected'), claim_reasons[0])
+            stage = 'rejection' if reason == 'semantic_rejected' else 'grounding'
+            reasons[section] = {'stage': stage, 'reason': reason,
+                                'claim_ids': claim_ids[:12]}
+        else:
+            reasons[section] = {'stage': 'generation', 'reason': 'not_generated',
+                                'claim_ids': claim_ids[:12]}
+    return reasons
+
+
 def _finish_question_explanation(card, candidate, selected, retrieval, contract, comparison, sources):
     final, diagnostic = finish_question_card(card, candidate, selected, retrieval, contract)
     # Remove the provisional missing-explanation notice before comparisons
@@ -510,7 +622,8 @@ def _finish_question_explanation(card, candidate, selected, retrieval, contract,
         final['missing_features'] = [text for text in final['missing_features'] if text != NO_QUESTION_EXPLANATION]
     final, comparison_diagnostic = add_comparison_context(final, candidate, comparison, sources)
     diagnostic['comparison'] = comparison_diagnostic
-    if contract.get('topic_ids') or contract.get('excluded_topics'):
+    if (contract.get('topic_ids') or contract.get('excluded_topics')
+            or contract.get('feature_ids')):
         diagnostic['optional_answer_available'] = bool(final['reasons'] or final['context_notes'])
         if provisional_notice and not diagnostic['optional_answer_available']:
             final['missing_features'].append(NO_QUESTION_EXPLANATION)
@@ -521,7 +634,7 @@ def _explain_one_candidate(
     candidate: dict[str, Any], *, retrieval_evidence: list[dict[str, Any]],
     query_context: dict[str, Any], contract: dict[str, Any], comparison: dict[str, Any],
     client: OpenAICompatibleJsonClient | None, system_prompt: str,
-    has_query_context: bool, llm_mode: str,
+    llm_mode: str,
 ) -> dict[str, Any]:
     """Generate, verify, and finalize one card in isolation.
 
@@ -547,13 +660,19 @@ def _explain_one_candidate(
     fallback_reason = 'no_client' if client is None else None
     stage = 'generation'
     llm_used = 0
+    validation_errors: list[str] = []
     if client:
         try:
             card = client.generate_json(system_prompt, {
-                "candidate_evidence": ({"candidate_id": candidate.get("candidate_id"),
-                                        "fit_tier": candidate.get("fit_tier"),
-                                        "hypothesis_reference_ids": sorted(_candidate_reference_ids(candidate))}
-                                       if has_query_context else candidate),
+                # Keep the user contract at the same level as the model task.
+                # query_context remains for backward-compatible consumers, but
+                # these direct fields prevent nested-input omissions.
+                "original_user_text": query_context.get("original_text") or query_context.get("normalized_text") or "",
+                "preferences": query_context.get("preferences") or {},
+                "question_contract": contract,
+                "feature_catalog_version": FEATURE_CATALOG_VERSION,
+                "feature_catalog": feature_catalog_for_prompt(),
+                "candidate_evidence": _structured_candidate_payload(candidate),
                 "query_context": query_context or {},
                 "explanation_sources": selected,
                 "output_contract": {
@@ -609,6 +728,14 @@ def _explain_one_candidate(
                     final, candidate, selected, retrieval_evidence, contract, comparison, sources)
                 generated_sections, failed_sections, grounding_status = _section_diagnostics(
                     candidate, draft, final, decisions, fallback_reason=None)
+                summary_is_generic = (
+                    isinstance(draft, dict)
+                    and draft.get('summary') == template_card(candidate)['summary']
+                )
+                final, summary_replaced, summary_replacement_refs = (
+                    _replace_generic_partial_summary(candidate, final, generated_sections, selected)
+                    if summary_is_generic else (final, False, [])
+                )
                 if generated_sections:
                     generation_status = (
                         'complete' if set(generated_sections) == set(_EXPLANATION_SECTIONS)
@@ -616,7 +743,14 @@ def _explain_one_candidate(
                     )
                 else:
                     generation_status = 'fallback'
+                # The replacement is composed from a surviving verified LLM
+                # section; keep the card's LLM mode while diagnostics expose
+                # that the generic summary was rebuilt server-side.
                 final["explanation_mode"] = "mixed" if restored else "llm"
+                failed_section_reasons = _section_failure_reasons(
+                    candidate, draft, decisions, failed_sections,
+                    fallback_reason=None,
+                )
                 return {
                     "candidate_id": candidate_id,
                     "sources": sources,
@@ -629,7 +763,10 @@ def _explain_one_candidate(
                         restored_source_ids=restored,
                         generated_sections=generated_sections,
                         failed_sections=failed_sections,
+                        failed_section_reasons=failed_section_reasons,
                         grounding_status=grounding_status,
+                        summary_replaced=summary_replaced,
+                        summary_replacement_source_ids=summary_replacement_refs,
                     ),
                     "errors": errors,
                     "llm_used": 1,
@@ -655,6 +792,10 @@ def _explain_one_candidate(
         final, candidate, selected, retrieval_evidence, contract, comparison, sources)
     generated_sections, failed_sections, grounding_status = _section_diagnostics(
         candidate, draft, final, decisions, fallback_reason=fallback_reason)
+    failed_section_reasons = _section_failure_reasons(
+        candidate, draft, decisions, failed_sections,
+        fallback_reason=fallback_reason, validation_errors=validation_errors,
+    )
     return {
         "candidate_id": candidate_id,
         "sources": sources,
@@ -666,6 +807,7 @@ def _explain_one_candidate(
             generation_status=generation_status, fallback_reason=fallback_reason,
             generated_sections=generated_sections,
             failed_sections=failed_sections,
+            failed_section_reasons=failed_section_reasons,
             grounding_status=grounding_status,
         ),
         "errors": errors,
@@ -680,7 +822,6 @@ def explain_candidates(
     query_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     retrieval_evidence = build_retrieval_evidence(retrieval_context or {})
-    has_query_context = bool(query_context)
     query_context = dict(query_context or {})
     contract = query_context.get('question_contract') or build_question_contract(query_context)
     query_context['question_contract'] = contract
@@ -702,11 +843,15 @@ def explain_candidates(
         except LLMRuntimeError as exc:
             errors.append(str(exc))
 
+    feature_catalog_prompt = json.dumps(feature_catalog_for_prompt(), ensure_ascii=False)
     system_prompt = f"""{RECOMMENDATION_LLM_POLICY}
 
 추가 역할: 검증된 서울 창업 입지 후보를 설명하는 Evidence 기반 설명 카드 작성기다.
+입력 payload의 original_user_text, preferences, question_contract를 최우선 질문 계약으로 직접 읽어라. 이 세 필드를 query_context 안에서 다시 찾느라 누락하지 말라.
+candidate_evidence.evidence와 candidate_evidence.dimension_evidence의 구조화 관측을 주 입력으로 사용하고, explanation_sources는 각 문장의 인용·검증용 출처 catalog로 사용하라. context_notes 문자열은 구조화 관측을 해석할 때의 제한사항·배경 보조 입력일 뿐, 구조화 Evidence를 대체하지 않는다.
+feature_catalog와 question_contract.feature_matches가 있으면 특정 feature 하나를 고정 규칙으로 가정하지 말고, 자연어 의도와 metric_name/feature_id/analysis_topics의 의미 대응을 확인해 관련 Evidence를 선택하라. 현재 catalog 메타데이터는 다음과 같다: {feature_catalog_prompt}
 후보 JSON과 서버가 제공한 explanation_sources만 사용해 한국어 JSON을 작성하라.
-사용자 query_context의 질문과 부정·시간대·대상 고객 조건에 직접 답하고, 정렬된 출처에서 관련 근거를 먼저 설명하라. 관련 데이터가 없으면 미확인이라고 명시하라.
+사용자 원문과 preferences의 부정·시간대·대상 고객 조건에 직접 답하고, 정렬된 출처에서 관련 근거를 먼저 설명하라. 관련 데이터가 없으면 미확인이라고 명시하라.
 summary와 근거 문장은 자연스럽게 재서술할 수 있다. summary는 기존 등급과 미확인 조건 검토 필요성을 유지하라.
 원문과 달라진 문장은 citations에 출력 위치(summary 또는 context_notes:0 등)를 키로, explanation_sources의 참조 ID 배열을 값으로 넣어라.
 citations에는 같은 bucket의 출처와 candidate-evidence:* 출처만 넣어라. summary는 카드의 다른 관측 bucket 출처도 인용할 수 있다.
@@ -731,7 +876,6 @@ claim_type은 descriptive 또는 associational만 허용한다."""
             comparison=comparison,
             client=client,
             system_prompt=system_prompt,
-            has_query_context=has_query_context,
             llm_mode=llm_mode,
         )
 
@@ -772,6 +916,10 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         candidate_id: value.get('failed_sections', [])
         for candidate_id, value in verification.items()
     }
+    failed_section_reasons_by_candidate = {
+        candidate_id: value.get('failed_section_reasons', {})
+        for candidate_id, value in verification.items()
+    }
     grounding_status_by_candidate = {
         candidate_id: value.get('grounding_status', 'not_attempted')
         for candidate_id, value in verification.items()
@@ -797,6 +945,7 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         "generation_status": overall_generation_status,
         "generated_sections_by_candidate": generated_sections_by_candidate,
         "failed_sections_by_candidate": failed_sections_by_candidate,
+        "failed_section_reasons_by_candidate": failed_section_reasons_by_candidate,
         "grounding_status_by_candidate": grounding_status_by_candidate,
         "explanation_mode": mode,
         "degraded": mode != "llm",

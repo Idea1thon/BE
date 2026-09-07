@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import re
 
+from .feature_catalog import (
+    FEATURE_CATALOG_VERSION,
+    match_feature_intents,
+)
+
 _TOPICS = {
     'rent': r'임대료|임대가격|월세|보증금',
     'vacancy': r'공실',
@@ -28,7 +33,23 @@ def build_question_contract(query_context: dict) -> dict:
     text = query_context.get('normalized_text')
     contract = {'version': 1, 'topic_ids': [], 'topics': [], 'excluded_topics': [],
                 'comparison_requested': False, 'unsupported': [],
-                'analysis_topics': []}
+                'analysis_topics': [], 'feature_ids': [], 'feature_matches': [],
+                'feature_catalog_version': FEATURE_CATALOG_VERSION}
+    # The legacy topic parser remains the source of retrieval dimensions. The
+    # catalog matcher is a second, general semantic vocabulary for intents
+    # which are present in candidate Evidence but do not have a legacy topic
+    # regex (for example foreign-customer signals). It never changes ranking.
+    feature_matches = match_feature_intents(query_context)
+    contract['feature_matches'] = feature_matches
+    contract['feature_ids'] = list(dict.fromkeys(
+        match['feature_id'] for match in feature_matches
+        if isinstance(match.get('feature_id'), str)
+    ))
+    feature_analysis_topics = list(dict.fromkeys(
+        topic for match in feature_matches
+        for topic in match.get('analysis_topics', [])
+        if isinstance(topic, str)
+    ))
     has_region_and_industry = bool(
         isinstance(query_context.get('selected_region'), dict)
         and query_context.get('industry_code')
@@ -43,6 +64,10 @@ def build_question_contract(query_context: dict) -> dict:
                 analysis_topics=list(_DEFAULT_ANALYSIS_TOPICS),
                 mode='default_region_industry',
             )
+        if contract['feature_ids']:
+            contract['analysis_topics'] = list(dict.fromkeys(
+                contract['analysis_topics'] + feature_analysis_topics
+            ))
         return contract
     # Only immediate, explicit topic exclusions are applied. A ban on making
     # estimates ("월세는 추정하지 말라") still requests honest rent coverage.
@@ -76,20 +101,23 @@ def build_question_contract(query_context: dict) -> dict:
     if 'rent' in contract['topic_ids']:
         contract['unsupported'].append({'id': 'property_monthly_rent',
             'reason': '임대가격지수는 개별 매물 월세·보증금이나 권역 간 절대 임대료가 아닙니다.'})
-    if not contract['topic_ids'] and not contract['excluded_topics']:
+    if not contract['topic_ids'] and not contract['excluded_topics'] and not contract['feature_ids']:
         contract['unsupported'].append({'id': 'unmapped_question',
             'reason': '질문을 지원 지표에 확실히 연결하지 못했습니다. 추가 관측을 추정하지 않습니다.'})
-    contract['analysis_topics'] = [
+    legacy_analysis_topics = [
         topic for topic in _DEFAULT_ANALYSIS_TOPICS
         if topic in {'demand', 'competition', 'population', 'sales_potential',
                      'commercial_activity', 'accessibility', 'development', 'risk'}
     ] if contract['topic_ids'] else []
+    contract['analysis_topics'] = list(dict.fromkeys(legacy_analysis_topics + feature_analysis_topics))
     return contract
 
 
 def retrieval_requests_for_contract(contract: dict, fallback_requests: list) -> list:
     topics = contract.get('topic_ids') or []
     if not topics:
+        # Catalog-only intents are answered from candidate structured Evidence;
+        # keep the ordinary fallback RAG plan available for background context.
         return [] if contract.get('excluded_topics') else fallback_requests
     dimensions = list(dict.fromkeys(_DIMENSIONS[topic] for topic in topics if topic in _DIMENSIONS))
     return [{'tool': 'search_region_evidence',
