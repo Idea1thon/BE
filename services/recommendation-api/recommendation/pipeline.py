@@ -42,8 +42,9 @@ from . import urban_plan
 from .llm_explanation import explain_candidates
 from .llm_input_planner import parse_conditions, plan_input
 from .llm_runtime import LLMRuntimeError, reset_call_budget
+from .candidate_reranker import prefilter_candidates, rerank_candidates
 from .paths import SERVICE_ROOT, find_project_root
-from .rag_tools import execute_retrieval_requests
+from .rag_tools import build_retrieval_evidence, execute_retrieval_requests
 from .query_context import build_query_context
 from .question_contract import build_question_contract, retrieval_requests_for_contract
 from shapely import wkb as shapely_wkb
@@ -2737,7 +2738,7 @@ def run_pipeline(
         v for row in flow_dong.values()
         if (v := num(row, "총_유동인구_수")) is not None
     )
-    candidates = [build_candidate(
+    all_candidates = [build_candidate(
         request, conditions, seed, trdar_layer, hinterland_layer, dong_layer, sigungu_by_prefix, target_sigungu,
         store_trdar, sales_trdar, flow_trdar, change_trdar, store_dong, sales_dong, flow_dong, change_dong,
         trdar_area, dong_area, eh_trdar, eh_trdar_dist, eh_dong, eh_dong_dist, stations, buses, apts,
@@ -2747,37 +2748,18 @@ def run_pipeline(
         rone_vac_areas, rone_vac_seoul, rone_vac_path,
         pop, flow_dong_total_seoul, plan,
     ) for seed in seeds]
-    # 검증된 품질 신호가 없으므로 근거 수로 등수를 매기지 않는다(-len(reasons) 제거).
-    # tier → (같은 tier 안에서 candidate_type 라운드로빈으로 인터리브) → 반대근거 적은 순 → 신뢰도 → id.
-    # 인터리브: --limit로 자를 때 특정 앵커 타입(예: 아파트)이 id 정렬 편향으로 통째로 잘리는 것을 막는다.
-    # 신뢰도는 _sort_confidence(인구 FC-06 하향 반영 전) 기준 — 인구 근거는 순위 불변(F36).
-    _conf_rank = {"high": 0, "medium": 1, "low": 2}
-    _tier_rank = {"추천": 0, "조건부 검토": 1, "주의": 2}
-
-    def _within_key(c: dict[str, Any]) -> tuple:
-        return (len(c["counter_evidence"]), _conf_rank.get(c["_sort_confidence"], 3), c["candidate_id"])
-
-    ordered: list[dict[str, Any]] = []
-    for tier in sorted({c["fit_tier"] for c in candidates}, key=lambda t: _tier_rank.get(t, 3)):
-        group = sorted((c for c in candidates if c["fit_tier"] == tier), key=_within_key)
-        buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for c in group:
-            buckets[c["candidate_type"]].append(c)
-        cursors = {t: 0 for t in buckets}
-        while any(cursors[t] < len(buckets[t]) for t in buckets):
-            for t in sorted(buckets):
-                if cursors[t] < len(buckets[t]):
-                    ordered.append(buckets[t][cursors[t]])
-                    cursors[t] += 1
-    candidates = ordered
-    for c in candidates:
-        c.pop("_sort_confidence", None)  # 정렬 전용 내부 키 — 스키마·출력에서 제외
-    candidates = _order_by_preferences(candidates, preferences)
-    if limit is not None:
-        candidates = candidates[:limit]
+    # The preliminary fit_tier created by the legacy feature builder is not a
+    # final recommendation. It is intentionally excluded from the prefilter;
+    # only explicit constraints and data-safety signals may narrow the search.
+    for candidate in all_candidates:
+        candidate.pop("_sort_confidence", None)
+    requested_limit = limit or 5
+    prefiltered_candidates, prefilter_diagnostics = prefilter_candidates(
+        all_candidates, top_k=requested_limit,
+    )
     target_areas = []
     seen_target_codes = set()
-    for candidate in candidates:
+    for candidate in prefiltered_candidates:
         host = (candidate.get("location") or {}).get("host_commercial_area") or {}
         if host.get("code") and str(host["code"]) not in seen_target_codes:
             seen_target_codes.add(str(host["code"]))
@@ -2792,6 +2774,19 @@ def run_pipeline(
         target_areas=target_areas,
     )
     input_interpretation["retrieval"] = retrieval_context
+    try:
+        candidates, selection = rerank_candidates(
+            prefiltered_candidates,
+            retrieval_evidence=build_retrieval_evidence(retrieval_context),
+            query_context=query_context,
+            limit=limit,
+            llm_mode=llm_mode,
+        )
+    except LLMRuntimeError as exc:
+        raise PipelineDependencyError("후보 LLM rerank를 수행할 수 없습니다.") from exc
+    # The final ordering is model-owned. Preferences remain presentation
+    # metadata and never alter the model's fit tier or evidence.
+    selection["prefilter"] = prefilter_diagnostics
     try:
         errors = validate_candidates(candidates)
     except Exception as exc:
@@ -2825,7 +2820,10 @@ def run_pipeline(
         except LLMRuntimeError as exc:
             raise PipelineDependencyError("추천 설명 LLM을 사용할 수 없습니다.") from exc
     summary = {
-        "candidate_count": len(candidates), "seed_count_before_limit": len(seeds), "applied_limit": limit,
+        "candidate_count": len(candidates), "seed_count_before_limit": len(seeds), "applied_limit": requested_limit,
+        "deterministic_prefilter_count": len(prefiltered_candidates),
+        "candidate_flow": "seed -> deterministic_prefilter -> rag_llm_rerank -> top_k",
+        "selection": selection,
         "fit_tier_counts": dict(Counter(c["fit_tier"] for c in candidates)),
         "greenfield_count": sum(c["greenfield"] for c in candidates),
         "schema_error_count": len(errors), "coverage": dict(coverage),
@@ -2893,6 +2891,10 @@ def run_pipeline(
             "mode": explanations["explanation_mode"],
             "degraded": explanations["degraded"],
             "llm": explanations["llm"],
+            "generation_status": explanations.get("generation_status"),
+            "generated_sections_by_candidate": explanations.get("generated_sections_by_candidate", {}),
+            "failed_sections_by_candidate": explanations.get("failed_sections_by_candidate", {}),
+            "grounding_status_by_candidate": explanations.get("grounding_status_by_candidate", {}),
         },
     }
     manifest_source_paths = {relative_path(p) for p in source_paths.values()}
@@ -2901,9 +2903,10 @@ def run_pipeline(
     # 후보 evidence에 실제 연결된 경로(합성 seed·생성 evidence·인허가)를 manifest 최상위에도 합친다.
     for candidate in candidates:
         manifest_source_paths.update(candidate["feature_build"].get("sources", []))
-    manifest = {"pipeline": "recommendation_pipeline_v2_llm_input", "build_passed": not errors, "request": request_payload,
+    manifest = {"pipeline": "recommendation_pipeline_v3_rag_llm_rerank", "build_passed": not errors, "request": request_payload,
                 "candidate_count": len(candidates), "source_paths": sorted(manifest_source_paths),
                 "data_source": data_source_manifest, "seed_mode": seed_mode,
+                "selection": selection,
                 "input_interpretation": input_interpretation,
                 "explanation": explanations["llm"],
                 "validation": {"schema_errors": errors, "generated_by": "GPT(Codex)", "generated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()}}

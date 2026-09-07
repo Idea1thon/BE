@@ -451,6 +451,54 @@ def _restore_required_context(candidate: dict[str, Any], card: dict[str, Any]) -
     return restored
 
 
+_EXPLANATION_SECTIONS = ('summary', 'strengths', 'risks', 'comparison', 'outlook')
+
+
+def _section_diagnostics(
+    candidate: dict[str, Any], draft: Any, final: dict[str, Any],
+    decisions: dict[str, str], *, fallback_reason: str | None,
+) -> tuple[list[str], list[str], str]:
+    """Map legacy card buckets to explicit partial-generation diagnostics."""
+    if fallback_reason or not isinstance(draft, dict):
+        return [], list(_EXPLANATION_SECTIONS), 'not_attempted'
+    generated: list[str] = []
+    template = template_card(candidate)
+    if (isinstance(draft.get('summary'), str)
+            and draft.get('summary') != template['summary']
+            and final.get('summary') != template['summary']
+            and decisions.get('summary') == 'supported'):
+        generated.append('summary')
+    for bucket, section in (('reasons', 'strengths'), ('counter_evidence', 'risks')):
+        values = draft.get(bucket)
+        if isinstance(values, list) and any(
+            isinstance(value, str) and value not in _candidate_claims(candidate, bucket)
+            and decisions.get(f'{bucket}:{index}') == 'supported'
+            for index, value in enumerate(values)
+        ) and final.get(bucket):
+            generated.append(section)
+    context_values = draft.get('context_notes')
+    if isinstance(context_values, list) and any(
+        isinstance(value, str) and value not in _candidate_claims(candidate, 'context_notes')
+        and decisions.get(f'context_notes:{index}') == 'supported'
+        for index, value in enumerate(context_values)
+    ) and final.get('context_notes'):
+        generated.append('comparison')
+        if any(re.search(r'개발|계획|미래|전망|변화|추진', str(value)) for value in context_values):
+            generated.append('outlook')
+    generated = list(dict.fromkeys(generated))
+    rewritten = changed_claims(candidate, draft)
+    supported = sum(decisions.get(key) == 'supported' for key in rewritten)
+    if not rewritten:
+        grounding = 'not_needed' if generated else 'not_attempted'
+    elif supported == len(rewritten):
+        grounding = 'grounded'
+    elif supported:
+        grounding = 'partial'
+    else:
+        grounding = 'unverified'
+    return generated, [section for section in _EXPLANATION_SECTIONS if section not in generated], grounding
+
+
 def _finish_question_explanation(card, candidate, selected, retrieval, contract, comparison, sources):
     final, diagnostic = finish_question_card(card, candidate, selected, retrieval, contract)
     # Remove the provisional missing-explanation notice before comparisons
@@ -503,7 +551,8 @@ def explain_candidates(
 사용자 query_context의 질문과 부정·시간대·대상 고객 조건에 직접 답하고, 정렬된 출처에서 관련 근거를 먼저 설명하라. 관련 데이터가 없으면 미확인이라고 명시하라.
 summary와 근거 문장은 자연스럽게 재서술할 수 있다. summary는 기존 등급과 미확인 조건 검토 필요성을 유지하라.
 원문과 달라진 문장은 citations에 출력 위치(summary 또는 context_notes:0 등)를 키로, explanation_sources의 참조 ID 배열을 값으로 넣어라.
-citations에는 같은 bucket의 출처와 candidate-evidence:* 출처만 넣어라. summary는 카드의 다른 관측 bucket 출처도 인용할 수 있다. retrieval-* 검색 근거는 context_notes 문장에서만 인용하고, 지역·기간·단위·출처를 명시한 배경 설명으로만 활용하라.
+citations에는 같은 bucket의 출처와 candidate-evidence:* 출처만 넣어라. summary는 카드의 다른 관측 bucket 출처도 인용할 수 있다.
+retrieval-* 검색 근거는 서버가 선택한 상권·행정동 범위의 관측값이다. source_region, spatial_unit_name, 기간, 단위를 유지하고, 후보 건물의 실적이나 성공확률로 바꾸지 말라. retrieval-*는 context_notes 배경 설명과 질문 비교에만 인용하라.
 근거에 없는 관측 사실·수치·인과·추천 등급을 추가하지 말라. 분기 간 개월 수 차이처럼 계산해서 얻는 숫자도 만들지 말고, 필요하면 숫자 없이 서술하라.
 지역·배경 통계는 context_notes에만 두고 reasons/counter_evidence로 옮기지 말라. 지역 통계를 후보 건물의 실적으로 표현하지 말라.
 원문의 부정·불확실성·한계를 유지하라. 그대로 복사하는 문장은 citations가 없어도 된다. 검증을 통과하지 못한 재서술 문장은 서버가 제거한다.
@@ -565,7 +614,25 @@ claim_type은 descriptive 또는 associational만 허용한다."""
                     card, verified = prune_unverified_claims(candidate, card, verified)
                 else:
                     verified = set()
-                if not any(card[bucket] for bucket in _OBSERVED_BUCKETS):
+                # One verified section is still useful. Keep it and fall back
+                # only when the model produced no surviving content at all.
+                # Verbatim/template claims that survived pruning still make
+                # the generated card useful: unsupported claims must be
+                # removed individually rather than forcing a whole-card
+                # replacement and hiding their diagnostics.
+                has_generated_section = (
+                    isinstance(card.get('summary'), str)
+                    and card.get('summary') != template_card(candidate)['summary']
+                ) or any(
+                    any(value not in _candidate_claims(candidate, bucket)
+                        for value in card.get(bucket, []) if isinstance(value, str))
+                    for bucket in _OBSERVED_BUCKETS
+                )
+                preserved_server_sections = any(
+                    card.get(bucket) for bucket in ('counter_evidence', 'missing_features')
+                )
+                preserved_card_content = any(card.get(bucket) for bucket in _OBSERVED_BUCKETS)
+                if not has_generated_section and not preserved_server_sections and not preserved_card_content:
                     fallback_reason = 'empty_explanation'
                     raise LLMRuntimeError('검증 후 설명 목록이 모두 비어 있어 원천 근거 템플릿으로 복귀합니다.')
                 restored = _restore_required_context(candidate, card)
@@ -577,11 +644,23 @@ claim_type은 descriptive 또는 associational만 허용한다."""
                     final, question_diagnostic = _finish_question_explanation(
                         final, candidate, selected, retrieval_evidence, contract, comparison, sources)
                     question_grounding[str(candidate.get('candidate_id'))] = question_diagnostic
+                    generated_sections, failed_sections, grounding_status = _section_diagnostics(
+                        candidate, draft, final, decisions, fallback_reason=None)
+                    if generated_sections:
+                        generation_status = (
+                            'complete' if set(generated_sections) == set(_EXPLANATION_SECTIONS)
+                            else 'partial'
+                        )
+                    else:
+                        generation_status = 'fallback'
                     cards.append(final)
                     verification[str(candidate.get('candidate_id'))] = build_verification_diagnostics(
                         template_card(candidate), draft, final, decisions,
                         generation_status=generation_status, fallback_reason=None,
                         restored_source_ids=restored,
+                        generated_sections=generated_sections,
+                        failed_sections=failed_sections,
+                        grounding_status=grounding_status,
                     )
                     llm_used += 1
                     continue
@@ -605,10 +684,15 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         final, question_diagnostic = _finish_question_explanation(
             final, candidate, selected, retrieval_evidence, contract, comparison, sources)
         question_grounding[str(candidate.get('candidate_id'))] = question_diagnostic
+        generated_sections, failed_sections, grounding_status = _section_diagnostics(
+            candidate, draft, final, decisions, fallback_reason=fallback_reason)
         cards.append(final)
         verification[str(candidate.get('candidate_id'))] = build_verification_diagnostics(
             template_card(candidate), draft, final, decisions,
             generation_status=generation_status, fallback_reason=fallback_reason,
+            generated_sections=generated_sections,
+            failed_sections=failed_sections,
+            grounding_status=grounding_status,
         )
 
     if not candidates:
@@ -619,6 +703,26 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         mode = "mixed"
     else:
         mode = "template"
+    generated_sections_by_candidate = {
+        candidate_id: value.get('generated_sections', [])
+        for candidate_id, value in verification.items()
+    }
+    failed_sections_by_candidate = {
+        candidate_id: value.get('failed_sections', [])
+        for candidate_id, value in verification.items()
+    }
+    grounding_status_by_candidate = {
+        candidate_id: value.get('grounding_status', 'not_attempted')
+        for candidate_id, value in verification.items()
+    }
+    overall_generation_status = (
+        'complete' if verification and all(
+            set(value.get('generated_sections', [])) == set(_EXPLANATION_SECTIONS)
+            for value in verification.values()
+        )
+        else 'partial' if any(value.get('generated_sections') for value in verification.values())
+        else 'fallback'
+    )
     return {
         "cards": cards,
         "empty_reason": "no_candidates" if not candidates else None,
@@ -629,6 +733,10 @@ claim_type은 descriptive 또는 associational만 허용한다."""
         "question_grounding_by_candidate": question_grounding,
         "question_comparison": comparison,
         "query_context": query_context or {},
+        "generation_status": overall_generation_status,
+        "generated_sections_by_candidate": generated_sections_by_candidate,
+        "failed_sections_by_candidate": failed_sections_by_candidate,
+        "grounding_status_by_candidate": grounding_status_by_candidate,
         "explanation_mode": mode,
         "degraded": mode != "llm",
         "llm": {**config.public_metadata(), "calls_succeeded": llm_used, "candidate_count": len(candidates), "validation_or_runtime_errors": errors[:20]},

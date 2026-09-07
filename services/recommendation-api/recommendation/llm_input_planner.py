@@ -19,6 +19,14 @@ from .llm_runtime import (
 )
 from .rag_tools import validate_retrieval_requests
 
+# 특별조건 텍스트가 없어 planner LLM 이 돌지 않아도, 선택 지역·업종의 상권
+# 배경 지표는 항상 조회한다(읽기 전용, 지역·업종·분기는 서버가 지정).
+_BASELINE_RETRIEVAL_REQUEST = {
+    "tool": "search_region_evidence",
+    "dimensions": ["sales", "stores", "flow", "change"],
+    "reason": "선택 지역·업종 상권 배경 지표 기본 조회",
+}
+
 
 SUPPORTED_INDUSTRIES = {f"CS100{i:03d}" for i in range(1, 11)}
 INDUSTRY_NAMES = {
@@ -550,6 +558,10 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
         retrieval_requests = []
         inference_hypotheses = []
         parse_confidence = "high" if explicit_industry_code or len(candidates) == 1 else "low"
+
+    if not retrieval_requests:
+        # planner 가 조회를 요청하지 않았거나 결정론 폴백이면 기본 조회를 넣는다.
+        retrieval_requests = validate_retrieval_requests([_BASELINE_RETRIEVAL_REQUEST])
 
     if not explicit_industry_code and len(candidates) != 1:
         questions.insert(0, "창업하려는 업종을 10개 업종 중 하나로 선택해 주세요.")

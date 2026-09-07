@@ -53,11 +53,13 @@ class QuestionPipelineTests(unittest.TestCase):
                 run_pipeline(request, out_dir=Path(directory), limit=1, llm_mode='offline')
         return source, requests, explain, contract
 
-    def test_only_final_limited_host_is_retrieved_and_contract_is_shared(self):
+    def test_prefilter_window_hosts_are_retrieved_and_contract_is_shared(self):
         source, requests, explain, contract = self._run_until_explanation([
             {'code': '123', 'name': '선택 상권'}, {'code': '456', 'name': '제외 상권'}])
         self.assertEqual(source.retrieve_requests.call_args.kwargs['target_areas'], [
-            {'spatial_unit_type': 'commercial_area', 'spatial_unit_code': '123', 'spatial_unit_name': '선택 상권'}])
+            {'spatial_unit_type': 'commercial_area', 'spatial_unit_code': '123', 'spatial_unit_name': '선택 상권'},
+            {'spatial_unit_type': 'commercial_area', 'spatial_unit_code': '456', 'spatial_unit_name': '제외 상권'},
+        ])
         self.assertIs(explain.call_args.kwargs['query_context']['question_contract'], contract)
         self.assertIs(requests.call_args.args[0], contract)
         self.assertEqual(len(explain.call_args.args[0]), 1)

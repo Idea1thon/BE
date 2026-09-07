@@ -10,6 +10,7 @@ import math
 import re
 import hashlib
 import json
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
@@ -329,12 +330,26 @@ def _numeric_evidence(value: Any) -> int | float | None:
     return result if math.isfinite(result) else None
 
 
-def build_retrieval_evidence(context: Any) -> list[dict[str, Any]]:
-    """Expose validated regional facts for explanation, never candidate scoring.
+_RETRIEVAL_METRICS = {
+    # dimension -> (source_table, unit, integer-only)
+    "sales": ("location.sales_quarter", "원", False),
+    "stores": ("location.store_quarter", "개", True),
+    "flow": ("location.flow_quarter", "명", False),
+    "rent": ("context.rent_index", "지수", False),
+    "vacancy": ("context.rent_index", "%", False),
+    "workplace_population": ("context.population_snapshot", "명", True),
+    "change_indicator_code": ("context.metric_snapshot", "코드", None),
+    "change_indicator_name": ("context.metric_snapshot", "분류", None),
+}
 
-    Every record carries its own source, spatial scope, period, industry and
-    unit. Unknown or missing values are omitted rather than interpreted as zero.
-    IDs depend on the source coordinates and metric, not retrieval ordering.
+
+def build_retrieval_evidence(context: Any) -> list[dict[str, Any]]:
+    """Validate and expose bounded, citable RAG rows.
+
+    Retrieval evidence is kept at its observed spatial grain so question
+    comparisons can distinguish candidates. It is never merged into the
+    candidate's own evidence or used by deterministic selection. Every row
+    carries the source scope and limitation supplied by the server query.
     """
     if not isinstance(context, dict) or not isinstance(context.get("results"), list):
         return []
@@ -366,9 +381,9 @@ def build_retrieval_evidence(context: Any) -> list[dict[str, Any]]:
             if not isinstance(row, dict):
                 continue
             dimension = row.get("dimension")
-            if not isinstance(dimension, str) or dimension not in metrics:
+            if not isinstance(dimension, str) or dimension not in _RETRIEVAL_METRICS:
                 continue
-            source_table, unit = metrics[dimension]
+            source_table, _, _ = _RETRIEVAL_METRICS[dimension]
             if row.get("source_table") != source_table:
                 continue
             period = str(row.get("period") or "")
@@ -396,6 +411,7 @@ def build_retrieval_evidence(context: Any) -> list[dict[str, Any]]:
                 if not isinstance(values, dict):
                     continue
                 values = {key: values.get(key) for key in ("total_store_count", "franchise_store_count")}
+            source_table, unit = metrics[dimension]
             for metric, raw_value in values.items():
                 if dimension.startswith("change_indicator_"):
                     value = str(raw_value).strip() if isinstance(raw_value, str) else None

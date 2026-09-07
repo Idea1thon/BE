@@ -11,6 +11,7 @@ import json
 import os
 import re
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -83,6 +84,9 @@ class LLMConfig:
     timeout_s: float = 20.0
     max_output_tokens: int = 1200
     max_response_bytes: int = 2_000_000
+    max_retries: int = 2
+    retry_backoff_s: float = 0.25
+    max_concurrency: int = 2
 
     @classmethod
     def from_env(cls, mode: str = "auto") -> "LLMConfig":
@@ -107,9 +111,24 @@ class LLMConfig:
             max_response_bytes = int(os.getenv("LLM_MAX_RESPONSE_BYTES", "2000000"))
         except ValueError:
             max_response_bytes = 2_000_000
+        try:
+            max_retries = int(os.getenv("LLM_RETRY_COUNT", "2"))
+        except ValueError:
+            max_retries = 2
+        try:
+            retry_backoff_s = float(os.getenv("LLM_RETRY_BACKOFF_SECONDS", "0.25"))
+        except ValueError:
+            retry_backoff_s = 0.25
+        try:
+            max_concurrency = int(os.getenv("LLM_MAX_CONCURRENCY", "2"))
+        except ValueError:
+            max_concurrency = 2
         return cls(
             mode, endpoint, api_key, model, max(1.0, timeout_s), max(128, max_output_tokens),
             max(64_000, min(20_000_000, max_response_bytes)),
+            max(0, min(4, max_retries)),
+            max(0.0, min(5.0, retry_backoff_s)),
+            max(1, min(8, max_concurrency)),
         )
 
     @property
@@ -122,6 +141,9 @@ class LLMConfig:
             "configured": self.available,
             "model": self.model or None,
             "endpoint_configured": bool(self.endpoint),
+            "timeout_seconds": self.timeout_s,
+            "retry_count": self.max_retries,
+            "max_concurrency": self.max_concurrency,
         }
 
 
@@ -214,19 +236,34 @@ class OpenAICompatibleJsonClient:
             },
             method="POST",
         )
-        try:
-            with urlopen(request, timeout=self.config.timeout_s) as response:
-                raw_bytes = response.read(self.config.max_response_bytes + 1)
-                if len(raw_bytes) > self.config.max_response_bytes:
-                    raise LLMRuntimeError("LLM 응답 본문 크기 제한 초과")
-                raw = raw_bytes.decode("utf-8")
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:500]
-            raise LLMRuntimeError(f"LLM HTTP 오류 {exc.code}: {detail}") from exc
-        except URLError as exc:
-            raise LLMRuntimeError(f"LLM 네트워크 오류: {exc.reason}") from exc
-        except TimeoutError as exc:
-            raise LLMRuntimeError("LLM 요청 timeout") from exc
+        last_error: LLMRuntimeError | None = None
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                with urlopen(request, timeout=self.config.timeout_s) as response:
+                    raw_bytes = response.read(self.config.max_response_bytes + 1)
+                    if len(raw_bytes) > self.config.max_response_bytes:
+                        raise LLMRuntimeError("LLM 응답 본문 크기 제한 초과")
+                    raw = raw_bytes.decode("utf-8")
+                break
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:500]
+                last_error = LLMRuntimeError(f"LLM HTTP 오류 {exc.code}: {detail}")
+                retryable = exc.code == 429 or exc.code >= 500
+            except URLError as exc:
+                last_error = LLMRuntimeError(f"LLM 네트워크 오류: {exc.reason}")
+                retryable = True
+            except TimeoutError as exc:
+                last_error = LLMRuntimeError("LLM 요청 timeout")
+                retryable = True
+            except LLMRuntimeError:
+                raise
+            if not retryable or attempt >= self.config.max_retries:
+                raise last_error from None
+            delay = self.config.retry_backoff_s * (2 ** attempt)
+            if delay:
+                time.sleep(delay)
+        else:  # pragma: no cover - loop always either breaks or raises
+            raise last_error or LLMRuntimeError("LLM 요청 실패")
 
         try:
             response_json = json.loads(raw)
