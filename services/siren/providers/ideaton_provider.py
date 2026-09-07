@@ -174,6 +174,23 @@ class IdeatonProvider:
         return MarketSnapshot(location=location, market_data=market_data)
 
     async def _resolve_location(self, connection: Any, branch: BranchSnapshot) -> dict[str, Any]:
+        # Branch already stores the authoritative IDEATON commercial-area code
+        # and EPSG:5181 coordinates. Prefer those values so a formatted or
+        # abbreviated address cannot make the entire market layer disappear.
+        location = {
+            "gu_code": str(branch.region_code)[:5],
+            "admin_dong_code": None,
+            "trade_area_code": branch.trade_area_code,
+            "x_5181": branch.x_5181,
+            "y_5181": branch.y_5181,
+        }
+
+        # Address resolution remains a fallback for older branch rows that do
+        # not yet have the location columns populated. It may also supply the
+        # administrative-dong code without overriding stored branch facts.
+        if location["trade_area_code"] and location["x_5181"] is not None and location["y_5181"] is not None:
+            return location
+
         row = (
             await connection.execute(
                 text(
@@ -221,21 +238,16 @@ class IdeatonProvider:
         ).mappings().one_or_none()
 
         gu_code = str((row or {}).get("sigungu_code") or branch.region_code)[:5]
-        location = {
-            "gu_code": gu_code,
-            "admin_dong_code": (row or {}).get("admin_dong_code"),
-            "trade_area_code": None,
-            "x_5181": None,
-            "y_5181": None,
-        }
+        location["gu_code"] = gu_code
+        location["admin_dong_code"] = (row or {}).get("admin_dong_code")
         if row is not None:
             host_area_id = str(row.get("host_area_id") or "")
-            location.update(
-                {
-                    "trade_area_code": host_area_id.removeprefix("commercial_area:"),
-                    "x_5181": float(row["x_5181"]) if row["x_5181"] is not None else None,
-                    "y_5181": float(row["y_5181"]) if row["y_5181"] is not None else None,
-                }
+            location["trade_area_code"] = location["trade_area_code"] or host_area_id.removeprefix("commercial_area:")
+            location["x_5181"] = location["x_5181"] if location["x_5181"] is not None else (
+                float(row["x_5181"]) if row["x_5181"] is not None else None
+            )
+            location["y_5181"] = location["y_5181"] if location["y_5181"] is not None else (
+                float(row["y_5181"]) if row["y_5181"] is not None else None
             )
         return location
 
