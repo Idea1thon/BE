@@ -49,6 +49,63 @@ async def test_submit_returns_202_with_analysis_request_id(client, seeded):
     assert len(body["analysis_request_id"]) == 36  # uuid4
 
 
+async def test_owner_can_list_own_reports(client, seeded):
+    headers = await _auth(client, OWNER1)
+    created = await client.post(
+        "/api/v1/reports",
+        headers=headers,
+        json=_payload("2027-01", await _minimal_items(client, headers)),
+    )
+    assert created.status_code == 202, created.text
+
+    res = await client.get("/api/v1/reports?sort=month_desc", headers=headers)
+    assert res.status_code == 200, res.text
+    items = res.json()["items"]
+    assert items
+    assert items[0]["report_id"] == created.json()["report_id"]
+    assert items[0]["report_month"] == "2027-01"
+
+    hq = await _auth(client, HQ)
+    forbidden = await client.get("/api/v1/reports", headers=hq)
+    assert forbidden.status_code == 403
+
+
+async def test_report_list_supports_sort_pagination_and_validation(client, seeded):
+    headers = await _auth(client, OWNER1)
+    created_ids = []
+    for month in ("2028-01", "2028-02", "2028-03"):
+        created = await client.post(
+            "/api/v1/reports",
+            headers=headers,
+            json=_payload(month, await _minimal_items(client, headers)),
+        )
+        assert created.status_code == 202, created.text
+        created_ids.append(created.json()["report_id"])
+
+    all_reports = await client.get("/api/v1/reports?sort=month_asc&limit=500", headers=headers)
+    assert all_reports.status_code == 200, all_reports.text
+    all_items = all_reports.json()["items"]
+    first_created_index = next(
+        index for index, item in enumerate(all_items) if item["report_id"] == created_ids[0]
+    )
+
+    asc = await client.get(
+        f"/api/v1/reports?sort=month_asc&limit=2&offset={first_created_index}",
+        headers=headers,
+    )
+    assert asc.status_code == 200, asc.text
+    assert [item["report_id"] for item in asc.json()["items"]] == created_ids[:2]
+
+    desc = await client.get("/api/v1/reports?sort=month_desc&limit=1", headers=headers)
+    assert desc.status_code == 200, desc.text
+    assert desc.json()["items"][0]["report_id"] == created_ids[-1]
+
+    for query in ("sort=unknown", "limit=0", "offset=-1"):
+        invalid = await client.get(f"/api/v1/reports?{query}", headers=headers)
+        assert invalid.status_code == 400, invalid.text
+        assert invalid.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 async def test_net_sales_is_gross_minus_deductions(client, seeded):
     """DB_SCHEMA 4-7 D1: 매출 3그룹 합계 − 매출 차감 2항목."""
     headers = await _auth(client, OWNER1)
