@@ -70,6 +70,21 @@ class InputSourceGroundingTests(unittest.TestCase):
         self.assertIsNone(result["deposit_max_krw"])
         self.assertNotIn("deposit_max_krw: 개별 매물 보증금 데이터 없음", result["unsupported_conditions"])
 
+    def test_blank_free_text_with_explicit_industry_skips_the_planner_call(self):
+        # roadmap phase 3a: 업종·지역만 폼으로 고른 요청은 planner LLM 을 부르지 않는다.
+        env = {"LLM_API_URL": "https://example.test", "LLM_API_KEY": "test", "LLM_MODEL": "test"}
+        for text in ("", "   ", "\n\t"):
+            with self.subTest(text=repr(text)):
+                with patch.dict(environ, env), patch(
+                    "recommendation.llm_input_planner.OpenAICompatibleJsonClient.generate_json"
+                ) as generate_json:
+                    result = plan_input({"sigungu": "강남구"}, text,
+                                        explicit_industry_code="CS100010", llm_mode="auto")
+                generate_json.assert_not_called()
+                self.assertEqual(result["resolved_industry_code"], "CS100010")
+                self.assertEqual(result["planner"]["execution"], "deterministic_fallback")
+                self.assertFalse(result["confirmation_required"])
+
     def test_plan_keeps_grounded_warning_and_explicit_industry(self):
         text = "임대료는 매달 삼백만 원 이하"
         remote = {"conditions": {"monthly_rent_max_krw": {"value": 3000000, "source_text": text}},
