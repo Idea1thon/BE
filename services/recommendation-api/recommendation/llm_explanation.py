@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from .rag_tools import build_retrieval_evidence
-from .evidence_reranker import select_sources, order_card_claims
+from .evidence_reranker import select_sources, select_sources_batch, order_card_claims
 from .verification_diagnostics import build_verification_diagnostics
 from .grounding_periods import normalize_claim_periods
 from .question_contract import build_question_contract
@@ -634,7 +634,8 @@ def _explain_one_candidate(
     candidate: dict[str, Any], *, retrieval_evidence: list[dict[str, Any]],
     query_context: dict[str, Any], contract: dict[str, Any], comparison: dict[str, Any],
     client: OpenAICompatibleJsonClient | None, system_prompt: str,
-    llm_mode: str,
+    llm_mode: str, selected_sources: dict[str, dict[str, Any]] | None = None,
+    source_ranking: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate, verify, and finalize one card in isolation.
 
@@ -649,7 +650,14 @@ def _explain_one_candidate(
     scoped_ids = {item['evidence_id'] for item in retrieval_evidence if matches_candidate(item, candidate)}
     eligible = {ref: source for ref, source in sources.items()
                 if not ref.startswith('retrieval-') or ref in scoped_ids}
-    selected, ranking = select_sources(query_context, eligible, client)
+    if selected_sources is None:
+        selected, ranking = select_sources(query_context, eligible, client)
+    else:
+        # Batch reranking has already applied the same candidate-scoped
+        # filtering and mandatory-source rules. Copy the mapping so the
+        # per-candidate explanation path cannot mutate shared state.
+        selected = dict(selected_sources)
+        ranking = dict(source_ranking or {})
     ranking['catalog_source_count'] = len(sources)
     card = None
     draft = None
@@ -867,7 +875,25 @@ summary는 문자열이다. reasons, counter_evidence, context_notes, missing_fe
 인용은 최상위 citations 객체에만 넣고 각 값은 출처 ID 문자열 배열로 반환하라. missing_features의 재서술에도 출처 인용이 필요하다.
 서버의 반대근거와 미확인 항목을 빠뜨리지 말라. output_contract는 반환 형식이며 후보 사실을 추가하는 근거가 아니다.
 claim_type은 descriptive 또는 associational만 허용한다."""
+    source_selections: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    candidate_ids = [str(candidate.get('candidate_id')) for candidate in candidates]
+    if client and len(candidates) > 1 and len(set(candidate_ids)) == len(candidate_ids):
+        candidate_sources: dict[str, dict[str, dict[str, Any]]] = {}
+        for candidate in candidates:
+            candidate_id = str(candidate.get('candidate_id'))
+            sources = explanation_sources(candidate, retrieval_evidence)
+            scoped_ids = {
+                item['evidence_id'] for item in retrieval_evidence
+                if matches_candidate(item, candidate)
+            }
+            candidate_sources[candidate_id] = {
+                ref: source for ref, source in sources.items()
+                if not ref.startswith('retrieval-') or ref in scoped_ids
+            }
+        source_selections = select_sources_batch(query_context, candidate_sources, client)
+
     def run_one(candidate: dict[str, Any]) -> dict[str, Any]:
+        selection = source_selections.get(str(candidate.get('candidate_id')))
         return _explain_one_candidate(
             candidate,
             retrieval_evidence=retrieval_evidence,
@@ -877,6 +903,8 @@ claim_type은 descriptive 또는 associational만 허용한다."""
             client=client,
             system_prompt=system_prompt,
             llm_mode=llm_mode,
+            selected_sources=selection[0] if selection else None,
+            source_ranking=selection[1] if selection else None,
         )
 
     if client and len(candidates) > 1 and config.max_concurrency > 1:

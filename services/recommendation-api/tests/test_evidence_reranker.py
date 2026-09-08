@@ -1,6 +1,11 @@
 import unittest
 from unittest.mock import Mock, patch
-from recommendation.evidence_reranker import select_sources, order_card_claims, source_topic_ids
+from recommendation.evidence_reranker import (
+    select_sources,
+    select_sources_batch,
+    order_card_claims,
+    source_topic_ids,
+)
 from recommendation.llm_explanation import explain_candidates, template_card, validate_card
 from recommendation.llm_runtime import LLMConfig, LLMRuntimeError
 from recommendation.query_context import build_query_context
@@ -33,6 +38,85 @@ class EvidenceRerankerTests(unittest.TestCase):
             self.assertEqual(next(iter(selected)), 'context_notes:1')
         client.generate_json.side_effect = LLMRuntimeError('budget')
         self.assertEqual(select_sources(self.query, self.sources, client)[1]['mode'], 'lexical')
+
+    def test_batch_rerank_uses_one_model_call_for_multiple_candidates(self):
+        client = Mock()
+        client.generate_json.return_value = {
+            'items': [
+                {'candidate_id': 'candidate-a', 'ordered_ids': ['E02', 'E01']},
+                {'candidate_id': 'candidate-b', 'ordered_ids': ['E01', 'E02']},
+            ]
+        }
+        result = select_sources_batch(
+            self.query,
+            {'candidate-a': self.sources, 'candidate-b': self.sources},
+            client,
+        )
+
+        self.assertEqual(client.generate_json.call_count, 1)
+        payload = client.generate_json.call_args.args[1]
+        self.assertEqual([item['candidate_id'] for item in payload['items']], ['candidate-a', 'candidate-b'])
+        self.assertEqual(result['candidate-a'][1]['mode'], 'llm')
+        self.assertEqual(result['candidate-b'][1]['mode'], 'llm')
+        self.assertEqual(list(result['candidate-a'][0])[:2], ['context_notes:0', 'context_notes:1'])
+        self.assertEqual(list(result['candidate-b'][0])[:2], ['context_notes:1', 'context_notes:0'])
+
+    def test_batch_rerank_falls_back_per_candidate_when_response_entry_is_missing(self):
+        client = Mock()
+        client.generate_json.return_value = {
+            'items': [{'candidate_id': 'candidate-a', 'ordered_ids': ['E01']}]
+        }
+        result = select_sources_batch(
+            self.query,
+            {'candidate-a': self.sources, 'candidate-b': self.sources},
+            client,
+        )
+
+        self.assertEqual(client.generate_json.call_count, 1)
+        self.assertEqual(result['candidate-a'][1]['mode'], 'llm_partial')
+        self.assertEqual(result['candidate-b'][1]['mode'], 'lexical')
+        self.assertEqual(result['candidate-b'][1]['diagnostics']['failure_reason'], 'missing_candidate')
+
+    @patch('recommendation.llm_explanation.LLMConfig.from_env')
+    @patch('recommendation.llm_explanation.OpenAICompatibleJsonClient')
+    def test_explanation_pipeline_uses_one_batch_rerank_call(self, client_type, config):
+        config.return_value = LLMConfig(endpoint='https://example.invalid', api_key='test', model='test')
+        candidates = [
+            {
+                'candidate_id': 'candidate-a', 'fit_tier': '조건부 검토',
+                'reasons': ['후보 A 근거'], 'counter_evidence': [],
+                'context_notes': ['후보 A 배경'], 'missing_features': [], 'evidence': [],
+            },
+            {
+                'candidate_id': 'candidate-b', 'fit_tier': '조건부 검토',
+                'reasons': ['후보 B 근거'], 'counter_evidence': [],
+                'context_notes': ['후보 B 배경'], 'missing_features': [], 'evidence': [],
+            },
+        ]
+        payloads = []
+
+        def respond(_prompt, payload):
+            payloads.append(payload)
+            if 'items' in payload:
+                return {
+                    'items': [
+                        {'candidate_id': item['candidate_id'], 'ordered_ids': ['E01']}
+                        for item in payload['items']
+                    ]
+                }
+            candidate_id = payload['candidate_evidence']['candidate_id']
+            candidate = next(item for item in candidates if item['candidate_id'] == candidate_id)
+            return template_card(candidate)
+
+        client_type.return_value.generate_json.side_effect = respond
+        result = explain_candidates(
+            candidates,
+            query_context=build_query_context('직장인 점심 수요를 알고 싶어요'),
+        )
+
+        self.assertEqual(sum('items' in payload for payload in payloads), 1)
+        self.assertEqual(client_type.return_value.generate_json.call_count, 3)
+        self.assertEqual(result['llm']['calls_succeeded'], 2)
 
     def test_partial_ranking_keeps_valid_order_and_reports_repairs(self):
         client = Mock()
