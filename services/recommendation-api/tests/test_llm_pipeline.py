@@ -330,7 +330,7 @@ class LLMRuntimeConfigTests(unittest.TestCase):
             sent.append(body)
             if "max_completion_tokens" in body:
                 raise LLMRuntimeError("LLM HTTP 오류 400: Unsupported parameter: 'max_tokens' ... use max_completion_tokens")
-            return {"ok": True}
+            return {"ok": True}, {"attempts": 1, "finish_reason": "stop", "usage": {}}
 
         with patch.object(client, "_post_chat", side_effect=fake_post):
             reset_call_budget()

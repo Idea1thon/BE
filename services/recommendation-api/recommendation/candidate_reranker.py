@@ -16,6 +16,7 @@ from .llm_runtime import (
     LLMRuntimeError,
     OpenAICompatibleJsonClient,
     RECOMMENDATION_LLM_POLICY,
+    llm_stage,
 )
 
 
@@ -197,8 +198,9 @@ def rerank_candidates(
 
     try:
         client = OpenAICompatibleJsonClient(config)
-        reply = client.generate_json(
-            f"""{RECOMMENDATION_LLM_POLICY}
+        with llm_stage("candidate_rerank"):
+            reply = client.generate_json(
+                f"""{RECOMMENDATION_LLM_POLICY}
 
 추가 역할: 선택 지역과 업종의 후보를 비교하는 근거 기반 reranker다.
 결정론적 tier, 기존 순위, reason 문장을 믿고 복사하지 말고 raw_signals와 regional_retrieval_evidence를 비교하라.
@@ -206,8 +208,8 @@ hard constraint를 위반한 후보는 추천하지 말고, 상충하는 근거�
 반드시 입력 후보 ID만 사용하고, 각 결과의 evidence_refs에는 입력의 allowed_evidence_refs에 있는 값만 넣어라.
 모델이 근거를 충분히 확인할 수 없으면 조건부 검토 또는 주의로 낮추고 evidence_refs를 비워 두지 말라.
 JSON 형식은 {{"ranked_candidates":[{{"candidate_id":"...","rank":1,"fit_tier":"추천|조건부 검토|주의","evidence_refs":["..."]}}]}} 하나만 반환하라.""",
-            candidate_reasoning_payload(candidates, retrieval_evidence, query_context),
-        )
+                candidate_reasoning_payload(candidates, retrieval_evidence, query_context),
+            )
     except LLMRuntimeError as exc:
         if llm_mode == "required":
             raise

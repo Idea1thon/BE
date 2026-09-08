@@ -41,7 +41,7 @@ from . import population
 from . import urban_plan
 from .llm_explanation import explain_candidates
 from .llm_input_planner import parse_conditions, plan_input
-from .llm_runtime import LLMRuntimeError, reset_call_budget
+from .llm_runtime import LLMRuntimeError, reset_call_budget, summarize_telemetry
 from .candidate_reranker import prefilter_candidates, rerank_candidates
 from .paths import SERVICE_ROOT, find_project_root
 from .rag_tools import build_retrieval_evidence, execute_retrieval_requests
@@ -2910,6 +2910,7 @@ def run_pipeline(
                 "selection": selection,
                 "input_interpretation": input_interpretation,
                 "explanation": explanations["llm"],
+                "llm_telemetry": summarize_telemetry(),
                 "validation": {"schema_errors": errors, "generated_by": "GPT(Codex)", "generated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()}}
     atomic_write_text(out_dir / "request.json", json.dumps(request_payload, ensure_ascii=False, indent=2))
     atomic_write_text(out_dir / "candidates.json", json.dumps(candidates, ensure_ascii=False, indent=2))

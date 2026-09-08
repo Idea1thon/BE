@@ -16,6 +16,7 @@ from .llm_runtime import (
     LLMRuntimeError,
     OpenAICompatibleJsonClient,
     RECOMMENDATION_LLM_POLICY,
+    llm_stage,
 )
 from .rag_tools import validate_retrieval_requests
 
@@ -508,7 +509,8 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
             "output_shape": {"industry_candidates": [], "conditions": {}, "preferences": {}, "retrieval_requests": [], "clarification_questions": [], "unsupported_conditions": [], "analysis_plan": [], "inference_hypotheses": []},
         }
         try:
-            remote = OpenAICompatibleJsonClient(config).generate_json(prompt, payload)
+            with llm_stage("planner"):
+                remote = OpenAICompatibleJsonClient(config).generate_json(prompt, payload)
             planner_mode = "llm"
         except LLMRuntimeError as exc:
             remote_error = str(exc)

@@ -5,7 +5,14 @@ import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
-from recommendation.llm_runtime import LLMConfig, OpenAICompatibleJsonClient
+from recommendation.llm_runtime import (
+    LLMConfig,
+    LLMRuntimeError,
+    OpenAICompatibleJsonClient,
+    llm_stage,
+    reset_call_budget,
+    summarize_telemetry,
+)
 
 
 class _Response:
@@ -48,9 +55,36 @@ class LLMRuntimeResilienceTests(unittest.TestCase):
             'choices': [{'message': {'content': '{"ok": true}'}}],
         }).encode('utf-8')
         with patch('recommendation.llm_runtime.urlopen', side_effect=[URLError('temporary'), _Response(body)]) as urlopen:
-            result = client._post_chat({'model': 'test'})
+            result, meta = client._post_chat({'model': 'test'})
         self.assertEqual(result, {'ok': True})
         self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(meta['attempts'], 2)
+
+    def test_run_telemetry_records_stage_latency_and_token_usage(self):
+        config = LLMConfig(
+            mode='auto', endpoint='https://example.invalid', api_key='test', model='test',
+            max_retries=0, retry_backoff_s=0,
+        )
+        client = OpenAICompatibleJsonClient(config)
+        ok_body = json.dumps({
+            'choices': [{'message': {'content': '{"ok": true}'}, 'finish_reason': 'stop'}],
+            'usage': {'prompt_tokens': 40, 'completion_tokens': 12,
+                      'completion_tokens_details': {'reasoning_tokens': 7}},
+        }).encode('utf-8')
+        reset_call_budget()
+        with patch('recommendation.llm_runtime.urlopen', return_value=_Response(ok_body)):
+            with llm_stage('explanation_card'):
+                client.generate_json('sys', {'a': 1})
+        with patch('recommendation.llm_runtime.urlopen', side_effect=URLError('down')):
+            with llm_stage('explanation_verify'), self.assertRaises(LLMRuntimeError):
+                client.generate_json('sys', {'a': 1})
+        summary = summarize_telemetry()
+        self.assertEqual(summary['call_count'], 2)
+        self.assertEqual(summary['ok_count'], 1)
+        self.assertEqual(summary['prompt_tokens_total'], 40)
+        self.assertEqual(summary['reasoning_tokens_total'], 7)
+        self.assertEqual(summary['by_stage']['explanation_card']['count'], 1)
+        self.assertEqual(summary['by_stage']['explanation_verify']['ok'], 0)
 
 
 if __name__ == '__main__':

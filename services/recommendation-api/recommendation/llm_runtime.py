@@ -12,9 +12,10 @@ import os
 import re
 import threading
 import time
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -41,9 +42,27 @@ class LLMRuntimeError(RuntimeError):
 class _CallBudgetState:
     used: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    # Phase 0 계측: 이 실행에서 발생한 LLM 호출별 지연·토큰·재시도 기록.
+    # 예산 카운터와 같은 ContextVar·lock 을 공유하므로 병렬 worker 도 하나의
+    # 리스트에 안전하게 append 한다. 원문 프롬프트·응답은 담지 않는다.
+    records: list[dict[str, Any]] = field(default_factory=list)
 
 
 _call_budget: ContextVar[_CallBudgetState | None] = ContextVar("llm_call_budget", default=None)
+
+# 어느 단계(planner/candidate_rerank/source_rerank/explanation_card/explanation_verify)의
+# 호출인지를 telemetry 에 남기기 위한 라벨. 호출부가 with llm_stage(...) 로 감싸며,
+# ContextVar 이므로 병렬 worker context(copy_context)마다 격리된다.
+_call_stage: ContextVar[str] = ContextVar("llm_call_stage", default="unspecified")
+
+
+@contextmanager
+def llm_stage(name: str) -> Iterator[None]:
+    token = _call_stage.set(name or "unspecified")
+    try:
+        yield
+    finally:
+        _call_stage.reset(token)
 
 
 def _max_calls_per_run() -> int:
@@ -69,6 +88,83 @@ def _charge_call(*, enforce: bool = True) -> None:
         if enforce and limit and state.used >= limit:
             raise LLMRuntimeError(f"LLM 호출 예산 초과 (LLM_MAX_CALLS_PER_RUN={limit})")
         state.used += 1
+
+
+def _record_call(
+    stage: str, started: float, meta: dict[str, Any], *, ok: bool, error: str | None = None,
+) -> None:
+    """호출 1건의 지연·토큰·재시도를 현재 실행의 telemetry 버퍼에 남긴다."""
+    state = _call_budget.get()
+    if state is None:
+        return
+    usage = meta.get("usage") if isinstance(meta.get("usage"), dict) else {}
+    record = {
+        "stage": stage or "unspecified",
+        "elapsed_s": round(max(0.0, time.perf_counter() - started), 3),
+        "ok": ok,
+        "attempts": meta.get("attempts", 1),
+        "finish_reason": meta.get("finish_reason"),
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+        "reasoning_tokens": usage.get("reasoning_tokens"),
+    }
+    if error:
+        record["error"] = error[:200]
+    with state.lock:
+        state.records.append(record)
+
+
+def call_telemetry() -> list[dict[str, Any]]:
+    """현재 실행에서 기록된 LLM 호출 telemetry 사본."""
+    state = _call_budget.get()
+    if state is None:
+        return []
+    with state.lock:
+        return [dict(record) for record in state.records]
+
+
+def _percentile(values: list[float], pct: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(0, min(len(ordered) - 1, round((pct / 100) * (len(ordered) - 1))))
+    return round(ordered[rank], 3)
+
+
+def summarize_telemetry() -> dict[str, Any]:
+    """run-manifest 용 요약: 전체·단계별 호출 수, 지연 p50/p95, 토큰 합계."""
+    records = call_telemetry()
+    if not records:
+        return {"call_count": 0, "records": []}
+    durations = [record["elapsed_s"] for record in records if isinstance(record.get("elapsed_s"), (int, float))]
+
+    def _sum(field_name: str) -> int:
+        return sum(int(record[field_name]) for record in records
+                   if isinstance(record.get(field_name), (int, float)))
+
+    by_stage: dict[str, dict[str, Any]] = {}
+    for record in records:
+        stage = record.get("stage") or "unspecified"
+        bucket = by_stage.setdefault(stage, {"count": 0, "ok": 0, "elapsed_s": 0.0})
+        bucket["count"] += 1
+        bucket["ok"] += 1 if record.get("ok") else 0
+        if isinstance(record.get("elapsed_s"), (int, float)):
+            bucket["elapsed_s"] = round(bucket["elapsed_s"] + record["elapsed_s"], 3)
+    return {
+        "call_count": len(records),
+        "ok_count": sum(1 for record in records if record.get("ok")),
+        "wall_lower_bound_s": round(sum(durations), 3),
+        "elapsed_p50_s": _percentile(durations, 50),
+        "elapsed_p95_s": _percentile(durations, 95),
+        "elapsed_max_s": round(max(durations), 3) if durations else None,
+        "prompt_tokens_total": _sum("prompt_tokens"),
+        "completion_tokens_total": _sum("completion_tokens"),
+        "reasoning_tokens_total": _sum("reasoning_tokens"),
+        "length_truncated_count": sum(1 for record in records if record.get("finish_reason") == "length"),
+        "retried_count": sum(1 for record in records if (record.get("attempts") or 1) > 1),
+        "by_stage": by_stage,
+        "records": records,
+    }
 
 
 # This is deliberately shared by the planner and explanation stages. The
@@ -228,18 +324,24 @@ class OpenAICompatibleJsonClient:
             {**common, "max_completion_tokens": self.config.max_output_tokens},
             {**common, "max_tokens": self.config.max_output_tokens, "temperature": 0},
         ]
+        stage = _call_stage.get()
+        started = time.perf_counter()
         last_exc: LLMRuntimeError | None = None
         for i, body in enumerate(shapes):
             try:
-                return self._post_chat(body)
+                value, meta = self._post_chat(body)
             except LLMRuntimeError as exc:
                 last_exc = exc
                 if i + 1 < len(shapes) and _is_param_rejection(str(exc)):
                     continue
+                _record_call(stage, started, {}, ok=False, error=str(exc))
                 raise
+            _record_call(stage, started, meta, ok=True)
+            return value
+        _record_call(stage, started, {}, ok=False, error=str(last_exc))
         raise last_exc  # pragma: no cover - shapes is non-empty
 
-    def _post_chat(self, body: dict[str, Any]) -> dict[str, Any]:
+    def _post_chat(self, body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         request = Request(
             _chat_url(self.config.endpoint or ""),
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
@@ -284,8 +386,19 @@ class OpenAICompatibleJsonClient:
             content = choice["message"]["content"]
         except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
             raise LLMRuntimeError(f"LLM 응답 형식 오류: {exc}") from exc
+        usage = response_json.get("usage") if isinstance(response_json.get("usage"), dict) else {}
+        details = usage.get("completion_tokens_details") if isinstance(usage.get("completion_tokens_details"), dict) else {}
+        meta = {
+            "attempts": attempt + 1,
+            "finish_reason": choice.get("finish_reason"),
+            "usage": {
+                "prompt_tokens": usage.get("prompt_tokens"),
+                "completion_tokens": usage.get("completion_tokens"),
+                "reasoning_tokens": details.get("reasoning_tokens"),
+            },
+        }
         # 추론 모델은 max_completion_tokens 안에서 추론 토큰을 먼저 쓰므로, 한도가
         # 낮으면 content 없이 잘린다(finish_reason=length). "JSON 아님" 대신 명확히.
         if choice.get("finish_reason") == "length" and not str(content or "").strip():
             raise LLMRuntimeError("LLM 응답이 max_completion_tokens 한도에서 잘림 (LLM_MAX_OUTPUT_TOKENS 상향 필요)")
-        return _extract_json(content)
+        return _extract_json(content), meta
