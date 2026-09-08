@@ -31,10 +31,10 @@ class LLMRuntimeError(RuntimeError):
 # 한 번의 추천 실행에서 허용할 LLM 호출 수 상한 (opt-in). 초과하면 generate_json 이
 # LLMRuntimeError 를 던지고, 호출부(plan_input·explain_candidates)는 기존 실패
 # 경로처럼 template/deterministic 폴백으로 전환한다. 기본값 0 = 상한 없음이며,
-# 질문이 있는 요청의 설명 단계는 source rerank를 최대 8개 후보 단위로 batch 처리한다.
-# 따라서 설명 관련 호출은 source-rerank ceil(N/8) + 카드 생성 N + 선택적 검증 N이다.
-# planner와 후보 선택 rerank는 별도 1회씩 발생한다. required 모드에서는
-# 캡을 무시한다(자체 비용캡을 외부 장애처럼 503 으로 보고하지 않도록).
+# 질문이 있는 요청의 설명 단계 호출은 source-rerank ceil(N/8) + 카드 생성 N +
+# 의미 검증 1(전 후보 배치, 검증할 재서술이 있을 때만)이다. planner와 후보 선택
+# rerank는 별도 1회씩 발생한다. required 모드에서는 캡을 무시한다(자체 비용캡을
+# 외부 장애처럼 503 으로 보고하지 않도록).
 # run_pipeline 이 요청마다 reset_call_budget() 를 호출한다. ContextVar 로 요청
 # 간 상태는 격리하고, 한 요청에서 복제된 worker context는 같은 상태 객체를
 # 공유하므로 병렬 호출도 하나의 예산을 함께 사용한다.

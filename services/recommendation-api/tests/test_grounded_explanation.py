@@ -80,6 +80,36 @@ class GroundedExplanationTests(unittest.TestCase):
         self.assertEqual(result['sources_by_candidate']['test']['reasons:0']['text'], self.candidate['reasons'][0])
         self.assertEqual(client_type.return_value.generate_json.call_count, 2)
 
+    @patch('recommendation.llm_explanation.LLMConfig.from_env')
+    @patch('recommendation.llm_explanation.OpenAICompatibleJsonClient')
+    def test_semantic_verification_is_one_batched_call_for_all_candidates(self, client_type, config):
+        config.return_value = LLMConfig(
+            endpoint='https://example.invalid', api_key='test', model='test', max_concurrency=2,
+        )
+        cand_a = {**self.candidate, 'candidate_id': 'A'}
+        cand_b = {**self.candidate, 'candidate_id': 'B'}
+        card_a = {**self.card, 'candidate_id': 'A'}
+        card_b = {**self.card, 'candidate_id': 'B',
+                  'reasons': ['버스정류장이 반경 내에 3곳 확인됩니다.']}
+        verify_payloads = []
+
+        def respond(_prompt, payload):
+            if 'checks' in payload:
+                verify_payloads.append(payload)
+                return {'verdicts': [{'claim_id': check['claim_id'], 'supported': True}
+                                     for check in payload['checks']]}
+            return card_a if payload['candidate_evidence']['candidate_id'] == 'A' else card_b
+
+        client_type.return_value.generate_json.side_effect = respond
+        result = explain_candidates([cand_a, cand_b], llm_mode='required')
+
+        self.assertEqual(len(verify_payloads), 1)
+        self.assertEqual({row['claim_id'].split('␟')[0] for row in verify_payloads[0]['checks']}, {'A', 'B'})
+        # 2 card generations + 1 shared verification
+        self.assertEqual(client_type.return_value.generate_json.call_count, 3)
+        self.assertEqual(result['cards'][0]['reasons'], card_a['reasons'])
+        self.assertEqual(result['cards'][1]['reasons'], card_b['reasons'])
+
     def test_candidate_evidence_is_citable_from_any_observed_bucket(self):
         cand = {
             'candidate_id': 'j', 'fit_tier': '조건부 검토', 'reasons': ['직장인구 관측치 있음'],
