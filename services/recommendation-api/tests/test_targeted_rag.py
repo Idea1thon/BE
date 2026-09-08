@@ -71,6 +71,27 @@ class TargetedRetrievalTests(unittest.TestCase):
         self.assertEqual([s["status"] for s in states], ["error", "available", "available"])
         self.assertEqual(sum("to_regclass('context.rent_index')" in q for q in queries), 1)
 
+    def test_duplicate_tool_requests_reuse_identical_data_sql(self):
+        queries = []
+
+        def query(sql):
+            queries.append(sql)
+            return []
+
+        result = execute_retrieval_requests(
+            query,
+            [
+                {"tool": "search_region_evidence", "dimensions": ["sales"]},
+                {"tool": "search_region_evidence", "dimensions": ["sales"]},
+            ],
+            {"sigungu": "마포구", "sigungu_code": "11440"}, "CS100010", "20261",
+        )
+
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(sum("JOIN location.sales_quarter" in sql for sql in queries), 1)
+        self.assertEqual(result["unique_data_query_count"], 1)
+        self.assertEqual(result["data_query_cache_hits"], 1)
+
     def test_future_or_invalid_input_quarter_rejected_before_query(self):
         for quarter in ("20260", "20265", "2026Q1", "20261' OR true"):
             with self.assertRaises(ValueError):

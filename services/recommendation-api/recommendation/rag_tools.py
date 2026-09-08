@@ -250,6 +250,23 @@ def execute_retrieval_requests(
         "workplace_population": ("context.population_snapshot",),
     }
     table_available: dict[str, bool] = {}
+    # A planner may emit overlapping tool requests. Keep the request-level
+    # response shape, but avoid issuing the same server-built SQL more than
+    # once in this run. The returned rows are read-only at this layer, so a
+    # shallow copy prevents an adapter from mutating the memoized list.
+    data_query_cache: dict[str, list[dict[str, str]]] = {}
+    data_query_cache_hits = 0
+
+    def run_data_query(sql: str) -> list[dict[str, str]]:
+        nonlocal data_query_cache_hits
+        cached = data_query_cache.get(sql)
+        if cached is not None:
+            data_query_cache_hits += 1
+            return [dict(row) for row in cached]
+        rows = query(sql)
+        data_query_cache[sql] = [dict(row) for row in rows]
+        return rows
+
     results: list[dict[str, Any]] = []
     for index, request in enumerate(validate_retrieval_requests(requests), start=1):
         rows: list[dict[str, str]] = []
@@ -282,7 +299,7 @@ def execute_retrieval_requests(
                             row_limit = len(codes) if codes is not None else (len(dong_codes) if dong_codes else request["limit"])
                             if dimension == "change" and (codes is not None or dong_codes):
                                 row_limit *= 2
-                            dimension_rows = query(_dimension_sql(
+                            dimension_rows = run_data_query(_dimension_sql(
                                 dimension, selected_region, industry_code, quarter,
                                 row_limit, codes,
                             ))[:row_limit]
@@ -310,6 +327,8 @@ def execute_retrieval_requests(
         "mode": "db",
         "requested_count": len(requests),
         "executed_count": len(results),
+        "unique_data_query_count": len(data_query_cache),
+        "data_query_cache_hits": data_query_cache_hits,
         "results": results,
     }
 

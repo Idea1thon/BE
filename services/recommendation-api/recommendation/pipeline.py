@@ -2517,12 +2517,13 @@ class DbSource:
         return urban_plan.load_from_db(self._query, ROOT)
 
     def retrieve_requests(self, requests, selected_region, industry_code, quarter, *, target_areas=None):
-        # RAG 검색 SQL 은 지역·차원·업종별로 갈라져 종류가 매우 많고(수백 지역 ×
-        # 최대 7차원 × 업종) 최종 후보 상권 최대50개로 제한한다. 공용 캐시에 태우면 값비싼
-        # Seoul-wide 블롭을 FIFO 로 밀어내므로 캐시를 우회한다.
+        # RAG 결과도 dataset_run stamp와 TTL로 무효화되는 서빙 캐시를 사용한다.
+        # 검색 범위·분기·업종·대상 상권이 SQL 키에 포함되므로 반복 요청은 재사용되고,
+        # 적재 버전이 바뀌면 캐시가 비워진다. 실행 중 중복 SQL은 rag_tools가 한 번 더
+        # memoize해 planner의 겹치는 tool request가 DB 왕복을 늘리지 않게 한다.
         try:
             return execute_retrieval_requests(
-                lambda sql: self._query(sql, use_cache=False),
+                lambda sql: self._query(sql, use_cache=True),
                 requests, selected_region, industry_code, quarter,
                 target_areas=target_areas,
             )

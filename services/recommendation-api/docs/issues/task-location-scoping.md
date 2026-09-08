@@ -65,7 +65,8 @@ breakpoint + 자치구 스코프 팩트만 읽는 구조로 가야 근본 해결
 - [x] 엔트리 최대 수명(`SERVING_CACHE_TTL_SECONDS`) — 부분 적재 실패로 스탬프가 안 바뀌어도
       갱신된 DB 값이 무기한 가려지지 않게 (ziholee P2-1).
 - [x] `_CACHE_GEN` 세대 가드 — 진행 중 조회가 초기화를 가로지르면 저장 스킵 (ziholee P2-2).
-- [x] 반환 시 행 단위 얕은 복사(`_copy_rows`). RAG 검색 경로는 `use_cache=False`.
+- [x] 반환 시 행 단위 얕은 복사(`_copy_rows`). RAG 검색도 dataset-run stamp·TTL 캐시를
+  사용하며, 실행 내 중복 SQL은 별도 memoization으로 한 번만 조회한다.
 - [x] `FileSource` 무변경. A/B: `--source db` cache vs no-cache `candidates.json` 바이트 동일.
 
 ### Phase 2 — 서울 분위 breakpoint 사전계산 (후속 이슈)
