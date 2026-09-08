@@ -71,9 +71,11 @@ class BranchSnapshot:
     address: str
     region_code: str
     industry_code: str
-    # The middle-backend branch row already owns these IDEATON location facts.
-    # Preserve them so market lookup does not depend on an exact address match.
+    # The middle-backend ``siren_branch_location`` row already owns these IDEATON
+    # location facts. Preserve them so market lookup does not depend on an exact
+    # address match.
     trade_area_code: str | None = None
+    admin_dong_code: str | None = None
     x_5181: float | None = None
     y_5181: float | None = None
     reports: list[dict[str, Any]] = field(default_factory=list)
@@ -136,11 +138,14 @@ class FmpProvider:
                     await connection.execute(
                         text(
                             """
-                            SELECT id, franchise_id, name, address, region_code,
-                                   business_category_code, trade_area_code,
-                                   x_5181, y_5181
-                            FROM branch
-                            WHERE id = :branch_id
+                            SELECT b.id, b.franchise_id, b.name, b.address,
+                                   b.region_code, b.business_category_code,
+                                   loc.trade_area_code, loc.admin_dong_code,
+                                   loc.x_5181, loc.y_5181
+                            FROM branch AS b
+                            LEFT JOIN siren_branch_location AS loc
+                              ON loc.branch_id = b.id
+                            WHERE b.id = :branch_id
                             """
                         ),
                         {"branch_id": numeric_branch_id},
@@ -194,9 +199,9 @@ class FmpProvider:
 
         by_report: dict[int, dict[str, Any]] = {}
         for row in rows:
-            report_id = int(row["report_id"])
+            row_report_id = int(row["report_id"])
             report = by_report.setdefault(
-                report_id,
+                row_report_id,
                 {
                     "month": row["report_month"],
                     "input_source": row["input_source"],
@@ -222,6 +227,11 @@ class FmpProvider:
             trade_area_code=(
                 str(branch_row["trade_area_code"])
                 if branch_row["trade_area_code"] is not None
+                else None
+            ),
+            admin_dong_code=(
+                str(branch_row["admin_dong_code"])
+                if branch_row["admin_dong_code"] is not None
                 else None
             ),
             x_5181=(float(branch_row["x_5181"]) if branch_row["x_5181"] is not None else None),
