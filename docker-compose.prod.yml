@@ -64,7 +64,8 @@ services:
       RECOMMENDATION_SOURCE: db
       RECOMMENDATION_LLM_MODE: ${RECOMMENDATION_LLM_MODE:-auto}
       RECOMMENDATION_SEED_MODE: buildings
-      RECOMMENDATION_DEFAULT_LIMIT: "5"
+      # RAG 지연 튜닝(roadmap phase 1): 설명 대상 후보 수 = LLM 호출 수.
+      RECOMMENDATION_DEFAULT_LIMIT: ${RECOMMENDATION_DEFAULT_LIMIT:-3}
       RECOMMENDATION_REQUEST_TIMEOUT_SECONDS: "180"
       RECOMMENDATION_READINESS_TIMEOUT_SECONDS: "3"
       RECOMMENDATION_MAX_CONCURRENT: "2"
@@ -80,6 +81,9 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-20}
+      # RAG 지연 튜닝(roadmap phase 1): 후보별 카드·검증 병렬 폭↑, 재시도 1회.
+      LLM_MAX_CONCURRENCY: ${LLM_MAX_CONCURRENCY:-4}
+      LLM_RETRY_COUNT: ${LLM_RETRY_COUNT:-1}
     volumes:
       # 준우형 원천 데이터. 없으면 서버는 뜨지만 실제 추천 요청이 실패한다.
       - ./data:/data:ro

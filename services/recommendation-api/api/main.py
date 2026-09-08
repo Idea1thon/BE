@@ -445,7 +445,9 @@ def _service_config() -> ServiceConfig:
     llm_mode = os.getenv("RECOMMENDATION_LLM_MODE", "auto").strip() or "auto"
     seed_mode = os.getenv("RECOMMENDATION_SEED_MODE", "buildings").strip() or "buildings"
     try:
-        limit = int(os.getenv("RECOMMENDATION_DEFAULT_LIMIT", "5"))
+        # roadmap phase 1: 설명 대상 후보 수가 곧 LLM 호출 수라 기본값을 3으로 낮춘다.
+        # 운영 환경에서 RECOMMENDATION_DEFAULT_LIMIT 로 다시 올릴 수 있다.
+        limit = int(os.getenv("RECOMMENDATION_DEFAULT_LIMIT", "3"))
     except ValueError as exc:
         raise HTTPException(status_code=503, detail={
             "code": "invalid_service_config",

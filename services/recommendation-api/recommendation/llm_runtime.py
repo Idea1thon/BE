@@ -221,17 +221,21 @@ class LLMConfig:
         except ValueError:
             max_response_bytes = 2_000_000
         try:
-            max_retries = int(os.getenv("LLM_RETRY_COUNT", "2"))
+            # roadmap phase 1: 걸린 콜의 최대 지연을 낮추려 기본 재시도를 1회로.
+            # 429/5xx·네트워크 오류는 여전히 1회 재시도하며, 초과분은 폴백 경로가 흡수한다.
+            max_retries = int(os.getenv("LLM_RETRY_COUNT", "1"))
         except ValueError:
-            max_retries = 2
+            max_retries = 1
         try:
             retry_backoff_s = float(os.getenv("LLM_RETRY_BACKOFF_SECONDS", "0.25"))
         except ValueError:
             retry_backoff_s = 0.25
         try:
-            max_concurrency = int(os.getenv("LLM_MAX_CONCURRENCY", "2"))
+            # roadmap phase 1: 후보별 카드 생성·검증을 더 넓게 병렬화해
+            # ceil(N/C) 배치 깊이를 줄인다. 상한은 아래 clamp(최대 8)로 유지.
+            max_concurrency = int(os.getenv("LLM_MAX_CONCURRENCY", "4"))
         except ValueError:
-            max_concurrency = 2
+            max_concurrency = 4
         return cls(
             mode, endpoint, api_key, model, max(1.0, timeout_s), max(128, max_output_tokens),
             max(64_000, min(20_000_000, max_response_bytes)),
