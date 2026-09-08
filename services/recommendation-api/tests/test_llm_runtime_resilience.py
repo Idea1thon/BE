@@ -3,7 +3,6 @@ import json
 import os
 import unittest
 from unittest.mock import patch
-from urllib.error import URLError
 
 from recommendation.llm_runtime import (
     LLMConfig,
@@ -13,20 +12,6 @@ from recommendation.llm_runtime import (
     reset_call_budget,
     summarize_telemetry,
 )
-
-
-class _Response:
-    def __init__(self, payload):
-        self.payload = payload
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    def read(self, _limit):
-        return self.payload
 
 
 class LLMRuntimeResilienceTests(unittest.TestCase):
@@ -54,11 +39,28 @@ class LLMRuntimeResilienceTests(unittest.TestCase):
         body = json.dumps({
             'choices': [{'message': {'content': '{"ok": true}'}}],
         }).encode('utf-8')
-        with patch('recommendation.llm_runtime.urlopen', side_effect=[URLError('temporary'), _Response(body)]) as urlopen:
+        with patch('recommendation.llm_runtime._http_post',
+                   side_effect=[ConnectionResetError('temporary'), (200, body)]) as http_post:
             result, meta = client._post_chat({'model': 'test'})
         self.assertEqual(result, {'ok': True})
-        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(http_post.call_count, 2)
         self.assertEqual(meta['attempts'], 2)
+
+    def test_http_error_status_maps_to_runtime_error_and_retry_policy(self):
+        config = LLMConfig(
+            mode='auto', endpoint='https://example.invalid', api_key='test', model='test',
+            max_retries=1, retry_backoff_s=0,
+        )
+        client = OpenAICompatibleJsonClient(config)
+        with patch('recommendation.llm_runtime._http_post',
+                   side_effect=[(503, b'busy'), (200, b'{"choices":[{"message":{"content":"{}"}}]}')]) as http_post:
+            client._post_chat({'model': 'test'})
+        self.assertEqual(http_post.call_count, 2)  # 5xx retried
+        with patch('recommendation.llm_runtime._http_post', return_value=(400, b'bad model')) as http_post:
+            with self.assertRaises(LLMRuntimeError) as ctx:
+                client._post_chat({'model': 'test'})
+        self.assertIn('400', str(ctx.exception))
+        self.assertEqual(http_post.call_count, 1)  # 4xx not retried
 
     def test_run_telemetry_records_stage_latency_and_token_usage(self):
         config = LLMConfig(
@@ -72,10 +74,10 @@ class LLMRuntimeResilienceTests(unittest.TestCase):
                       'completion_tokens_details': {'reasoning_tokens': 7}},
         }).encode('utf-8')
         reset_call_budget()
-        with patch('recommendation.llm_runtime.urlopen', return_value=_Response(ok_body)):
+        with patch('recommendation.llm_runtime._http_post', return_value=(200, ok_body)):
             with llm_stage('explanation_card'):
                 client.generate_json('sys', {'a': 1})
-        with patch('recommendation.llm_runtime.urlopen', side_effect=URLError('down')):
+        with patch('recommendation.llm_runtime._http_post', side_effect=ConnectionError('down')):
             with llm_stage('explanation_verify'), self.assertRaises(LLMRuntimeError):
                 client.generate_json('sys', {'a': 1})
         summary = summarize_telemetry()

@@ -7,6 +7,7 @@ responses are intentionally not logged here.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -16,12 +17,64 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Iterator
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 from .env import load_env
 
 load_env()
+
+
+# roadmap phase 4a: HTTP keep-alive. urllib 은 호출마다 새 TCP+TLS 핸드셰이크를 하며,
+# 한 요청이 planner·rerank·batch-verify 로 여러 번 호출한다. 스레드마다 origin 별
+# 커넥션 하나를 재사용하고(‑ threading.local 이라 병렬 worker 와 공유되지 않음),
+# 소켓이 끊겼으면 새 커넥션으로 한 번 조용히 재시도한다. 서빙 프로세스의 메인
+# 스레드 커넥션은 요청 간에도 살아 있어 핸드셰이크가 사라진다.
+_conn_pool = threading.local()
+
+
+def _http_post(
+    url: str, data: bytes, headers: dict[str, str], timeout: float, max_bytes: int,
+) -> tuple[int, bytes]:
+    """POST reusing a per-thread keep-alive connection. Returns (status, body)."""
+    parts = urlsplit(url)
+    path = parts.path or "/"
+    if parts.query:
+        path = f"{path}?{parts.query}"
+    pool = getattr(_conn_pool, "conns", None)
+    if pool is None:
+        pool = _conn_pool.conns = {}
+    key = (parts.scheme, parts.hostname, parts.port)
+    last: Exception | None = None
+    for attempt in (0, 1):
+        conn = pool.get(key)
+        if conn is None:
+            factory = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+            conn = pool[key] = factory(parts.hostname, parts.port, timeout=timeout)
+        try:
+            conn.request("POST", path, body=data, headers=headers)
+            response = conn.getresponse()
+            body = response.read(max_bytes + 1)
+            if response.version == 10 or response.getheader("Connection", "").lower() == "close":
+                pool.pop(key, None)
+                conn.close()
+            return response.status, body
+        except TimeoutError:
+            pool.pop(key, None)
+            try:
+                conn.close()
+            except OSError:
+                pass
+            raise
+        except (http.client.HTTPException, OSError) as exc:
+            last = exc
+            pool.pop(key, None)
+            try:
+                conn.close()
+            except OSError:
+                pass
+            if attempt == 1:
+                raise
+    raise last  # pragma: no cover - loop returns or raises
 
 
 class LLMRuntimeError(RuntimeError):
@@ -346,36 +399,34 @@ class OpenAICompatibleJsonClient:
         raise last_exc  # pragma: no cover - shapes is non-empty
 
     def _post_chat(self, body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-        request = Request(
-            _chat_url(self.config.endpoint or ""),
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.config.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
+        url = _chat_url(self.config.endpoint or "")
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        max_bytes = self.config.max_response_bytes
         last_error: LLMRuntimeError | None = None
         for attempt in range(self.config.max_retries + 1):
             try:
-                with urlopen(request, timeout=self.config.timeout_s) as response:
-                    raw_bytes = response.read(self.config.max_response_bytes + 1)
-                    if len(raw_bytes) > self.config.max_response_bytes:
-                        raise LLMRuntimeError("LLM 응답 본문 크기 제한 초과")
+                status, raw_bytes = _http_post(url, data, headers, self.config.timeout_s, max_bytes)
+                if len(raw_bytes) > max_bytes:
+                    raise LLMRuntimeError("LLM 응답 본문 크기 제한 초과")
+                if 200 <= status < 300:
                     raw = raw_bytes.decode("utf-8")
-                break
-            except HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")[:500]
-                last_error = LLMRuntimeError(f"LLM HTTP 오류 {exc.code}: {detail}")
-                retryable = exc.code == 429 or exc.code >= 500
-            except URLError as exc:
-                last_error = LLMRuntimeError(f"LLM 네트워크 오류: {exc.reason}")
-                retryable = True
-            except TimeoutError as exc:
-                last_error = LLMRuntimeError("LLM 요청 timeout")
-                retryable = True
+                    break
+                detail = raw_bytes.decode("utf-8", errors="replace")[:500]
+                last_error = LLMRuntimeError(f"LLM HTTP 오류 {status}: {detail}")
+                retryable = status == 429 or status >= 500
             except LLMRuntimeError:
                 raise
+            except TimeoutError:
+                last_error = LLMRuntimeError("LLM 요청 timeout")
+                retryable = True
+            except (http.client.HTTPException, OSError) as exc:
+                last_error = LLMRuntimeError(f"LLM 네트워크 오류: {exc}")
+                retryable = True
             if not retryable or attempt >= self.config.max_retries:
                 raise last_error from None
             delay = self.config.retry_backoff_s * (2 ** attempt)

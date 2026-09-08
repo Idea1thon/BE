@@ -1017,6 +1017,10 @@ def explain_candidates(
         except LLMRuntimeError as exc:
             errors.append(str(exc))
 
+    # roadmap phase 4b: 이 system_prompt 는 요청별 가변값이 없는 안정 prefix 다
+    # (정책 + feature_catalog + 고정 지시, FEATURE_CATALOG_VERSION 바뀔 때만 변경).
+    # 요청 1건의 N개 카드 호출과 배포 내 요청 간에 byte 동일하므로 OpenAI 호환
+    # endpoint 의 자동 prompt 캐시가 그대로 적용된다 — 별도 캐시 키/마커 불필요.
     feature_catalog_prompt = json.dumps(feature_catalog_for_prompt(), ensure_ascii=False)
     system_prompt = f"""{RECOMMENDATION_LLM_POLICY}
 

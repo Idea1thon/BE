@@ -371,12 +371,7 @@ class LLMRuntimeConfigTests(unittest.TestCase):
             client = OpenAICompatibleJsonClient(LLMConfig.from_env("auto"))
         raw = _json.dumps({"choices": [{"finish_reason": "length", "message": {"content": ""}}]}).encode()
 
-        class _Resp:
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-            def read(self, *_): return raw
-
-        with patch("recommendation.llm_runtime.urlopen", return_value=_Resp()):
+        with patch("recommendation.llm_runtime._http_post", return_value=(200, raw)):
             reset_call_budget()
             with self.assertRaises(LLMRuntimeError) as ctx:
                 client.generate_json("sys", {"q": 1})
