@@ -87,7 +87,9 @@ class ServingDbCacheTest(unittest.TestCase):
         with patch.object(serving_db, "_cache_ttl", lambda: 1.0):
             serving_db.query("SELECT 1")
             self._row = {**self._row, "data_version": "2026-09-07"}
-            serving_db._DV_STATE["checked_at"] = 0.0  # TTL 만료 강제
+            # monotonic()의 절대값은 프로세스/실행 환경에 따라 0 근처일 수
+            # 있으므로, checked_at=0 대신 현재 시각보다 과거로 이동한다.
+            serving_db._DV_STATE["checked_at"] = serving_db.time.monotonic() - 2.0
             serving_db.query("SELECT 1")
         self.assertEqual(self._data_calls(), ["SELECT 1", "SELECT 1"])
 
