@@ -16,6 +16,7 @@ from .llm_runtime import (
     LLMRuntimeError,
     OpenAICompatibleJsonClient,
     RECOMMENDATION_LLM_POLICY,
+    llm_stage,
 )
 from .rag_tools import validate_retrieval_requests
 
@@ -474,6 +475,9 @@ def plan_input(
 ) -> dict[str, Any]:
     """Return a validated input proposal; no data query is performed here."""
     text = raw_user_text or ""
+    # roadmap phase 3a: 자유 텍스트가 없으면(업종·지역만 폼으로 선택) planner LLM 콜을
+    # 건너뛴다. .strip() 으로 공백만 있는 입력도 결정론 폴백으로 처리한다.
+    has_free_text = bool(text.strip())
     baseline_conditions = parse_conditions(text)
     baseline_preferences = parse_preferences(text)
     fallback_candidates = _industry_candidates(text, explicit_industry_code)
@@ -483,7 +487,7 @@ def plan_input(
     remote_error = None
     remote: dict[str, Any] | None = None
 
-    if config.available and text:
+    if config.available and has_free_text:
         prompt = f"""{RECOMMENDATION_LLM_POLICY}
 
 추가 역할: 사용자 자연어의 업종·특별조건을 구조화하고, 읽기 전용 분석 계획 초안을 만드는 입력 계약 분석기다.
@@ -508,7 +512,8 @@ analysis_plan의 tool은 허용된 읽기 전용 도구만 사용하라.
             "output_shape": {"industry_candidates": [], "conditions": {}, "preferences": {}, "retrieval_requests": [], "clarification_questions": [], "unsupported_conditions": [], "analysis_plan": [], "inference_hypotheses": []},
         }
         try:
-            remote = OpenAICompatibleJsonClient(config).generate_json(prompt, payload)
+            with llm_stage("planner"):
+                remote = OpenAICompatibleJsonClient(config).generate_json(prompt, payload)
             planner_mode = "llm"
         except LLMRuntimeError as exc:
             remote_error = str(exc)

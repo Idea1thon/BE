@@ -91,3 +91,17 @@ class QuestionPipelineTests(unittest.TestCase):
         self.assertEqual(execute.call_args.kwargs['target_areas'], [])
         result = FileSource().retrieve_requests([], {}, 'CS100010', '20262', target_areas=[])
         self.assertEqual(result['executed_count'], 0)
+
+    def test_db_rag_uses_stamp_safe_serving_cache(self):
+        db = DbSource.__new__(DbSource)
+        db._query = MagicMock(return_value=[])
+        db._db = SimpleNamespace(ServingDbError=RuntimeError)
+
+        def execute(query, *_args, **_kwargs):
+            query("SELECT 1")
+            return {"results": []}
+
+        with patch('recommendation.pipeline.execute_retrieval_requests', side_effect=execute):
+            db.retrieve_requests([], {}, 'CS100010', '20262', target_areas=[])
+
+        db._query.assert_called_once_with("SELECT 1", use_cache=True)
