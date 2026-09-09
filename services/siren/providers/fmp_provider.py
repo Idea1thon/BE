@@ -71,6 +71,13 @@ class BranchSnapshot:
     address: str
     region_code: str
     industry_code: str
+    # The middle-backend ``siren_branch_location`` row already owns these IDEATON
+    # location facts. Preserve them so market lookup does not depend on an exact
+    # address match.
+    trade_area_code: str | None = None
+    admin_dong_code: str | None = None
+    x_5181: float | None = None
+    y_5181: float | None = None
     reports: list[dict[str, Any]] = field(default_factory=list)
     franchise_closure: dict[str, Any] | None = None
 
@@ -111,18 +118,34 @@ class FmpProvider:
         except (TypeError, ValueError) as exc:
             raise SourceNotFound(f"branch_id must be numeric for FMP: {value!r}") from exc
 
-    async def fetch_branch(self, branch_id: str, as_of: dt.date) -> BranchSnapshot:
+    async def fetch_branch(
+        self,
+        branch_id: str,
+        as_of: dt.date,
+        *,
+        report_id: str | None = None,
+    ) -> BranchSnapshot:
         numeric_branch_id = self._branch_key(branch_id)
+        numeric_report_id: int | None = None
+        if report_id is not None:
+            try:
+                numeric_report_id = int(report_id)
+            except (TypeError, ValueError) as exc:
+                raise SourceNotFound(f"report_id must be numeric for FMP: {report_id!r}") from exc
         try:
             async with self._get_engine().connect() as connection:
                 branch_row = (
                     await connection.execute(
                         text(
                             """
-                            SELECT id, franchise_id, name, address, region_code,
-                                   business_category_code
-                            FROM branch
-                            WHERE id = :branch_id
+                            SELECT b.id, b.franchise_id, b.name, b.address,
+                                   b.region_code, b.business_category_code,
+                                   loc.trade_area_code, loc.admin_dong_code,
+                                   loc.x_5181, loc.y_5181
+                            FROM branch AS b
+                            LEFT JOIN siren_branch_location AS loc
+                              ON loc.branch_id = b.id
+                            WHERE b.id = :branch_id
                             """
                         ),
                         {"branch_id": numeric_branch_id},
@@ -150,7 +173,7 @@ class FmpProvider:
                                        ) AS synthetic
                                 FROM operation_report AS r
                                 WHERE r.branch_id = :branch_id
-                                  AND r.status = 'COMPLETED'
+                                  AND (r.status = 'COMPLETED' OR r.id = :report_id)
                                   AND r.report_month <= :as_of
                                 ORDER BY r.report_month DESC, r.id DESC
                             )
@@ -162,7 +185,11 @@ class FmpProvider:
                             ORDER BY r.report_month DESC, r.id DESC
                             """
                         ),
-                        {"branch_id": numeric_branch_id, "as_of": as_of},
+                        {
+                            "branch_id": numeric_branch_id,
+                            "report_id": numeric_report_id,
+                            "as_of": as_of,
+                        },
                     )
                 ).mappings().all()
         except (SourceNotFound, ProviderUnavailable):
@@ -172,9 +199,9 @@ class FmpProvider:
 
         by_report: dict[int, dict[str, Any]] = {}
         for row in rows:
-            report_id = int(row["report_id"])
+            row_report_id = int(row["report_id"])
             report = by_report.setdefault(
-                report_id,
+                row_report_id,
                 {
                     "month": row["report_month"],
                     "input_source": row["input_source"],
@@ -197,6 +224,18 @@ class FmpProvider:
             address=str(branch_row["address"]),
             region_code=str(branch_row["region_code"]),
             industry_code=str(branch_row["business_category_code"]),
+            trade_area_code=(
+                str(branch_row["trade_area_code"])
+                if branch_row["trade_area_code"] is not None
+                else None
+            ),
+            admin_dong_code=(
+                str(branch_row["admin_dong_code"])
+                if branch_row["admin_dong_code"] is not None
+                else None
+            ),
+            x_5181=(float(branch_row["x_5181"]) if branch_row["x_5181"] is not None else None),
+            y_5181=(float(branch_row["y_5181"]) if branch_row["y_5181"] is not None else None),
             reports=reports,
             franchise_closure=franchise_closure,
         )

@@ -18,7 +18,13 @@ from services.siren.providers.ideaton_provider import MarketSnapshot
 
 
 class _Fmp:
-    async def fetch_branch(self, branch_id: str, as_of: date) -> BranchSnapshot:
+    def __init__(self) -> None:
+        self.report_id: str | None = None
+
+    async def fetch_branch(
+        self, branch_id: str, as_of: date, *, report_id: str | None = None
+    ) -> BranchSnapshot:
+        self.report_id = report_id
         return BranchSnapshot(
             branch_id=branch_id,
             franchise_id="10",
@@ -135,6 +141,7 @@ class OrchestratorContractTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result, {"request_id": "req-1"})
+        self.assertEqual(orchestrator.fmp_provider.report_id, "report-1")
         self.assertEqual(len(captured), 1)
         request = captured[0]
         self.assertEqual(request.location.trade_area_code, None)

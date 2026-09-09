@@ -46,7 +46,11 @@ class RiskSirenOrchestrator:
             if isinstance(trigger, SirenAnalyzeTrigger)
             else SirenAnalyzeTrigger.model_validate(trigger)
         )
-        branch = await self.fmp_provider.fetch_branch(trigger_model.branch_id, trigger_model.as_of)
+        branch = await self.fmp_provider.fetch_branch(
+            trigger_model.branch_id,
+            trigger_model.as_of,
+            report_id=trigger_model.report_id,
+        )
         market = await self.ideaton_provider.fetch_market(branch, trigger_model.as_of)
         reviews = await self.review_provider.fetch_reviews(trigger_model.branch_id, trigger_model.as_of)
         payload = build_risk_request(trigger_model, branch, market, reviews)

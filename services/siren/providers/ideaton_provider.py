@@ -36,6 +36,14 @@ def _nonnegative_int_or_none(value: object) -> int | None:
     return parsed if parsed >= 0 else None
 
 
+def _first_float(*values: object) -> float | None:
+    """Return the first non-NULL value coerced to float, else ``None``."""
+    for value in values:
+        if value is not None:
+            return float(value)
+    return None
+
+
 class IdeatonProvider:
     """Resolve branch location and market signals in IDEATON.
 
@@ -174,6 +182,29 @@ class IdeatonProvider:
         return MarketSnapshot(location=location, market_data=market_data)
 
     async def _resolve_location(self, connection: Any, branch: BranchSnapshot) -> dict[str, Any]:
+        # ``siren_branch_location`` already stores the authoritative IDEATON
+        # commercial-area code, administrative-dong code and EPSG:5181
+        # coordinates. Prefer those values so a formatted or abbreviated address
+        # cannot make the entire market layer disappear. The first five digits
+        # of the dong code are the sigungu (gu) code.
+        location = {
+            "gu_code": str(branch.admin_dong_code or branch.region_code)[:5],
+            "admin_dong_code": branch.admin_dong_code,
+            "trade_area_code": branch.trade_area_code,
+            "x_5181": branch.x_5181,
+            "y_5181": branch.y_5181,
+        }
+
+        # Address resolution remains a fallback for older branch rows that do
+        # not yet have the location columns populated. It may also supply the
+        # administrative-dong code without overriding stored branch facts.
+        if (
+            location["trade_area_code"]
+            and location["x_5181"] is not None
+            and location["y_5181"] is not None
+        ):
+            return location
+
         row = (
             await connection.execute(
                 text(
@@ -220,23 +251,21 @@ class IdeatonProvider:
             )
         ).mappings().one_or_none()
 
-        gu_code = str((row or {}).get("sigungu_code") or branch.region_code)[:5]
-        location = {
-            "gu_code": gu_code,
-            "admin_dong_code": (row or {}).get("admin_dong_code"),
-            "trade_area_code": None,
-            "x_5181": None,
-            "y_5181": None,
-        }
+        # Stored branch facts still win; the address row only fills the gaps.
+        location["gu_code"] = str(
+            (row or {}).get("sigungu_code")
+            or branch.admin_dong_code
+            or branch.region_code
+        )[:5]
+        location["admin_dong_code"] = location["admin_dong_code"] or (row or {}).get("admin_dong_code")
         if row is not None:
             host_area_id = str(row.get("host_area_id") or "")
-            location.update(
-                {
-                    "trade_area_code": host_area_id.removeprefix("commercial_area:"),
-                    "x_5181": float(row["x_5181"]) if row["x_5181"] is not None else None,
-                    "y_5181": float(row["y_5181"]) if row["y_5181"] is not None else None,
-                }
+            location["trade_area_code"] = (
+                location["trade_area_code"]
+                or host_area_id.removeprefix("commercial_area:")
             )
+            location["x_5181"] = _first_float(location["x_5181"], row["x_5181"])
+            location["y_5181"] = _first_float(location["y_5181"], row["y_5181"])
         return location
 
     async def _competition(
