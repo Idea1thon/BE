@@ -49,12 +49,35 @@ FIELD_TO_SIREN: dict[str, tuple[str, ...]] = {
     "FIN_MISC": ("finance", "other_misc"),
 }
 
+# Fields the middle-backend report form marks ``is_required`` (REQ-OW-14). The
+# owner submits only the codes that apply, so ``report_input_item`` holds between
+# 9 and 35 rows for a valid report. Requiring the full FIELD_TO_SIREN set here
+# dropped every real report from the branch layer. Absent optional codes are a
+# deliberate "not incurred this month" and map to 0; a missing *required* code
+# still excludes the month rather than fabricating a base value.
+# Mirror of services/middle-backend/scripts/seed.py INPUT_FIELDS (is_required).
+_REQUIRED_FIELDS: frozenset[str] = frozenset(
+    {
+        "HALL_CARD",
+        "HALL_CASH",
+        "DED_REFUND",
+        "MAT_FOOD",
+        "VAR_UTILITY",
+        "OPS_RENT",
+        "OPS_TELECOM",
+        "OPS_INSURANCE",
+        "OPS_CARD_FEE",
+    }
+)
+
 
 class IncompleteMonthlyReport(ValueError):
-    """A source report is missing one or more form fields.
+    """A source report is missing one or more *required* form fields.
 
-    Missing fields are not converted to zero. The orchestrator drops that month
-    so the calculator can surface a partial window instead of a fabricated value.
+    Missing required fields are not converted to zero. The orchestrator drops
+    that month so the calculator can surface a partial window instead of a
+    fabricated value. Absent optional fields are left at 0 (the form treats them
+    as "not incurred").
     """
 
     def __init__(self, month: object, missing_fields: list[str]) -> None:
@@ -124,7 +147,7 @@ def _monthly_report(report: dict[str, Any]) -> dict[str, Any]:
     if unknown:
         raise ValueError(f"unsupported FMP input fields: {', '.join(unknown)}")
 
-    missing = sorted(set(FIELD_TO_SIREN) - set(items))
+    missing = sorted(_REQUIRED_FIELDS - set(items))
     if missing:
         raise IncompleteMonthlyReport(report.get("month"), missing)
 
