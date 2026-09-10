@@ -134,14 +134,14 @@ class PipelineInvarianceTests(unittest.TestCase):
     REQ = dict(sido="서울특별시", sigungu="송파구", dong="잠실동",
                industry_code="CS100010", special_condition_text="", quarter="20261")
 
-    def _run(self, patch_pop_none):
+    def _run(self, patch_pop_none, **req_overrides):
         import recommendation.pipeline as P
         from recommendation.pipeline import RecommendationRequest, run_pipeline
         orig = P.FileSource.population
         if patch_pop_none:
             P.FileSource.population = lambda self, flow_dong=None: None
         try:
-            return run_pipeline(RecommendationRequest(**self.REQ), source="files", llm_mode="offline", limit=8)
+            return run_pipeline(RecommendationRequest(**{**self.REQ, **req_overrides}), source="files", llm_mode="offline", limit=8)
         finally:
             P.FileSource.population = orig
 
@@ -157,13 +157,25 @@ class PipelineInvarianceTests(unittest.TestCase):
         self.assertIn("수요구성", with_pop[0]["dimension_evidence"])
         self.assertTrue(any("FC-03" in n for n in with_pop[0]["context_notes"]))
 
-    def test_foreign_proxy_downgrades_confidence_one_level(self):
-        """FC-06a/06b 상권 crosswalk 대리 → data_confidence 표기 등급 1단계 하향 (spec §4-2).
+    def test_foreign_proxy_does_not_downgrade_confidence_without_foreign_request(self):
+        """요청 text에 외국인 언급이 없으면 FC-06a/06b 대리값으로 data_confidence를 낮추지 않는다.
 
-        지점 후보는 대개 base confidence 가 medium 이므로 medium→low 여야 한다
-        (예전 코드는 high→medium 만 처리해 medium 후보에서 하향이 누락됐다).
+        외국인 생활인구는 상권 crosswalk 면적가중 대리라는 이유만으로 신뢰도를 강등하지
+        않는다 — 사용자가 외국인 고객을 직접 언급했을 때만 반영한다.
         """
         cands = self._run(patch_pop_none=False)["candidates"]
+        for c in cands:
+            self.assertFalse(
+                any("FC-06a" in r and "하향" in r for r in c["data_confidence"]["reasons"]),
+                c["candidate_id"],
+            )
+
+    def test_foreign_proxy_downgrades_confidence_one_level_when_foreign_requested(self):
+        """요청 text가 외국인 고객을 언급하면 FC-06a/06b 대리 근거가 붙은 후보는 표기 등급 1단계 하향 (spec §4-2).
+
+        지점 후보는 대개 base confidence 가 medium 이므로 medium→low 여야 한다.
+        """
+        cands = self._run(patch_pop_none=False, special_condition_text="외국인 관광객 대상")["candidates"]
         downgraded = [
             c for c in cands
             if any("FC-06a" in r and "하향" in r for r in c["data_confidence"]["reasons"])

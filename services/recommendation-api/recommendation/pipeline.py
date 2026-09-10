@@ -1275,6 +1275,7 @@ def build_candidate(
     rone_vac_areas: dict[str, dict[str, str]], rone_vac_seoul: dict[str, str], rone_vac_path: Path | None,
     pop: "population.PopulationData | None" = None, flow_dong_total_seoul: list[float] | None = None,
     plan: "urban_plan.PlanData | None" = None,
+    seoul_flow_density_dong: list[float] | None = None, seoul_sales_pp_dong: list[float] | None = None,
 ) -> dict[str, Any]:
     point = seed["pt"]
     synthetic = seed["kind"] == "생성지점"
@@ -1311,28 +1312,24 @@ def build_candidate(
 
     f_scope = f_key = f_row = f_area = None
     u_scope = u_key = u_row = u_area = None
-    # 상권을 우선하고, 상권 업종 행이 없으면 행정동으로 내린다.
-    if host and host.code in trdar_rows:
-        u_scope, u_key, u_row, u_area = "상권", host.code, trdar_rows[host.code], trdar_area.get(host.code)
-    elif dong_rec and dong_rec.code in store_dong:
+    # 사용자는 서울시→자치구→행정동 순으로 범위를 좁혀 요청하므로 배경 지표도 행정동
+    # grain을 우선한다. 행정동에 업종 행이 없을 때만 상권으로, 상권 행도 없으면 상권
+    # 배경(면적만) 순으로 내린다.
+    if dong_rec and dong_rec.code in store_dong:
         u_scope, u_key, u_row, u_area = "행정동", dong_rec.code, store_dong[dong_rec.code], dong_area.get(dong_rec.code)
+    elif host and host.code in trdar_rows:
+        u_scope, u_key, u_row, u_area = "상권", host.code, trdar_rows[host.code], trdar_area.get(host.code)
     elif host:
         u_scope, u_key, u_row, u_area = "상권", host.code, None, trdar_area.get(host.code)
     else:
         u_scope = u_key = u_row = u_area = None
 
-    if host and host.code in flow_trdar:
-        f_scope, f_key, f_row, f_area = "상권", host.code, flow_trdar[host.code], trdar_area.get(host.code)
-    elif dong_rec and dong_rec.code in flow_dong:
+    if dong_rec and dong_rec.code in flow_dong:
         f_scope, f_key, f_row, f_area = "행정동", dong_rec.code, flow_dong[dong_rec.code], dong_area.get(dong_rec.code)
+    elif host and host.code in flow_trdar:
+        f_scope, f_key, f_row, f_area = "상권", host.code, flow_trdar[host.code], trdar_area.get(host.code)
     else:
         f_scope = f_key = f_row = f_area = None
-    if host and host.code in trdar_rows:
-        u_scope, u_key, u_row, u_area = "상권", host.code, trdar_rows[host.code], trdar_area.get(host.code)
-    elif dong_rec and dong_rec.code in store_dong:
-        u_scope, u_key, u_row, u_area = "행정동", dong_rec.code, store_dong[dong_rec.code], dong_area.get(dong_rec.code)
-    else:
-        u_scope = u_key = u_row = u_area = None
 
     flow_total = num(f_row, "총_유동인구_수")
     flow_density = flow_total / f_area if flow_total is not None and f_area else None
@@ -1349,17 +1346,17 @@ def build_candidate(
     franchise_ratio = franchise_count / store_count if franchise_count is not None and store_count else None
     greenfield = store_count is None or store_count == 0
 
-    if host and host.code in change_trdar:
-        change_row, change_scope = change_trdar[host.code], "상권"
-    elif dong_rec and dong_rec.code in change_dong:
+    if dong_rec and dong_rec.code in change_dong:
         change_row, change_scope = change_dong[dong_rec.code], "행정동"
+    elif host and host.code in change_trdar:
+        change_row, change_scope = change_trdar[host.code], "상권"
     else:
         change_row, change_scope = None, None
     label = change_row.get("상권_변화_지표") if change_row else None
-    if host and host.code in eh_trdar:
-        eh_scope, eh_rec, eh_dist = "상권", eh_trdar[host.code], eh_trdar_dist
-    elif dong_rec and dong_rec.code in eh_dong:
+    if dong_rec and dong_rec.code in eh_dong:
         eh_scope, eh_rec, eh_dist = "행정동", eh_dong[dong_rec.code], eh_dong_dist
+    elif host and host.code in eh_trdar:
+        eh_scope, eh_rec, eh_dist = "상권", eh_trdar[host.code], eh_trdar_dist
     else:
         eh_scope = eh_rec = eh_dist = None
     grade, risk, eh_inputs = entry_health(eh_scope, eh_rec, eh_dist, label) if eh_scope else ("정보없음", None, {})
@@ -1384,9 +1381,10 @@ def build_candidate(
         sigungu_name=target_sigungu,
     )
 
-    flow_p = pct(seoul_flow_density, flow_density)
-    sales_p = pct(seoul_sales_pp, sales_per_store)
-    area_p = pct(sorted(trdar_area.values()), f_area) if f_area else None
+    # 배경 grain에 맞는 서울 분포로 분위를 매긴다 — 행정동 값을 상권 분포에 매기면 분위가 왜곡된다.
+    flow_p = pct(seoul_flow_density_dong if f_scope == "행정동" and seoul_flow_density_dong else seoul_flow_density, flow_density)
+    sales_p = pct(seoul_sales_pp_dong if u_scope == "행정동" and seoul_sales_pp_dong else seoul_sales_pp, sales_per_store)
+    area_p = pct(sorted(dong_area.values()) if f_scope == "행정동" else sorted(trdar_area.values()), f_area) if f_area else None
     # FC 신호 등급표(regional-characteristics-profile.md §9-1, feature-evidential-value.md §9):
     #   reasons        = fit_tier 판정·정렬 반영. 범주 신호 + 약한 배경 신호만. 약한 배경 신호는 단독 추천 승격 금지.
     #   counter        = fit_tier 판정 반영. 범주 신호(FC-10 등급·FC-11 라벨) · 하드조건 미충족 · 핵심 결측.
@@ -1421,7 +1419,7 @@ def build_candidate(
 
     # 신호 없음 — 서술만: FC-01 유동밀도, FC-30 동종 점포밀도, FC-07 역거리
     if flow_p is not None:
-        caveat = " · 면적 큰 상권이라 밀도 저평가 가능" if area_p is not None and area_p >= 97 else ""
+        caveat = f" · 면적 큰 {f_scope}이라 밀도 저평가 가능" if area_p is not None and area_p >= 97 else ""
         context_notes.append(f"유동밀도 {f_scope or '미상'} 배경 서울 {flow_p}%{caveat} — 검증상 폐업/생존과 무연관, 판정·정렬 근거 아님 (FC-01)")
     if store_count is not None and u_scope:
         context_notes.append(f"{request.industry_code} 동종 점포 {as_int(store_count)}개 ({u_scope} 배경) — 경쟁 규모이며 폐업/생존과 무연관 (FC-30)")
@@ -1469,13 +1467,13 @@ def build_candidate(
         counter.append(f"상권변화 {(change_row or {}).get('상권_변화_지표_명', label)} — 신규 진입 상대적 불리 (FC-11 범주 신호)")
 
     # 하드조건 미충족 / 핵심 데이터 결측
-    # 매출 미제공(≠ 결측): 추정매출은 카드거래 표본이 임계치 미만인 상권×업종을 아예 추정하지 않는다
-    # → "데이터 없음"이 아니라 "이 상권에서 이 업종 시장이 작을 수 있음"이라는 신호. fallback은 넣지 않는다(결정 2026-09-02).
-    sales_thin_market = sales_per_store is None and not sales_unreliable and (store_count or 0) > 0 and u_scope == "상권"
+    # 매출 미제공(≠ 결측): 추정매출은 카드거래 표본이 임계치 미만인 지역×업종을 아예 추정하지 않는다
+    # → "데이터 없음"이 아니라 "이 지역에서 이 업종 시장이 작을 수 있음"이라는 신호. fallback은 넣지 않는다(결정 2026-09-02).
+    sales_thin_market = sales_per_store is None and not sales_unreliable and (store_count or 0) > 0 and u_scope in ("상권", "행정동")
     if sales_unreliable:
         counter.append(f"{request.industry_code} 추정매출 극소값(₩10만/분기 미만) — 카드 표본 1~2건, 시장 검증 불가")
     elif sales_thin_market:
-        counter.append(f"{request.industry_code} 추정매출 미제공 상권 — 카드거래 표본이 추정 임계치 미만(소규모 시장 가능성), 매출 검증 불가")
+        counter.append(f"{request.industry_code} 추정매출 미제공 {u_scope} — 카드거래 표본이 추정 임계치 미만(소규모 시장 가능성), 매출 검증 불가")
     elif sales_per_store is None:
         counter.append(f"{request.industry_code} 점포당매출 근거 없음 — {u_scope or '상권·행정동'} 데이터 부족")
     elif sales_p is not None and sales_p < 15:
@@ -1515,7 +1513,7 @@ def build_candidate(
         if sales_unreliable:
             reason = f"{request.industry_code} 추정매출 극소값(₩10만/분기 미만) — 카드 표본 1~2건 아티팩트, 결측 취급"
         elif sales_thin_market:
-            reason = (f"{request.industry_code} 추정매출 미제공 — 이 상권의 이 업종 카드거래가 추정 임계치 미만. "
+            reason = (f"{request.industry_code} 추정매출 미제공 — 이 {u_scope}의 이 업종 카드거래가 추정 임계치 미만. "
                       f"소규모 시장 신호이므로 다른 grain 매출로 대체하지 않음(결정 2026-09-02, value-level-qa.md)")
         else:
             reason = f"{request.industry_code} {u_scope or '상권·행정동'} 점포·추정매출 데이터 없음"
@@ -1799,13 +1797,15 @@ def build_candidate(
         confidence_reasons.append(f"{f_scope} 배경값 사용(grain_is_proxy)")
     if not rent_specific:
         confidence_reasons.append("R-ONE 상권별 자동 매핑 미허용")
-    if conditions["unsupported_conditions"]:
-        confidence_reasons.append("특별조건을 매물 데이터로 검증하지 못함")
-    # FC-06a/06b 상권 crosswalk 대리 시 data_confidence 1단계 하향 (candidate-selection-spec.md §4-2).
-    # 표기 등급만 한 단계 내리고(high→medium, medium→low; low 유지) 정렬에는 반영하지
-    # 않는다 — 인구 근거는 순위 불변(F36)이라 하향 전 등급을 정렬 키로 보존한다.
+    # 검증 불가한 개별 매물 특별조건(월세·면적·주차 등)은 data_confidence에 반영하지 않는다 —
+    # hard_fail(tier 캡)과 missing_features로만 유지하고 신뢰도 사유로는 표시하지 않는다.
+    # FC-06a/06b(외국인 생활인구 대리)는 요청이 외국인 고객을 직접 언급했을 때만
+    # data_confidence 1단계 하향을 적용한다(candidate-selection-spec.md §4-2). 언급이 없으면
+    # 상권 crosswalk 대리라는 이유만으로 신뢰도를 낮추지 않는다. 표기 등급만 내리고
+    # (high→medium, medium→low; low 유지) 정렬에는 반영하지 않는다 — 하향 전 등급을 정렬 키로 보존.
     sort_confidence = confidence
-    if pop_ctx.confidence_downgrade:
+    foreign_requested = "외국인" in (request.special_condition_text or "") or "외국인" in (conditions.get("target_customer") or [])
+    if pop_ctx.confidence_downgrade and foreign_requested:
         confidence_reasons.extend(pop_ctx.confidence_reasons)
         _conf_order = ("high", "medium", "low")
         confidence = _conf_order[min(_conf_order.index(confidence) + 1, len(_conf_order) - 1)]
@@ -2711,6 +2711,18 @@ def run_pipeline(
     all_sales_rows = sales_trdar  # 상권 업종 추정매출 인덱스와 동일 (서울 분위 분포용)
     all_store_rows = store_trdar
     all_sales_pp = [num(all_sales_rows[key], "당월_매출_금액") / num(all_store_rows[key], "전체_점포_수") for key in all_sales_rows if key in all_store_rows and num(all_sales_rows[key], "당월_매출_금액") is not None and num(all_store_rows[key], "전체_점포_수") not in (None, 0)]
+    # 행정동 grain 배경값용 서울 분포 (배경 grain이 행정동일 때 분위 기준선).
+    all_flow_density_dong = sorted(
+        num(row, "총_유동인구_수") / dong_area[key]
+        for key, row in flow_dong.items()
+        if key in dong_area and num(row, "총_유동인구_수") is not None and dong_area[key]
+    )
+    all_sales_pp_dong = sorted(
+        num(sales_dong[key], "당월_매출_금액") / num(store_dong[key], "전체_점포_수")
+        for key in sales_dong
+        if key in store_dong and num(sales_dong[key], "당월_매출_금액") is not None
+        and num(store_dong[key], "전체_점포_수") not in (None, 0)
+    )
     stations, buses, apts, radius_paths = src.radius_points()
     poi_context = load_completed_poi_context(request) if include_poi_context else None
     seeds = src.seeds(target_buffer, include_poi, generated_points, seed_mode)
@@ -2748,6 +2760,7 @@ def run_pipeline(
         source_paths, all_flow_density, sorted(all_sales_pp), crosswalk, rone_areas, rone_seoul, rone_path,
         rone_vac_areas, rone_vac_seoul, rone_vac_path,
         pop, flow_dong_total_seoul, plan,
+        all_flow_density_dong, all_sales_pp_dong,
     ) for seed in seeds]
     # The preliminary fit_tier created by the legacy feature builder is not a
     # final recommendation. It is intentionally excluded from the prefilter;
