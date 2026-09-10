@@ -187,6 +187,96 @@ class OrchestratorContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request["branch_reports"], [])
         self.assertEqual(request["excluded_report_months"], ["2026-01"])
 
+    def test_report_with_required_fields_only_is_kept(self) -> None:
+        # The middle-backend form requires 9 fields; the owner may omit the other
+        # 26. Such a report must still feed the branch layer, with the absent
+        # optional codes left at 0.
+        required_only = {
+            "HALL_CARD": 3_000_000,
+            "HALL_CASH": 200_000,
+            "DED_REFUND": 10_000,
+            "MAT_FOOD": 900_000,
+            "VAR_UTILITY": 120_000,
+            "OPS_RENT": 1_500_000,
+            "OPS_TELECOM": 60_000,
+            "OPS_INSURANCE": 40_000,
+            "OPS_CARD_FEE": 55_000,
+        }
+        branch = BranchSnapshot(
+            branch_id="20",
+            franchise_id="10",
+            branch_name="테스트점",
+            address="서울시 테스트구 테스트로 1",
+            region_code="11680",
+            industry_code="CS100001",
+            reports=[
+                {
+                    "month": date(2026, 1, 1),
+                    "input_source": "MANUAL",
+                    "items": dict(required_only),
+                    "synthetic": False,
+                }
+            ],
+        )
+        request = build_risk_request(
+            SirenAnalyzeTrigger(
+                request_id="req-required-only",
+                report_id="report-1",
+                franchise_id="10",
+                branch_id="20",
+                as_of=date(2026, 1, 31),
+            ),
+            branch,
+            MarketSnapshot(location={"gu_code": "11680"}, market_data=None),
+        )
+        self.assertEqual(request["excluded_report_months"], [])
+        self.assertEqual(len(request["branch_reports"]), 1)
+        monthly = request["branch_reports"][0]
+        self.assertEqual(monthly["sales"]["hall"]["credit"], 3_000_000.0)
+        # An omitted optional code (e.g. delivery) is treated as 0, not missing.
+        self.assertEqual(monthly["sales"]["delivery"]["baemin"], 0.0)
+
+    def test_report_missing_a_required_field_is_excluded(self) -> None:
+        branch = BranchSnapshot(
+            branch_id="20",
+            franchise_id="10",
+            branch_name="테스트점",
+            address="서울시 테스트구 테스트로 1",
+            region_code="11680",
+            industry_code="CS100001",
+            reports=[
+                {
+                    "month": date(2026, 1, 1),
+                    "input_source": "MANUAL",
+                    # OPS_CARD_FEE (required) is absent.
+                    "items": {
+                        "HALL_CARD": 3_000_000,
+                        "HALL_CASH": 200_000,
+                        "DED_REFUND": 10_000,
+                        "MAT_FOOD": 900_000,
+                        "VAR_UTILITY": 120_000,
+                        "OPS_RENT": 1_500_000,
+                        "OPS_TELECOM": 60_000,
+                        "OPS_INSURANCE": 40_000,
+                    },
+                    "synthetic": False,
+                }
+            ],
+        )
+        request = build_risk_request(
+            SirenAnalyzeTrigger(
+                request_id="req-missing-required",
+                report_id="report-1",
+                franchise_id="10",
+                branch_id="20",
+                as_of=date(2026, 1, 31),
+            ),
+            branch,
+            MarketSnapshot(location={"gu_code": "11680"}, market_data=None),
+        )
+        self.assertEqual(request["branch_reports"], [])
+        self.assertEqual(request["excluded_report_months"], ["2026-01"])
+
     async def test_synthetic_report_is_disclosed_without_reviews(self) -> None:
         orchestrator = RiskSirenOrchestrator(
             fmp_provider=_Fmp(),

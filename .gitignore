@@ -6,3 +6,24 @@
 __pycache__/
 *.pyc
 .venv/
+
+# --- Local analysis workspace & agent tooling (not part of this repo) ---
+# Skills, agent definitions and context/spec Markdown live in the local
+# working copy only; they must never land in a BE PR.
+/.claude/
+/.agents/
+/.codex/
+/.vscode/
+/AGENTS.md
+/.api_budget.json
+/scripts/
+/dong_lists/
+/output/
+*.ipynb
+
+# Analysis docs & artifacts are kept outside this repo; only the BE-owned
+# paths below are tracked.
+/docs/*
+!/docs/rag-data-coverage.md
+/artifacts/*
+!/artifacts/risk-siren/
