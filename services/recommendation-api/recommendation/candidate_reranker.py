@@ -53,13 +53,30 @@ def jsonish(value: Any) -> str:
     return str(value or "")
 
 
+# 인구 3종·도시계획(FC-03/04/05/06a/06b, FC-51/52)은 "판정·정렬 미반영" 계약(F36).
+# pipeline 이 이들의 missing 항목을 candidate["missing_features"] 에 병합하는데,
+# plan FC-51 은 후보의 상권 겹침에 따라 후보마다 다르게 붙으므로 prefilter 정렬 키에
+# 넣으면 pop/plan 데이터 유무가 후보 순서를 바꾼다. 정렬용 카운트에서만 제외한다.
+_ORDERING_NEUTRAL_MISSING = {"FC-03", "FC-04", "FC-05", "FC-06a", "FC-06b", "FC-51", "FC-52"}
+
+
+def _ordering_missing_count(candidate: dict[str, Any]) -> int:
+    count = 0
+    for item in candidate.get("missing_features") or []:
+        feature = item.get("feature") if isinstance(item, dict) else None
+        if feature not in _ORDERING_NEUTRAL_MISSING:
+            count += 1
+    return count
+
+
 def _prefilter_key(candidate: dict[str, Any]) -> tuple:
     # Stable data-safety ordering. Fit tier, reason count and any weighted
-    # recommendation score are deliberately absent from this key.
+    # recommendation score are deliberately absent from this key. Context-only
+    # population/plan features never move a candidate (F36).
     return (
         _hard_constraint_status(candidate),
         _confidence_rank(candidate),
-        len(candidate.get("missing_features") or []),
+        _ordering_missing_count(candidate),
         len(candidate.get("counter_evidence") or []),
         str(candidate.get("candidate_id") or ""),
     )
